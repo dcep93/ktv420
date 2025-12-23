@@ -43,8 +43,16 @@ export default function Stem420() {
     }
 
     setIsUploading(true);
+    const steps: string[] = [];
+
+    const recordStep = (description: string) => {
+      steps.push(description);
+    };
+
     try {
+      recordStep("Constructing SHA-256 checksum");
       const sha256Hash = await computeSha256(file);
+      recordStep("Checking for existing file in GCS");
       const objectPath = `_stem420/${sha256Hash}/input/${file.name}`;
       const encodedPath = encodeURIComponent(objectPath);
       const metadataUrl = `https://storage.googleapis.com/storage/v1/b/${BUCKET_NAME}/o/${encodedPath}`;
@@ -52,7 +60,9 @@ export default function Stem420() {
       const metadataResponse = await fetch(metadataUrl);
 
       if (metadataResponse.ok) {
-        alert("already exists");
+        recordStep("File already exists in bucket");
+
+        alert(steps.join(", "));
         return;
       }
 
@@ -62,6 +72,7 @@ export default function Stem420() {
         );
       }
 
+      recordStep("Uploading file to GCS");
       const uploadUrl = `https://storage.googleapis.com/upload/storage/v1/b/${BUCKET_NAME}/o?uploadType=media&name=${encodedPath}`;
 
       const uploadResponse = await fetch(uploadUrl, {
@@ -76,12 +87,18 @@ export default function Stem420() {
         throw new Error(`Upload failed with status ${uploadResponse.status}`);
       }
 
-      alert("upload complete");
+      recordStep("Upload complete");
+
+      alert(steps.join(", "));
     } catch (error) {
       const formattedMessage = formatErrorMessage(functionName, error);
+      const stepDetails = steps.join(", ");
+      const alertMessage = stepDetails
+        ? `${stepDetails}, Failure: ${formattedMessage}`
+        : `Failure: ${formattedMessage}`;
 
       console.error(formattedMessage, error);
-      alert(`Upload failed: ${formattedMessage}`);
+      alert(alertMessage);
     } finally {
       setIsUploading(false);
     }
