@@ -9,9 +9,20 @@ function toHex(buffer: ArrayBuffer) {
     .join("");
 }
 
-async function computeMd5(file: File) {
-  const hash = await crypto.subtle.digest("MD5", await file.arrayBuffer());
-  return toHex(hash);
+async function computeSha256(file: File) {
+  const functionName = "computeSha256";
+
+  try {
+    const hash = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+    return toHex(hash);
+  } catch (error) {
+    throw new Error(formatErrorMessage(functionName, error));
+  }
+}
+
+function formatErrorMessage(functionName: string, error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return `[${functionName}] ${message}`;
 }
 
 export default function Stem420() {
@@ -24,6 +35,8 @@ export default function Stem420() {
   };
 
   const handleUpload = async () => {
+    const functionName = "handleUpload";
+
     if (!file) {
       alert("Please select a file to upload.");
       return;
@@ -31,8 +44,8 @@ export default function Stem420() {
 
     setIsUploading(true);
     try {
-      const md5Hash = await computeMd5(file);
-      const objectPath = `_stem420/${md5Hash}/input/${file.name}`;
+      const sha256Hash = await computeSha256(file);
+      const objectPath = `_stem420/${sha256Hash}/input/${file.name}`;
       const encodedPath = encodeURIComponent(objectPath);
       const metadataUrl = `https://storage.googleapis.com/storage/v1/b/${BUCKET_NAME}/o/${encodedPath}`;
 
@@ -65,9 +78,10 @@ export default function Stem420() {
 
       alert("upload complete");
     } catch (error) {
-      console.error(error);
-      const message = error instanceof Error ? error.message : String(error);
-      alert(`Upload failed: ${message}`);
+      const formattedMessage = formatErrorMessage(functionName, error);
+
+      console.error(formattedMessage, error);
+      alert(`Upload failed: ${formattedMessage}`);
     } finally {
       setIsUploading(false);
     }
