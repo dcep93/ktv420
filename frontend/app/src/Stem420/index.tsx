@@ -66,7 +66,8 @@ export default function Stem420() {
       alert("upload complete");
     } catch (error) {
       console.error(error);
-      alert("Upload failed");
+      const message = error instanceof Error ? error.message : String(error);
+      alert(`Upload failed: ${message}`);
     } finally {
       setIsUploading(false);
     }
