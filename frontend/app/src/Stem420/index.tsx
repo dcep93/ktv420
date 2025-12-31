@@ -1,7 +1,7 @@
 import { useState } from "react";
 import recorded_sha from "./recorded_sha";
 
-const BUCKET_NAME = "stem420";
+const BUCKET_NAME = "stem420-bucket";
 
 function toHex(buffer: ArrayBuffer) {
   return Array.from(new Uint8Array(buffer))
@@ -13,7 +13,10 @@ async function computeSha256(file: File) {
   const functionName = "computeSha256";
 
   try {
-    const hash = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+    const hash = await crypto.subtle.digest(
+      "SHA-256",
+      await file.arrayBuffer()
+    );
     return toHex(hash);
   } catch (error) {
     throw new Error(formatErrorMessage(functionName, error));
@@ -61,6 +64,7 @@ export default function Stem420() {
 
       if (metadataResponse.ok) {
         recordStep("File already exists in bucket");
+        recordStep(objectPath);
 
         alert(steps.join(", "));
         return;
@@ -68,7 +72,7 @@ export default function Stem420() {
 
       if (metadataResponse.status !== 404) {
         throw new Error(
-          `Unexpected response when checking object: ${metadataResponse.status}`,
+          `Unexpected response when checking object: ${metadataResponse.status}`
         );
       }
 
