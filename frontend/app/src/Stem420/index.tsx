@@ -10,6 +10,14 @@ type GcsObject = {
   type: "file" | "folder";
 };
 
+type ObjectTreeNode = {
+  name: string;
+  path: string;
+  type: "file" | "folder";
+  size?: number;
+  children?: ObjectTreeNode[];
+};
+
 async function computeMd5(file: File) {
   const functionName = "computeMd5";
 
@@ -40,8 +48,6 @@ async function listBucketObjects(): Promise<GcsObject[]> {
         `https://storage.googleapis.com/storage/v1/b/${BUCKET_NAME}/o`
       );
 
-      listUrl.searchParams.set("delimiter", "/");
-
       if (pageToken) {
         listUrl.searchParams.set("pageToken", pageToken);
       }
@@ -67,30 +73,133 @@ async function listBucketObjects(): Promise<GcsObject[]> {
         type: "file" as const,
       }));
 
-      const parsedFolders = (listData.prefixes ?? [])
-        .filter((prefix) => {
-          if (folderNames.has(prefix)) {
-            return false;
-          }
+      for (const item of items) {
+        const itemParts = item.name.split("/");
 
-          folderNames.add(prefix);
-          return true;
-        })
-        .map((prefix) => ({
-          name: prefix,
-          size: 0,
-          type: "folder" as const,
-        }));
+        if (itemParts.length < 2) {
+          continue;
+        }
+
+        let accumulatedPath = "";
+
+        for (let index = 0; index < itemParts.length - 1; index += 1) {
+          accumulatedPath += `${itemParts[index]}/`;
+          folderNames.add(accumulatedPath);
+        }
+      }
 
       objects.push(...parsedObjects);
-      objects.push(...parsedFolders);
       pageToken = listData.nextPageToken;
     } while (pageToken);
 
-    return objects;
+    const parsedFolders = Array.from(folderNames).map((prefix) => ({
+      name: prefix,
+      size: 0,
+      type: "folder" as const,
+    }));
+
+    return [...objects, ...parsedFolders];
   } catch (error) {
     throw new Error(formatErrorMessage(functionName, error));
   }
+}
+
+function buildObjectTree(objects: GcsObject[]): ObjectTreeNode[] {
+  const folderMap = new Map<string, ObjectTreeNode>();
+  const rootNodes: ObjectTreeNode[] = [];
+
+  const ensureFolderNode = (parts: string[]) => {
+    let currentChildren = rootNodes;
+    let accumulatedPath = "";
+
+    for (const part of parts) {
+      accumulatedPath = accumulatedPath ? `${accumulatedPath}/${part}` : part;
+      const folderPath = `${accumulatedPath}/`;
+      let folderNode = folderMap.get(folderPath);
+
+      if (!folderNode) {
+        folderNode = {
+          name: part,
+          path: folderPath,
+          type: "folder",
+          children: [],
+        };
+
+        folderMap.set(folderPath, folderNode);
+        currentChildren.push(folderNode);
+      }
+
+      if (!folderNode.children) {
+        folderNode.children = [];
+      }
+
+      currentChildren = folderNode.children;
+    }
+  };
+
+  for (const object of objects) {
+    const trimmedName =
+      object.type === "folder" && object.name.endsWith("/")
+        ? object.name.slice(0, -1)
+        : object.name;
+    const pathParts = trimmedName.split("/").filter(Boolean);
+
+    if (pathParts.length === 0) {
+      continue;
+    }
+
+    if (object.type === "folder") {
+      ensureFolderNode(pathParts);
+      continue;
+    }
+
+    const parentParts = pathParts.slice(0, -1);
+
+    if (parentParts.length > 0) {
+      ensureFolderNode(parentParts);
+    }
+
+    const fileName = pathParts[pathParts.length - 1];
+    const parentPathKey = parentParts.length > 0 ? `${parentParts.join("/")}/` : "";
+    const fileNode: ObjectTreeNode = {
+      name: fileName,
+      path: object.name,
+      type: "file",
+      size: object.size,
+    };
+
+    if (parentPathKey) {
+      const parentFolder = folderMap.get(parentPathKey);
+
+      if (parentFolder?.children) {
+        parentFolder.children.push(fileNode);
+      } else {
+        rootNodes.push(fileNode);
+      }
+    } else {
+      rootNodes.push(fileNode);
+    }
+  }
+
+  const sortNodes = (nodes: ObjectTreeNode[]) => {
+    nodes.sort((a, b) => {
+      if (a.type === b.type) {
+        return a.name.localeCompare(b.name);
+      }
+
+      return a.type === "folder" ? -1 : 1;
+    });
+
+    for (const node of nodes) {
+      if (node.children?.length) {
+        sortNodes(node.children);
+      }
+    }
+  };
+
+  sortNodes(rootNodes);
+
+  return rootNodes;
 }
 
 export default function Stem420() {
@@ -99,6 +208,7 @@ export default function Stem420() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isListing, setIsListing] = useState(false);
   const [objects, setObjects] = useState<GcsObject[]>([]);
+  const [objectTree, setObjectTree] = useState<ObjectTreeNode[]>([]);
   const [listError, setListError] = useState<string | null>(null);
 
   const isBusy = isUploading || isDeleting;
@@ -222,6 +332,7 @@ export default function Stem420() {
 
       recordStep("Deletion complete");
       setObjects([]);
+      setObjectTree([]);
       alert(steps.join(", "));
     } catch (error) {
       const formattedMessage = formatErrorMessage(functionName, error);
@@ -246,6 +357,7 @@ export default function Stem420() {
     try {
       const listedObjects = await listBucketObjects();
       setObjects(listedObjects);
+      setObjectTree(buildObjectTree(listedObjects));
     } catch (error) {
       const formattedMessage = formatErrorMessage(functionName, error);
       setListError(formattedMessage);
@@ -255,17 +367,18 @@ export default function Stem420() {
     }
   };
 
-  const handleFolderClick = async (object: GcsObject) => {
+  const handleFolderClick = async (object: ObjectTreeNode) => {
     const functionName = "handleFolderClick";
 
     if (object.type !== "folder") {
       return;
     }
 
-    const trimmedName = object.name.endsWith("/")
-      ? object.name.slice(0, -1)
-      : object.name;
-    const folderName = trimmedName.split("/").pop();
+    if (object.type !== "folder") {
+      return;
+    }
+
+    const folderName = object.name;
 
     if (folderName !== "input") {
       return;
@@ -279,7 +392,7 @@ export default function Stem420() {
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ path: object.name }),
+          body: JSON.stringify({ path: object.path }),
         }
       );
 
@@ -304,6 +417,50 @@ export default function Stem420() {
     }
   };
 
+  const renderObjects = (nodes: ObjectTreeNode[]) => {
+    return (
+      <ul style={{ marginTop: "0.5rem" }}>
+        {nodes.map((node) => {
+          const isFolder = node.type === "folder";
+          const isInputFolder = isFolder && node.name === "input";
+
+          return (
+            <li key={node.path}>
+              {isFolder ? (
+                isInputFolder ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleFolderClick(node)}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      padding: 0,
+                      color: "blue",
+                      textDecoration: "underline",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <code>{node.name}/</code>
+                  </button>
+                ) : (
+                  <code>{node.name}/</code>
+                )
+              ) : (
+                <>
+                  <code>{node.name}</code> — {node.size?.toLocaleString()} bytes
+                </>
+              )}
+
+              {node.children && node.children.length > 0
+                ? renderObjects(node.children)
+                : null}
+            </li>
+          );
+        })}
+      </ul>
+    );
+  };
+
   useEffect(() => {
     void refreshObjectList();
   }, []);
@@ -322,37 +479,7 @@ export default function Stem420() {
         {!listError && objects.length === 0 && !isListing ? (
           <div style={{ marginTop: "0.5rem" }}>No files found in bucket.</div>
         ) : null}
-        {objects.length > 0 ? (
-          <ul style={{ marginTop: "0.5rem" }}>
-            {objects.map((object) => (
-              <li key={object.name}>
-                {object.type === "folder" ? (
-                  <button
-                    type="button"
-                    onClick={() => void handleFolderClick(object)}
-                    style={{
-                      background: "none",
-                      border: "none",
-                      padding: 0,
-                      color: "blue",
-                      textDecoration: "underline",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <code>{object.name}</code>
-                  </button>
-                ) : (
-                  <code>{object.name}</code>
-                )}
-                
-                —
-                {object.type === "folder"
-                  ? " folder"
-                  : ` ${object.size.toLocaleString()} bytes`}
-              </li>
-            ))}
-          </ul>
-        ) : null}
+        {objectTree.length > 0 ? renderObjects(objectTree) : null}
       </div>
       <div style={{ marginTop: "1rem" }}>
         <input type="file" onChange={handleFileChange} disabled={isBusy} />
