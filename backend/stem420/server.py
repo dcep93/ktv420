@@ -1,5 +1,7 @@
+import json
 import time
 import traceback
+import typing
 
 from fastapi import FastAPI, Response  # type: ignore
 from fastapi.middleware.cors import CORSMiddleware  # type: ignore
@@ -15,9 +17,13 @@ class Vars:
     start_time = time.time()
     manager: run_job.Manager
     health = 0
+    sha: typing.Any
 
 
 def init() -> None:
+    with open("./sha.json") as fh:
+        Vars.sha = json.load(fh)
+
     Vars.manager = run_job.Manager(
         lambda: run_job.run_job,
         NUM_WORKERS,
@@ -49,6 +55,7 @@ def get_() -> JSONResponse:
         "alive_age_s": alive_age_s,
         "alive_age_h": alive_age_s / 3600,
         "status_code": status_code,
+        "sha": Vars.sha,
     }
     return JSONResponse(
         status_code=status_code,

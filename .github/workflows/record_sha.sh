@@ -2,13 +2,13 @@
 
 set -euo pipefail
 
-DESTINATION="frontend/app/src/Stem420/recorded_sha.tsx"
-FMT='const recorded_sha = `%s\n%s`;\nexport default recorded_sha;\n'
+cat > sha.json <<EOF
+{
+  "time": $(TZ='America/New_York' date | jq -Rs .),
+  "git_log": $(git log -1 | jq -Rs .)
+}
+EOF
 
-CURRENT_TIME="$(TZ='America/New_York' date)"
-GIT_LOG="$(git log -1)"
-
-test -f "$DESTINATION"
-# shellcheck disable=2059
-printf "$FMT" "$CURRENT_TIME" "$GIT_LOG" >"$DESTINATION"
-cat "$DESTINATION"
+cp sha.json frontend/app/src/Stem420/
+cp sha.json backend/stem420/
+rm sha.json

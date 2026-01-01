@@ -5,7 +5,7 @@ import UploadControls from "./components/UploadControls";
 import { formatErrorMessage } from "./errors";
 import { BUCKET_NAME, computeMd5, listBucketObjects } from "./gcsClient";
 import { buildObjectTree } from "./objectTree";
-import recorded_sha from "./recorded_sha";
+import sha from "./sha.json";
 import { type GcsObject, type ObjectTreeNode } from "./types";
 
 export default function Stem420() {
@@ -234,7 +234,7 @@ export default function Stem420() {
 
   return (
     <div>
-      <div>testing123 {recorded_sha}</div>
+      <div>testing123 {JSON.stringify(sha)}</div>
       <ObjectTreeView
         isBusy={isBusy}
         isListing={isListing}
