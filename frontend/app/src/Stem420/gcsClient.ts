@@ -1,7 +1,7 @@
 import CryptoJS from "crypto-js";
 
 import { formatErrorMessage } from "./errors";
-import { GcsObject } from "./types";
+import { type GcsObject } from "./types";
 
 export const BUCKET_NAME = "stem420-bucket";
 

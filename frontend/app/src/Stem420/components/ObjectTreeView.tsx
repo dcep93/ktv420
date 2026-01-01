@@ -1,4 +1,4 @@
-import { ObjectTreeNode } from "../types";
+import { type ObjectTreeNode } from "../types";
 
 type ObjectTreeViewProps = {
   isBusy: boolean;

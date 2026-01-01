@@ -3,10 +3,10 @@ import { useEffect, useState } from "react";
 import ObjectTreeView from "./components/ObjectTreeView";
 import UploadControls from "./components/UploadControls";
 import { formatErrorMessage } from "./errors";
-import { computeMd5, listBucketObjects, BUCKET_NAME } from "./gcsClient";
+import { BUCKET_NAME, computeMd5, listBucketObjects } from "./gcsClient";
 import { buildObjectTree } from "./objectTree";
 import recorded_sha from "./recorded_sha";
-import { GcsObject, ObjectTreeNode } from "./types";
+import { type GcsObject, type ObjectTreeNode } from "./types";
 
 export default function Stem420() {
   const [file, setFile] = useState<File | null>(null);
@@ -84,8 +84,7 @@ export default function Stem420() {
       }
 
       recordStep("Uploading file to GCS");
-      const uploadUrl =
-        `https://storage.googleapis.com/upload/storage/v1/b/${BUCKET_NAME}/o?uploadType=media&name=${encodedPath}`;
+      const uploadUrl = `https://storage.googleapis.com/upload/storage/v1/b/${BUCKET_NAME}/o?uploadType=media&name=${encodedPath}`;
 
       const uploadResponse = await fetch(uploadUrl, {
         method: "POST",

@@ -1,4 +1,4 @@
-import { ObjectTreeNode, GcsObject } from "./types";
+import { type GcsObject, type ObjectTreeNode } from "./types";
 
 export function buildObjectTree(objects: GcsObject[]): ObjectTreeNode[] {
   const folderMap = new Map<string, ObjectTreeNode>();
@@ -56,7 +56,8 @@ export function buildObjectTree(objects: GcsObject[]): ObjectTreeNode[] {
     }
 
     const fileName = pathParts[pathParts.length - 1];
-    const parentPathKey = parentParts.length > 0 ? `${parentParts.join("/")}/` : "";
+    const parentPathKey =
+      parentParts.length > 0 ? `${parentParts.join("/")}/` : "";
     const fileNode: ObjectTreeNode = {
       name: fileName,
       path: object.name,
