@@ -83,15 +83,25 @@ def _download_mp3(client: storage.Client, gcs_path: str, dest: Path) -> None:
 def _run_demucs(mp3_path: Path, output_dir: Path) -> Path:
     _STATE.log(f"run_job.demucs.start input={mp3_path} output_dir={output_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
-    subprocess.run(  # noqa: S603
+    result = subprocess.run(  # noqa: S603
         [
             "demucs",
             "--out",
             str(output_dir),
             str(mp3_path),
         ],
-        check=True,
+        capture_output=True,
+        text=True,
     )
+    if result.returncode != 0:
+        _STATE.log(
+            "run_job.demucs.failed "
+            f"returncode={result.returncode} stdout={result.stdout!r} "
+            f"stderr={result.stderr!r}"
+        )
+        raise subprocess.CalledProcessError(
+            result.returncode, result.args, output=result.stdout, stderr=result.stderr
+        )
     _STATE.log("run_job.demucs.done")
     return output_dir
 
