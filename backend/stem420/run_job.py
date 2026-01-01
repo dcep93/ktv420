@@ -4,7 +4,8 @@ from . import manager
 
 
 class Request(BaseModel):
-    path: str
+    mp3_path: str
+    output_path: str
 
 
 class Response(BaseModel):
