@@ -62,6 +62,7 @@ def get_() -> JSONResponse:
         "alive_age_h": alive_age_s / 3600,
         "status_code": status_code,
         "sha": Vars.sha,
+        "run_job": run_job.get_state(),
     }
     return JSONResponse(
         status_code=status_code,
