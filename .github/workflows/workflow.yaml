@@ -43,6 +43,6 @@ jobs:
             ${{ runner.os }}
 
       - run: bash .github/workflows/record_sha.sh
-      - run: bash true || .github/workflows/build_react.sh
-      - run: bash true || .github/workflows/deploy_to_firebase.sh '${{ secrets.SA_KEY }}'
+      - run: true || bash .github/workflows/build_react.sh
+      - run: true || bash .github/workflows/deploy_to_firebase.sh '${{ secrets.SA_KEY }}'
       - run: bash .github/workflows/deploy_to_cloud_run.sh '${{ secrets.SA_KEY_BILLING }}'
