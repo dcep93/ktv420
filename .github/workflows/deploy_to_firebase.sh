@@ -4,6 +4,8 @@ set -euo pipefail
 
 SA_KEY="$1"
 
+# npm create vite@latest app -- --template react-ts
+
 # set -e
 # gcloud billing projects unlink $GOOGLE_CLOUD_PROJECT
 # gcloud services enable firebase.googleapis.com
@@ -17,8 +19,10 @@ SA_KEY="$1"
 # cat gac.json
 # echo; echo; echo
 
-
 cd frontend/app
+npm install
+yarn build
+rm -rf node_modules
 
 export GOOGLE_APPLICATION_CREDENTIALS="gac.json"
 echo "$SA_KEY" > "$GOOGLE_APPLICATION_CREDENTIALS"

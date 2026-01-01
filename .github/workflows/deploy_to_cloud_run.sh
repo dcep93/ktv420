@@ -72,7 +72,7 @@ gcloud beta run deploy "stem420" \
   --no-cpu-throttling \
   --cpu 2 \
   --memory 2Gi \
-  --min-instances 1 \
+  --min-instances 0 \
   --max-instances 1 \
   --timeout 300 \
   --liveness-probe httpGet.path=/health
