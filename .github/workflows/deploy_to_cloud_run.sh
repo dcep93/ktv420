@@ -3,6 +3,11 @@
 set -euo pipefail
 
 # # requires billing!
+# BILLING_ACCOUNT_ID="$(
+#   gcloud billing accounts list \
+#     --format="value(name)" \
+#     | head -n 1
+# )"
 # set -e
 # gcloud services enable compute
 # gcloud services enable cloudbuild.googleapis.com
@@ -19,6 +24,16 @@ set -euo pipefail
 # gcloud projects add-iam-policy-binding "$GOOGLE_CLOUD_PROJECT" --member="serviceAccount:$IAM@$GOOGLE_CLOUD_PROJECT.iam.gserviceaccount.com" --role="roles/viewer"
 # gcloud iam service-accounts keys create stem420_gac.json --iam-account "$IAM@$GOOGLE_CLOUD_PROJECT.iam.gserviceaccount.com"
 # cat stem420_gac.json
+
+# BUCKET_NAME="stem420-bucket"
+# LOCATION="us-east1"
+# gcloud services enable storage.googleapis.com
+# gcloud storage buckets create "gs://$BUCKET_NAME" \
+#     --location="$LOCATION" \
+#     --uniform-bucket-level-access
+# gcloud storage buckets add-iam-policy-binding "gs://$BUCKET_NAME" \
+#   --member="allUsers" \
+#   --role="roles/storage.objectAdmin"
 
 SA_KEY="$1"
 

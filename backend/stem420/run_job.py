@@ -1,4 +1,5 @@
 import os
+import shutil
 import threading
 import traceback
 from pathlib import Path
@@ -101,8 +102,21 @@ def _run_demucs(mp3_path: Path, output_dir: Path) -> Path:
         )
         raise subprocess.CalledProcessError(
             result.returncode, result.args, output=result.stdout, stderr=result.stderr
-        )
+    )
     _STATE.log("run_job.demucs.done")
+
+    model_dirs = [path for path in output_dir.iterdir() if path.is_dir()]
+    for model_dir in model_dirs:
+        for track_dir in model_dir.iterdir():
+            if not track_dir.is_dir():
+                continue
+            for stem_file in track_dir.iterdir():
+                if stem_file.is_file():
+                    destination = output_dir / stem_file.name
+                    stem_file.replace(destination)
+            shutil.rmtree(track_dir)
+        shutil.rmtree(model_dir)
+
     return output_dir
 
 

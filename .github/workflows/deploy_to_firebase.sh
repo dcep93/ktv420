@@ -17,22 +17,6 @@ SA_KEY="$1"
 # cat gac.json
 # echo; echo; echo
 
-# gcloud config set project proxy420
-# BUCKET_NAME="stem420-bucket"
-# LOCATION="us-east1"
-# BILLING_ACCOUNT_ID="$(
-#   gcloud billing accounts list \
-#     --format="value(name)" \
-#     | head -n 1
-# )"
-# gcloud services enable storage.googleapis.com
-# gcloud storage buckets create "gs://$BUCKET_NAME" \
-#     --location="$LOCATION" \
-#     --uniform-bucket-level-access
-# gcloud storage buckets add-iam-policy-binding "gs://$BUCKET_NAME" \
-#   --member="allUsers" \
-#   --role="roles/storage.objectAdmin"
-
 
 cd frontend/app
 
