@@ -1,4 +1,6 @@
 fastapi
 mypy
 pydantic
+google-cloud-storage
+demucs
 uvicorn
