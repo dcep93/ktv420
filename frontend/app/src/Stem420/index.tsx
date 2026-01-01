@@ -7,6 +7,7 @@ const BUCKET_NAME = "stem420-bucket";
 type GcsObject = {
   name: string;
   size: number;
+  type: "file" | "folder";
 };
 
 async function computeMd5(file: File) {
@@ -32,11 +33,14 @@ async function listBucketObjects(): Promise<GcsObject[]> {
   try {
     let pageToken: string | undefined;
     const objects: GcsObject[] = [];
+    const folderNames = new Set<string>();
 
     do {
       const listUrl = new URL(
         `https://storage.googleapis.com/storage/v1/b/${BUCKET_NAME}/o`
       );
+
+      listUrl.searchParams.set("delimiter", "/");
 
       if (pageToken) {
         listUrl.searchParams.set("pageToken", pageToken);
@@ -52,6 +56,7 @@ async function listBucketObjects(): Promise<GcsObject[]> {
 
       const listData = (await listResponse.json()) as {
         items?: { name: string; size?: string }[];
+        prefixes?: string[];
         nextPageToken?: string;
       };
 
@@ -59,9 +64,26 @@ async function listBucketObjects(): Promise<GcsObject[]> {
       const parsedObjects = items.map((item) => ({
         name: item.name,
         size: Number(item.size ?? 0),
+        type: "file" as const,
       }));
 
+      const parsedFolders = (listData.prefixes ?? [])
+        .filter((prefix) => {
+          if (folderNames.has(prefix)) {
+            return false;
+          }
+
+          folderNames.add(prefix);
+          return true;
+        })
+        .map((prefix) => ({
+          name: prefix,
+          size: 0,
+          type: "folder" as const,
+        }));
+
       objects.push(...parsedObjects);
+      objects.push(...parsedFolders);
       pageToken = listData.nextPageToken;
     } while (pageToken);
 
@@ -233,6 +255,55 @@ export default function Stem420() {
     }
   };
 
+  const handleFolderClick = async (object: GcsObject) => {
+    const functionName = "handleFolderClick";
+
+    if (object.type !== "folder") {
+      return;
+    }
+
+    const trimmedName = object.name.endsWith("/")
+      ? object.name.slice(0, -1)
+      : object.name;
+    const folderName = trimmedName.split("/").pop();
+
+    if (folderName !== "input") {
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        "https://stem420-854199998954.us-east1.run.app/run_job",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ path: object.name }),
+        }
+      );
+
+      const responseText = await response.text();
+      let parsedResponse: unknown;
+
+      try {
+        parsedResponse = JSON.parse(responseText);
+      } catch (parseError) {
+        parsedResponse = responseText;
+      }
+
+      console.log("Run job response:", parsedResponse);
+
+      if (!response.ok) {
+        throw new Error(
+          `Request failed with status ${response.status}: ${response.statusText}`
+        );
+      }
+    } catch (error) {
+      console.error(formatErrorMessage(functionName, error), error);
+    }
+  };
+
   useEffect(() => {
     void refreshObjectList();
   }, []);
@@ -255,7 +326,29 @@ export default function Stem420() {
           <ul style={{ marginTop: "0.5rem" }}>
             {objects.map((object) => (
               <li key={object.name}>
-                <code>{object.name}</code> — {object.size.toLocaleString()} bytes
+                {object.type === "folder" ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleFolderClick(object)}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      padding: 0,
+                      color: "blue",
+                      textDecoration: "underline",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <code>{object.name}</code>
+                  </button>
+                ) : (
+                  <code>{object.name}</code>
+                )}
+                
+                —
+                {object.type === "folder"
+                  ? " folder"
+                  : ` ${object.size.toLocaleString()} bytes`}
               </li>
             ))}
           </ul>
