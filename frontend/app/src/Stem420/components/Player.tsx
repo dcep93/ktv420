@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { type CachedOutputRecord } from "../indexedDbClient";
 
@@ -47,6 +47,13 @@ export default function Player({ record, onClose }: PlayerProps) {
   >({});
   const [visualizerType, setVisualizerType] =
     useState<VisualizerType>("laser-ladders");
+  const [trackMuteStates, setTrackMuteStates] = useState<Record<string, boolean>>({});
+  const [trackDeafenStates, setTrackDeafenStates] =
+    useState<Record<string, boolean>>({});
+  const isAnyTrackDeafened = useMemo(
+    () => Object.values(trackDeafenStates).some(Boolean),
+    [trackDeafenStates]
+  );
 
   const audioRefs = useRef<Record<string, HTMLAudioElement | null>>({});
   const durationMap = useRef<Record<string, number>>({});
@@ -74,6 +81,38 @@ export default function Player({ record, onClose }: PlayerProps) {
   const primaryTrack = tracks.find((track) => track.isInput) ?? tracks[0];
   const primaryTrackId = primaryTrack?.id ?? null;
   const playerTitle = primaryTrack?.name ?? "Playback";
+
+  const trackLookup = useMemo(() => {
+    return tracks.reduce<Record<string, Track>>((lookup, track) => {
+      lookup[track.id] = track;
+      return lookup;
+    }, {});
+  }, [tracks]);
+
+  const getEffectiveVolume = useCallback(
+    (trackId: string, baseVolume?: number) => {
+      const track = trackLookup[trackId];
+      const volume = baseVolume ?? volumes[trackId] ?? 1;
+
+      if (!track) {
+        return volume;
+      }
+
+      const isTrackMuted = trackMuteStates[trackId];
+      const isTrackDeafened = trackDeafenStates[trackId];
+
+      if (isTrackMuted) {
+        return 0;
+      }
+
+      if (isAnyTrackDeafened && !isTrackDeafened) {
+        return 0;
+      }
+
+      return volume;
+    },
+    [isAnyTrackDeafened, trackDeafenStates, trackLookup, trackMuteStates, volumes]
+  );
 
   useEffect(() => {
     const audioContextsSnapshot = audioContexts.current;
@@ -104,6 +143,8 @@ export default function Player({ record, onClose }: PlayerProps) {
     setDuration(0);
     setTrackDurations({});
     setIsPlaying(false);
+    setTrackMuteStates({});
+    setTrackDeafenStates({});
     durationMap.current = {};
 
     const audioRefsSnapshot = audioRefs.current;
@@ -187,6 +228,18 @@ export default function Player({ record, onClose }: PlayerProps) {
     };
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [tracks]);
+
+  useEffect(() => {
+    tracks.forEach((track) => {
+      const audio = audioRefs.current[track.id];
+
+      if (!audio) {
+        return;
+      }
+
+      audio.volume = getEffectiveVolume(track.id);
+    });
+  }, [getEffectiveVolume, tracks]);
 
   useEffect(() => {
     if (!primaryTrackId) {
@@ -848,7 +901,7 @@ export default function Player({ record, onClose }: PlayerProps) {
       }
 
       audio.currentTime = currentTime;
-      audio.volume = volumes[track.id] ?? 1;
+      audio.volume = getEffectiveVolume(track.id);
 
       return audio.play();
     });
@@ -865,12 +918,37 @@ export default function Player({ record, onClose }: PlayerProps) {
   const handleVolumeChange = (trackId: string, value: number) => {
     setVolumes((previous) => ({ ...previous, [trackId]: value }));
     const audio = audioRefs.current[trackId];
+    const track = trackLookup[trackId];
 
-    if (!audio) {
+    if (!audio || !track) {
       return;
     }
 
-    audio.volume = value;
+    audio.volume = getEffectiveVolume(trackId, value);
+  };
+
+  const toggleTrackMute = (trackId: string) => {
+    setTrackMuteStates((previous) => ({
+      ...previous,
+      [trackId]: !previous[trackId],
+    }));
+    const audio = audioRefs.current[trackId];
+
+    if (audio) {
+      audio.volume = getEffectiveVolume(trackId);
+    }
+  };
+
+  const toggleTrackDeafen = (trackId: string) => {
+    setTrackDeafenStates((previous) => ({
+      ...previous,
+      [trackId]: !previous[trackId],
+    }));
+    const audio = audioRefs.current[trackId];
+
+    if (audio) {
+      audio.volume = getEffectiveVolume(trackId);
+    }
   };
 
   const formattedTime = (time: number) => {
@@ -963,20 +1041,39 @@ export default function Player({ record, onClose }: PlayerProps) {
 
           return (
             <div key={track.id} style={{ marginBottom: "0.75rem" }}>
-              <div style={{ marginBottom: "0.25rem" }}>
-                {label} <span style={{ color: "#aaa" }}>({durationLabel})</span>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.5rem",
+                  flexWrap: "wrap",
+                  marginBottom: "0.4rem",
+                }}
+              >
+                <div style={{ minWidth: "220px" }}>
+                  {label} {" "}
+                  <span style={{ color: "#aaa" }}>({durationLabel})</span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={volumes[track.id] ?? 1}
+                  onChange={(event) =>
+                    handleVolumeChange(track.id, Number(event.target.value))
+                  }
+                  style={{ flex: 1, minWidth: "160px", maxWidth: "360px" }}
+                />
+                <div style={{ display: "flex", gap: "0.4rem" }}>
+                  <button type="button" onClick={() => toggleTrackMute(track.id)}>
+                    {trackMuteStates[track.id] ? "Unmute" : "Mute"}
+                  </button>
+                  <button type="button" onClick={() => toggleTrackDeafen(track.id)}>
+                    {trackDeafenStates[track.id] ? "Undeafen" : "Deafen"}
+                  </button>
+                </div>
               </div>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.01}
-                value={volumes[track.id] ?? 1}
-                onChange={(event) =>
-                  handleVolumeChange(track.id, Number(event.target.value))
-                }
-                style={{ width: "50%" }}
-              />
               <div style={{ marginTop: "0.4rem" }}>
                 <canvas
                   ref={(ref) => {
