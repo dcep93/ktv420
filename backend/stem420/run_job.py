@@ -113,7 +113,9 @@ def _wav_info(wav_path: Path) -> Tuple[int, int]:
     return sample_rate, nframes
 
 
-def _force_length_samples(input_wav: Path, output_wav: Path, ref_samples: int) -> None:
+def _force_length_samples(
+    input_wav: Path, output_wav: Path, ref_samples: int, ref_sample_rate: int
+) -> None:
     result = subprocess.run(  # noqa: S603
         [
             "ffmpeg",
@@ -121,7 +123,10 @@ def _force_length_samples(input_wav: Path, output_wav: Path, ref_samples: int) -
             "-i",
             str(input_wav),
             "-af",
-            f"apad,atrim=end_sample={ref_samples}",
+            (
+                "aresample="
+                f"{ref_sample_rate}:resampler=soxr,asetnsamples=n={ref_samples}:p=1"
+            ),
             str(output_wav),
         ],
         capture_output=True,
@@ -203,12 +208,14 @@ def _run_demucs(audio_path: Path, output_dir: Path) -> Path:
     return output_dir
 
 
-def _align_and_encode_stems_to_flac(output_dir: Path, ref_samples: int) -> None:
+def _align_and_encode_stems_to_flac(
+    output_dir: Path, ref_samples: int, ref_sample_rate: int
+) -> None:
     for stem_file in list(output_dir.iterdir()):
         if stem_file.suffix.lower() != ".wav" or not stem_file.is_file():
             continue
         aligned_wav = stem_file.with_name(stem_file.stem + ".aligned.wav")
-        _force_length_samples(stem_file, aligned_wav, ref_samples)
+        _force_length_samples(stem_file, aligned_wav, ref_samples, ref_sample_rate)
         flac_path = stem_file.with_suffix(".flac")
         _encode_flac(aligned_wav, flac_path)
         stem_file.unlink(missing_ok=True)
@@ -275,7 +282,9 @@ def _process_request(request: Request) -> None:
             ref_sample_rate, ref_samples = _wav_info(reference_wav)
             demucs_output_dir = tmp_dir_path / "demucs_output"
             _run_demucs(reference_wav, demucs_output_dir)
-            _align_and_encode_stems_to_flac(demucs_output_dir, ref_samples)
+            _align_and_encode_stems_to_flac(
+                demucs_output_dir, ref_samples, ref_sample_rate
+            )
             duration_s = time.perf_counter() - start_time
             _write_metadata(
                 demucs_output_dir, duration_s, ref_samples, ref_sample_rate
