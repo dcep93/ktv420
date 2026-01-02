@@ -1,0 +1,29 @@
+.root-sha-page {
+  margin: 0 auto;
+  max-width: 960px;
+  padding: 2rem clamp(1rem, 2vw, 2rem);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.root-sha-page h1 {
+  margin: 0;
+  font-size: 2rem;
+}
+
+.root-sha-page pre {
+  padding: 1.5rem;
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 0.95rem;
+  overflow: auto;
+}
+
+@media (prefers-color-scheme: light) {
+  .root-sha-page pre {
+    background: #f5f5f5;
+    border-color: #dcdcdc;
+  }
+}
