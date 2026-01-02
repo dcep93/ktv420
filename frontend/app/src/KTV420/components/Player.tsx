@@ -16,6 +16,7 @@ import {
   type VisualizerType,
 } from "./player/types";
 import { drawVisualizer } from "./player/visualizers";
+import { removeCachedOutputs } from "../indexedDbClient";
 
 const visualizerOptions: Array<{
   value: VisualizerType;
@@ -72,6 +73,7 @@ export default function Player({ record, onClose }: PlayerProps) {
     Record<string, boolean>
   >({});
   const [readyTrackIds, setReadyTrackIds] = useState<string[]>([]);
+  const [isClearingCache, setIsClearingCache] = useState(false);
   const isAnyTrackDeafened = useMemo(
     () => Object.values(trackDeafenStates).some(Boolean),
     [trackDeafenStates]
@@ -757,6 +759,19 @@ export default function Player({ record, onClose }: PlayerProps) {
   const areTracksReady =
     tracks.length > 0 && readyTrackIds.length === tracks.length;
 
+  const handleClearCache = useCallback(async () => {
+    setIsClearingCache(true);
+
+    try {
+      await removeCachedOutputs(record.md5);
+      onClose();
+    } catch (clearError) {
+      console.error("Failed to clear cache for record", clearError);
+    } finally {
+      setIsClearingCache(false);
+    }
+  }, [onClose, record.md5]);
+
   if (!tracks.length) {
     return null;
   }
@@ -772,7 +787,16 @@ export default function Player({ record, onClose }: PlayerProps) {
           alignItems: "center",
         }}
       >
-        <h3 style={{ margin: 0 }}>{playerTitle}</h3>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <h3 style={{ margin: 0 }}>{playerTitle}</h3>
+          <button
+            type="button"
+            onClick={() => void handleClearCache()}
+            disabled={isClearingCache}
+          >
+            {isClearingCache ? "Clearing..." : "Clear cache"}
+          </button>
+        </div>
         <button type="button" onClick={onClose}>
           Close
         </button>
