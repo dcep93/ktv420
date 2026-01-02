@@ -10,6 +10,8 @@ from tempfile import TemporaryDirectory
 from typing import Dict, List, Tuple
 
 import subprocess  # noqa: S404
+from google.auth.credentials import AnonymousCredentials  # type: ignore
+from google.auth.exceptions import DefaultCredentialsError  # type: ignore
 from google.cloud import storage  # type: ignore
 from pydantic import BaseModel
 
@@ -60,18 +62,43 @@ class _RunJobState:
 _STATE = _RunJobState()
 
 
+def _make_storage_client() -> storage.Client:
+    """
+    Prefer Application Default Credentials.
+    If unavailable, fall back to anonymous credentials.
+    This only works for publicly accessible buckets.
+    """
+    try:
+        return storage.Client()
+    except DefaultCredentialsError:
+        project = (
+            os.getenv("GOOGLE_CLOUD_PROJECT")
+            or os.getenv("GCP_PROJECT")
+            or os.getenv("GCLOUD_PROJECT")
+            or "anonymous"
+        )
+        _STATE.log("run_job.gcs.auth.anonymous adc_missing=1")
+        return storage.Client(
+            project=project,
+            credentials=AnonymousCredentials(),
+        )
+
+
 def _parse_gcs_path(gcs_path: str) -> Tuple[str, str]:
     if not gcs_path.startswith("gs://"):
         msg = f"Invalid GCS path: {gcs_path}"
         _STATE.log(msg)
         raise ValueError(msg)
+
     _, path = gcs_path.split("gs://", 1)
     bucket_name, *blob_parts = path.split("/", 1)
     blob_path = blob_parts[0] if blob_parts else ""
+
     if not bucket_name or not blob_path:
         msg = f"Invalid GCS path: {gcs_path}"
         _STATE.log(msg)
         raise ValueError(msg)
+
     return bucket_name, blob_path
 
 
@@ -88,7 +115,7 @@ def _download_mp3(client: storage.Client, gcs_path: str, dest: Path) -> None:
 
 def _decode_to_wav(mp3_path: Path, wav_path: Path) -> Path:
     _STATE.log(f"run_job.decode.start input={mp3_path} output={wav_path}")
-    result = subprocess.run(  # noqa: S603
+    result = subprocess.run(
         ["ffmpeg", "-y", "-i", str(mp3_path), str(wav_path)],
         capture_output=True,
         text=True,
@@ -116,7 +143,7 @@ def _wav_info(wav_path: Path) -> Tuple[int, int]:
 def _force_length_samples(
     input_wav: Path, output_wav: Path, ref_samples: int, ref_sample_rate: int
 ) -> None:
-    result = subprocess.run(  # noqa: S603
+    result = subprocess.run(
         [
             "ffmpeg",
             "-y",
@@ -125,7 +152,8 @@ def _force_length_samples(
             "-af",
             (
                 "aresample="
-                f"{ref_sample_rate}:resampler=soxr,asetnsamples=n={ref_samples}:p=1"
+                f"{ref_sample_rate}:resampler=soxr,"
+                f"asetnsamples=n={ref_samples}:p=1"
             ),
             str(output_wav),
         ],
@@ -144,7 +172,7 @@ def _force_length_samples(
 
 
 def _encode_flac(input_wav: Path, flac_path: Path) -> None:
-    result = subprocess.run(  # noqa: S603
+    result = subprocess.run(
         [
             "ffmpeg",
             "-y",
@@ -172,13 +200,8 @@ def _run_demucs(audio_path: Path, output_dir: Path) -> Path:
     _STATE.log(f"run_job.demucs.start input={audio_path} output_dir={output_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    result = subprocess.run(  # noqa: S603
-        [
-            "demucs",
-            "--out",
-            str(output_dir),
-            str(audio_path),
-        ],
+    result = subprocess.run(
+        ["demucs", "--out", str(output_dir), str(audio_path)],
         capture_output=True,
         text=True,
     )
@@ -191,17 +214,17 @@ def _run_demucs(audio_path: Path, output_dir: Path) -> Path:
         raise subprocess.CalledProcessError(
             result.returncode, result.args, output=result.stdout, stderr=result.stderr
         )
+
     _STATE.log("run_job.demucs.done")
 
-    model_dirs = [path for path in output_dir.iterdir() if path.is_dir()]
+    model_dirs = [p for p in output_dir.iterdir() if p.is_dir()]
     for model_dir in model_dirs:
         for track_dir in model_dir.iterdir():
             if not track_dir.is_dir():
                 continue
             for stem_file in track_dir.iterdir():
                 if stem_file.is_file():
-                    destination = output_dir / stem_file.name
-                    stem_file.replace(destination)
+                    stem_file.replace(output_dir / stem_file.name)
             shutil.rmtree(track_dir)
         shutil.rmtree(model_dir)
 
@@ -212,7 +235,7 @@ def _align_and_encode_stems_to_flac(
     output_dir: Path, ref_samples: int, ref_sample_rate: int
 ) -> None:
     for stem_file in list(output_dir.iterdir()):
-        if stem_file.suffix.lower() != ".wav" or not stem_file.is_file():
+        if stem_file.suffix.lower() != ".wav":
             continue
         aligned_wav = stem_file.with_name(stem_file.stem + ".aligned.wav")
         _force_length_samples(stem_file, aligned_wav, ref_samples, ref_sample_rate)
@@ -225,18 +248,20 @@ def _align_and_encode_stems_to_flac(
 def _upload_directory(client: storage.Client, directory: Path, gcs_path: str) -> None:
     bucket_name, base_blob_path = _parse_gcs_path(gcs_path)
     bucket = client.bucket(bucket_name)
+
     _STATE.log(
         "run_job.upload.start "
         f"bucket={bucket_name} base_blob_path={base_blob_path} directory={directory}"
     )
+
     for file_path in directory.rglob("*"):
         if not file_path.is_file():
             continue
         relative_path = file_path.relative_to(directory)
         blob_path = os.path.join(base_blob_path, str(relative_path))
-        _STATE.log(f"run_job.upload.file {file_path} -> gs://{bucket_name}/{blob_path}")
         blob = bucket.blob(blob_path)
         blob.upload_from_filename(file_path)  # type: ignore[call-arg]
+
     _STATE.log("run_job.upload.done")
 
 
@@ -247,51 +272,45 @@ def _write_metadata(
     ref_sample_rate: int,
 ) -> Path:
     metadata_path = output_dir / "_metadata.json"
-    ref_duration_s = ref_samples / ref_sample_rate if ref_sample_rate else 0.0
     metadata = {
         "duration_s": processing_duration_s,
         "ref_samples": ref_samples,
         "ref_sample_rate": ref_sample_rate,
-        "ref_duration_s": ref_duration_s,
+        "ref_duration_s": ref_samples / ref_sample_rate if ref_sample_rate else 0.0,
         "aligned_format": "flac",
-        "alignment_method": "apad+atrim end_sample",
+        "alignment_method": "asetnsamples end-pad",
     }
-    output_dir.mkdir(parents=True, exist_ok=True)
     metadata_path.write_text(json.dumps(metadata))
-    _STATE.log(
-        "run_job.metadata.written "
-        f"path={metadata_path} processing_duration_s={processing_duration_s} "
-        f"ref_samples={ref_samples} ref_sample_rate={ref_sample_rate}"
-    )
     return metadata_path
 
 
 def _process_request(request: Request) -> None:
     _STATE.log(
-        f"run_job.process.start mp3_path={request.mp3_path} output_path={request.output_path}"
+        f"run_job.process.start mp3_path={request.mp3_path} "
+        f"output_path={request.output_path}"
     )
+
     start_time = time.perf_counter()
     try:
-        client = storage.Client()
+        client = _make_storage_client()
         with TemporaryDirectory() as tmp_dir:
-            tmp_dir_path = Path(tmp_dir)
-            mp3_path = tmp_dir_path / "input.mp3"
+            tmp = Path(tmp_dir)
+            mp3_path = tmp / "input.mp3"
             _download_mp3(client, request.mp3_path, mp3_path)
-            reference_wav = tmp_dir_path / "reference.wav"
+
+            reference_wav = tmp / "reference.wav"
             _decode_to_wav(mp3_path, reference_wav)
             ref_sample_rate, ref_samples = _wav_info(reference_wav)
-            demucs_output_dir = tmp_dir_path / "demucs_output"
-            _run_demucs(reference_wav, demucs_output_dir)
-            _align_and_encode_stems_to_flac(
-                demucs_output_dir, ref_samples, ref_sample_rate
-            )
-            duration_s = time.perf_counter() - start_time
-            _write_metadata(
-                demucs_output_dir, duration_s, ref_samples, ref_sample_rate
-            )
 
-            # demucs output is typically nested, upload all generated stems
-            _upload_directory(client, demucs_output_dir, request.output_path)
+            demucs_output = tmp / "demucs_output"
+            _run_demucs(reference_wav, demucs_output)
+            _align_and_encode_stems_to_flac(demucs_output, ref_samples, ref_sample_rate)
+
+            duration_s = time.perf_counter() - start_time
+            _write_metadata(demucs_output, duration_s, ref_samples, ref_sample_rate)
+
+            _upload_directory(client, demucs_output, request.output_path)
+
     except Exception:
         _STATE.log("run_job.process.error")
         _STATE.log(traceback.format_exc())
@@ -303,10 +322,8 @@ def _process_request(request: Request) -> None:
 
 def run_job(request: Request) -> Response:
     _STATE.mark_started()
-    _STATE.log("run_job.start")
     thread = threading.Thread(target=_process_request, args=(request,), daemon=True)
     thread.start()
-    _STATE.log("run_job.spawned_background_thread")
     return Response()
 
 
