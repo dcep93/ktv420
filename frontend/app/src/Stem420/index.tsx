@@ -446,7 +446,6 @@ export default function Stem420() {
   };
 
   useEffect(() => {
-    void fetchRootResponse();
     void refreshObjectList();
   }, []);
 
