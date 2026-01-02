@@ -5,6 +5,10 @@ import "./index.css";
 import KTV420 from "./KTV420/index.tsx";
 import RootPage from "./RootPage";
 
+import sha from "./KTV420/sha.json";
+
+console.log(sha);
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <BrowserRouter>
