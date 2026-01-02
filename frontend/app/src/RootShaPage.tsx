@@ -1,4 +1,4 @@
-import sha from "./Stem420/sha.json";
+import sha from "./KTV420/sha.json";
 import "./RootShaPage.css";
 
 export default function RootShaPage() {

@@ -2,15 +2,15 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import "./index.css";
+import KTV420 from "./KTV420/index.tsx";
 import RootPage from "./RootPage";
-import Stem420 from "./Stem420/index.tsx";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<RootPage />} />
-        <Route path="/admin" element={<Stem420 />} />
+        <Route path="/admin" element={<KTV420 />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

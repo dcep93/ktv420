@@ -9,6 +9,6 @@ cat > sha.json <<EOF
 }
 EOF
 
-cp sha.json frontend/app/src/Stem420/
-cp sha.json backend/stem420/
+cp sha.json frontend/app/src/KTV420/
+cp sha.json backend/ktv420/
 rm sha.json

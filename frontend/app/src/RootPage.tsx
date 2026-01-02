@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import "./RootPage.css";
-import Player from "./Stem420/components/Player";
-import { formatErrorMessage } from "./Stem420/errors";
-import { fetchObjectBlob, listBucketObjects } from "./Stem420/gcsClient";
+import Player from "./KTV420/components/Player";
+import { formatErrorMessage } from "./KTV420/errors";
+import { fetchObjectBlob, listBucketObjects } from "./KTV420/gcsClient";
 import {
   type CachedOutputRecord,
   cacheMd5Files,
   getCachedMd5,
-} from "./Stem420/indexedDbClient";
-import { buildObjectTree } from "./Stem420/objectTree";
-import { type GcsObject, type ObjectTreeNode } from "./Stem420/types";
-import { collectFileNodes, extractMd5FromPath } from "./Stem420/utils";
+} from "./KTV420/indexedDbClient";
+import { buildObjectTree } from "./KTV420/objectTree";
+import { type GcsObject, type ObjectTreeNode } from "./KTV420/types";
+import { collectFileNodes, extractMd5FromPath } from "./KTV420/utils";
+import "./RootPage.css";
 
 type InputOption = {
   value: string;
@@ -52,27 +52,30 @@ export default function RootPage() {
 
   const resetStatus = () => setStatus(null);
 
-  const refreshObjectTree = useCallback(async (statusMessage: string | null = null) => {
-    setIsLoading(true);
-    setError(null);
-    setStatus(statusMessage);
+  const refreshObjectTree = useCallback(
+    async (statusMessage: string | null = null) => {
+      setIsLoading(true);
+      setError(null);
+      setStatus(statusMessage);
 
-    try {
-      const listedObjects = await listBucketObjects();
-      setObjects(listedObjects);
-      setObjectTree(buildObjectTree(listedObjects));
-    } catch (loadError) {
-      const formattedMessage = formatErrorMessage(
-        "listBucketObjects",
-        loadError
-      );
-      console.error(formattedMessage, loadError);
-      setError(formattedMessage);
-    } finally {
-      setIsLoading(false);
-      resetStatus();
-    }
-  }, []);
+      try {
+        const listedObjects = await listBucketObjects();
+        setObjects(listedObjects);
+        setObjectTree(buildObjectTree(listedObjects));
+      } catch (loadError) {
+        const formattedMessage = formatErrorMessage(
+          "listBucketObjects",
+          loadError
+        );
+        console.error(formattedMessage, loadError);
+        setError(formattedMessage);
+      } finally {
+        setIsLoading(false);
+        resetStatus();
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     void refreshObjectTree("Checking bucket contents...");
@@ -183,7 +186,7 @@ export default function RootPage() {
     <main className="root-page">
       <header className="root-page__header">
         <div>
-          <h1>Stem420 Player</h1>
+          <h1>KTV420</h1>
         </div>
         <div className="root-page__actions">
           <button
