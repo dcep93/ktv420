@@ -76,7 +76,9 @@ def _parse_gcs_path(gcs_path: str) -> Tuple[str, str]:
 
 def _download_mp3(client: storage.Client, gcs_path: str, dest: Path) -> None:
     bucket_name, blob_path = _parse_gcs_path(gcs_path)
-    _STATE.log(f"run_job.download.start bucket={bucket_name} blob={blob_path} -> {dest}")
+    _STATE.log(
+        f"run_job.download.start bucket={bucket_name} blob={blob_path} -> {dest}"
+    )
     bucket = client.bucket(bucket_name)
     blob = bucket.blob(blob_path)
     blob.download_to_filename(dest)  # type: ignore[call-arg]
@@ -86,11 +88,16 @@ def _download_mp3(client: storage.Client, gcs_path: str, dest: Path) -> None:
 def _run_demucs(mp3_path: Path, output_dir: Path) -> Path:
     _STATE.log(f"run_job.demucs.start input={mp3_path} output_dir={output_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
+
     result = subprocess.run(  # noqa: S603
         [
             "demucs",
             "--out",
             str(output_dir),
+            # compact stems:
+            "--mp3",
+            "--mp3-bitrate",
+            "64",  # try 48/64/96; 64 is usually fine for “just stems”
             str(mp3_path),
         ],
         capture_output=True,
@@ -104,7 +111,7 @@ def _run_demucs(mp3_path: Path, output_dir: Path) -> Path:
         )
         raise subprocess.CalledProcessError(
             result.returncode, result.args, output=result.stdout, stderr=result.stderr
-    )
+        )
     _STATE.log("run_job.demucs.done")
 
     model_dirs = [path for path in output_dir.iterdir() if path.is_dir()]
