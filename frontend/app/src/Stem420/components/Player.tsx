@@ -1,7 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { TrackRow } from "./player/TrackRow";
-import { drawVisualizer } from "./player/visualizers";
 import {
   AMPLITUDE_WINDOW_SECONDS,
   type CachedTrackFile,
@@ -9,12 +15,32 @@ import {
   type Track,
   type VisualizerType,
 } from "./player/types";
+import { drawVisualizer } from "./player/visualizers";
+
+const visualizerOptions: Array<{
+  value: VisualizerType;
+  label: string;
+  hint: string;
+}> = [
+  { value: "laser-ladders", label: "Laser Ladders", hint: "Graphic EQ" },
+  { value: "spectrum-safari", label: "Spectrum Safari", hint: "Analyzer" },
+  {
+    value: "waveform-waterline",
+    label: "Waveform Waterline",
+    hint: "Oscilloscope",
+  },
+  { value: "aurora-radar", label: "Aurora Radar", hint: "Radial Sweep" },
+  { value: "mirror-peaks", label: "Mirror Peaks", hint: "Symmetric Bars" },
+  { value: "pulse-grid", label: "Pulse Grid", hint: "Energy Matrix" },
+  { value: "luminous-orbit", label: "Luminous Orbit", hint: "Layered Rings" },
+  { value: "nebula-trails", label: "Nebula Trails", hint: "Shimmering Path" },
+  { value: "time-ribbon", label: "Time Ribbon", hint: "Amplitude Timeline" },
+];
 
 export default function Player({ record, onClose }: PlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [trackDurations, setTrackDurations] = useState<Record<string, number>>({});
   const [volumes, setVolumes] = useState<Record<string, number>>({});
   const [amplitudeEnvelopes, setAmplitudeEnvelopes] = useState<
     Record<string, number[]>
@@ -22,9 +48,14 @@ export default function Player({ record, onClose }: PlayerProps) {
   const [amplitudeMaximums, setAmplitudeMaximums] = useState<
     Record<string, number>
   >({});
-  const [visualizerType, setVisualizerType] = useState<VisualizerType>("laser-ladders");
-  const [trackMuteStates, setTrackMuteStates] = useState<Record<string, boolean>>({});
-  const [trackDeafenStates, setTrackDeafenStates] = useState<Record<string, boolean>>({});
+  const [visualizerType, setVisualizerType] =
+    useState<VisualizerType>("laser-ladders");
+  const [trackMuteStates, setTrackMuteStates] = useState<
+    Record<string, boolean>
+  >({});
+  const [trackDeafenStates, setTrackDeafenStates] = useState<
+    Record<string, boolean>
+  >({});
   const [readyTrackIds, setReadyTrackIds] = useState<string[]>([]);
   const isAnyTrackDeafened = useMemo(
     () => Object.values(trackDeafenStates).some(Boolean),
@@ -73,6 +104,26 @@ export default function Player({ record, onClose }: PlayerProps) {
     }, {});
   }, [tracks]);
 
+  const visualizerButtonStyle = useCallback(
+    (isActive: boolean): CSSProperties => ({
+      borderRadius: "14px",
+      border: isActive ? "1px solid #6ddcff" : "1px solid #1f2a3d",
+      background: isActive
+        ? "linear-gradient(135deg, rgba(37,99,235,0.9), rgba(14,165,233,0.8))"
+        : "linear-gradient(135deg, rgba(17,24,39,0.85), rgba(15,23,42,0.9))",
+      color: "#e5e7eb",
+      padding: "0.65rem 0.85rem",
+      minWidth: "200px",
+      textAlign: "left",
+      boxShadow: isActive
+        ? "0 0 0 1px rgba(109,220,255,0.35), 0 16px 40px rgba(0,0,0,0.45)"
+        : "0 10px 28px rgba(0,0,0,0.35)",
+      cursor: "pointer",
+      transition: "all 160ms ease",
+    }),
+    []
+  );
+
   useEffect(() => {
     volumesRef.current = volumes;
   }, [volumes]);
@@ -96,7 +147,9 @@ export default function Player({ record, onClose }: PlayerProps) {
 
       const isTrackMuted = trackMuteStatesRef.current[trackId];
       const isTrackDeafened = trackDeafenStatesRef.current[trackId];
-      const isAnyDeafened = Object.values(trackDeafenStatesRef.current).some(Boolean);
+      const isAnyDeafened = Object.values(trackDeafenStatesRef.current).some(
+        Boolean
+      );
 
       if (isTrackMuted) {
         return 0;
@@ -133,7 +186,13 @@ export default function Player({ record, onClose }: PlayerProps) {
 
       return volume;
     },
-    [isAnyTrackDeafened, trackDeafenStates, trackLookup, trackMuteStates, volumes]
+    [
+      isAnyTrackDeafened,
+      trackDeafenStates,
+      trackLookup,
+      trackMuteStates,
+      volumes,
+    ]
   );
 
   const ensureAudioContext = useCallback(() => {
@@ -220,7 +279,6 @@ export default function Player({ record, onClose }: PlayerProps) {
     setVolumes(initialVolumes);
     setCurrentTime(0);
     setDuration(0);
-    setTrackDurations({});
     setIsPlaying(false);
     setReadyTrackIds([]);
     setTrackMuteStates({});
@@ -297,12 +355,9 @@ export default function Player({ record, onClose }: PlayerProps) {
           context.currentTime
         );
 
-        setTrackDurations((previous) => {
-          const next = { ...previous, [track.id]: audioBuffer.duration };
-          const durations = Object.values(next);
-          const maxDuration = durations.length ? Math.max(...durations) : 0;
-          setDuration(Number.isFinite(maxDuration) ? maxDuration : 0);
-          return next;
+        setDuration((previous) => {
+          const maxDuration = Math.max(previous, audioBuffer.duration);
+          return Number.isFinite(maxDuration) ? maxDuration : 0;
         });
 
         const windowSize = Math.max(
@@ -377,7 +432,8 @@ export default function Player({ record, onClose }: PlayerProps) {
           return;
         }
 
-        const parentWidth = canvas.parentElement?.clientWidth ?? window.innerWidth;
+        const parentWidth =
+          canvas.parentElement?.clientWidth ?? window.innerWidth;
         const nextWidth = Math.max(0, Math.floor(parentWidth));
 
         if (nextWidth && canvas.width !== nextWidth) {
@@ -480,7 +536,8 @@ export default function Player({ record, onClose }: PlayerProps) {
       }
 
       const readyTracks = tracks.filter(
-        (track) => buffersRef.current[track.id] && gainNodesRef.current[track.id]
+        (track) =>
+          buffersRef.current[track.id] && gainNodesRef.current[track.id]
       );
 
       if (!readyTracks.length) {
@@ -555,7 +612,7 @@ export default function Player({ record, onClose }: PlayerProps) {
     pendingSeekRef.current = null;
   };
 
-  const handlePlayPause = async () => {
+  const handlePlayPause = useCallback(async () => {
     if (!tracks.length) {
       return;
     }
@@ -569,14 +626,45 @@ export default function Player({ record, onClose }: PlayerProps) {
       }
 
       startOffsetRef.current =
-        context.currentTime - startAtCtxTimeRef.current + startOffsetRef.current;
+        context.currentTime -
+        startAtCtxTimeRef.current +
+        startOffsetRef.current;
       stopAllSources();
       setIsPlaying(false);
       return;
     }
 
     await schedulePlayback(startOffsetRef.current);
-  };
+  }, [isPlaying, schedulePlayback, stopAllSources, tracks.length]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.code !== "Space" && event.key !== " ") {
+        return;
+      }
+
+      const target = event.target as HTMLElement | null;
+      const isInteractiveTarget =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        target instanceof HTMLButtonElement ||
+        target?.isContentEditable;
+
+      if (isInteractiveTarget) {
+        return;
+      }
+
+      event.preventDefault();
+      void handlePlayPause();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [handlePlayPause]);
 
   const handleVolumeChange = (trackId: string, value: number) => {
     setVolumes((previous) => ({ ...previous, [trackId]: value }));
@@ -608,7 +696,8 @@ export default function Player({ record, onClose }: PlayerProps) {
     return `${minutes}:${seconds}`;
   };
 
-  const areTracksReady = tracks.length > 0 && readyTrackIds.length === tracks.length;
+  const areTracksReady =
+    tracks.length > 0 && readyTrackIds.length === tracks.length;
 
   if (!tracks.length) {
     return null;
@@ -668,54 +757,62 @@ export default function Player({ record, onClose }: PlayerProps) {
           {isPlaying ? "Pause" : areTracksReady ? "Play" : "Loading..."}
         </button>
       </div>
-      <div style={{ marginTop: "0.75rem", display: "flex", gap: "0.5rem" }}>
-        <label htmlFor="visualizer-type" style={{ fontWeight: 600 }}>
-          Visualizer
-        </label>
-        <select
-          id="visualizer-type"
-          value={visualizerType}
-          onChange={(event) =>
-            setVisualizerType(event.target.value as VisualizerType)
-          }
+      <div style={{ marginTop: "0.75rem" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "baseline",
+            gap: "0.5rem",
+            marginBottom: "0.5rem",
+          }}
         >
-          <option value="laser-ladders">Laser Ladders (Graphic EQ)</option>
-          <option value="spectrum-safari">Spectrum Safari (Analyzer)</option>
-          <option value="waveform-waterline">
-            Waveform Waterline (Oscilloscope)
-          </option>
-          <option value="aurora-radar">Aurora Radar (Radial Sweep)</option>
-          <option value="mirror-peaks">Mirror Peaks (Symmetric Bars)</option>
-          <option value="pulse-grid">Pulse Grid (Energy Matrix)</option>
-          <option value="luminous-orbit">Luminous Orbit (Layered Rings)</option>
-          <option value="nebula-trails">Nebula Trails (Shimmering Path)</option>
-          <option value="time-ribbon">Time Ribbon (Amplitude Timeline)</option>
-        </select>
+          <span style={{ fontWeight: 700, color: "#e5e7eb" }}>Visualizer</span>
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.6rem" }}>
+          {visualizerOptions.map((option) => {
+            const isActive = visualizerType === option.value;
+
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setVisualizerType(option.value)}
+                style={visualizerButtonStyle(isActive)}
+                aria-pressed={isActive}
+              >
+                <div style={{ fontWeight: 700, letterSpacing: "0.02em" }}>
+                  {option.label}
+                </div>
+                <div
+                  style={{
+                    color: isActive ? "#eaf2ff" : "#c7d2fe",
+                    fontSize: "0.9rem",
+                    marginTop: "0.1rem",
+                  }}
+                >
+                  {option.hint}
+                </div>
+              </button>
+            );
+          })}
+        </div>
       </div>
       <div style={{ marginTop: "1rem" }}>
-        {tracks.map((track) => {
-          const trackDuration = trackDurations[track.id];
-          const durationLabel = Number.isFinite(trackDuration)
-            ? `${trackDuration.toFixed(4)}s`
-            : "Loading duration...";
-
-          return (
-            <TrackRow
-              key={track.id}
-              track={track}
-              durationLabel={durationLabel}
-              volume={volumes[track.id] ?? 1}
-              isMuted={!!trackMuteStates[track.id]}
-              isDeafened={!!trackDeafenStates[track.id]}
-              onVolumeChange={handleVolumeChange}
-              onToggleMute={toggleTrackMute}
-              onToggleDeafen={toggleTrackDeafen}
-              registerCanvas={(ref) => {
-                canvasRefs.current[track.id] = ref;
-              }}
-            />
-          );
-        })}
+        {tracks.map((track) => (
+          <TrackRow
+            key={track.id}
+            track={track}
+            volume={volumes[track.id] ?? 1}
+            isMuted={!!trackMuteStates[track.id]}
+            isDeafened={!!trackDeafenStates[track.id]}
+            onVolumeChange={handleVolumeChange}
+            onToggleMute={toggleTrackMute}
+            onToggleDeafen={toggleTrackDeafen}
+            registerCanvas={(ref) => {
+              canvasRefs.current[track.id] = ref;
+            }}
+          />
+        ))}
       </div>
     </div>
   );

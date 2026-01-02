@@ -1,8 +1,9 @@
+import { type CSSProperties } from "react";
+
 import { type Track } from "./types";
 
 type TrackRowProps = {
   track: Track;
-  durationLabel: string;
   volume: number;
   isMuted: boolean;
   isDeafened: boolean;
@@ -14,7 +15,6 @@ type TrackRowProps = {
 
 export function TrackRow({
   track,
-  durationLabel,
   volume,
   isMuted,
   isDeafened,
@@ -24,6 +24,24 @@ export function TrackRow({
   registerCanvas,
 }: TrackRowProps) {
   const label = track.isInput ? `Input: ${track.name}` : `Output: ${track.name}`;
+
+  const controlButtonStyle = (isActive: boolean): CSSProperties => ({
+    borderRadius: "999px",
+    border: "1px solid #2f384a",
+    background: isActive
+      ? "linear-gradient(135deg, #1f2a3d, #0f172a)"
+      : "rgba(17,23,37,0.75)",
+    color: "#f4f4f5",
+    padding: "0.45rem 0.9rem",
+    letterSpacing: "0.02em",
+    fontWeight: 600,
+    minWidth: "92px",
+    boxShadow: isActive
+      ? "0 6px 18px rgba(0,0,0,0.3)"
+      : "0 4px 12px rgba(0,0,0,0.22)",
+    transition: "all 160ms ease",
+    cursor: "pointer",
+  });
 
   return (
     <div key={track.id} style={{ marginBottom: "0.75rem" }}>
@@ -36,8 +54,8 @@ export function TrackRow({
           marginBottom: "0.4rem",
         }}
       >
-        <div style={{ minWidth: "220px" }}>
-          {label} <span style={{ color: "#aaa" }}>({durationLabel})</span>
+        <div style={{ minWidth: "220px", fontWeight: 600, color: "#e5e7eb" }}>
+          {label}
         </div>
         <input
           type="range"
@@ -49,10 +67,20 @@ export function TrackRow({
           style={{ flex: 1, minWidth: "160px", maxWidth: "360px" }}
         />
         <div style={{ display: "flex", gap: "0.4rem" }}>
-          <button type="button" onClick={() => onToggleMute(track.id)}>
+          <button
+            type="button"
+            onClick={() => onToggleMute(track.id)}
+            style={controlButtonStyle(isMuted)}
+            aria-pressed={isMuted}
+          >
             {isMuted ? "Unmute" : "Mute"}
           </button>
-          <button type="button" onClick={() => onToggleDeafen(track.id)}>
+          <button
+            type="button"
+            onClick={() => onToggleDeafen(track.id)}
+            style={controlButtonStyle(isDeafened)}
+            aria-pressed={isDeafened}
+          >
             {isDeafened ? "Undeafen" : "Deafen"}
           </button>
         </div>
