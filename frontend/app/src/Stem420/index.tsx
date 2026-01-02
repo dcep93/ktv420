@@ -282,6 +282,28 @@ export default function Stem420() {
   const isOutputFolder = (node: ObjectTreeNode) =>
     node.type === "folder" && node.name.toLowerCase() === "output";
 
+  const outputFolderExistsForMd5 = (md5: string): boolean => {
+    const nodesToSearch = [...objectTree];
+
+    while (nodesToSearch.length) {
+      const currentNode = nodesToSearch.pop();
+
+      if (!currentNode) {
+        continue;
+      }
+
+      if (isMd5Folder(currentNode) && currentNode.name === md5) {
+        return (currentNode.children ?? []).some((child) =>
+          isOutputFolder(child)
+        );
+      }
+
+      nodesToSearch.push(...(currentNode.children ?? []));
+    }
+
+    return false;
+  };
+
   const findFirstMp3File = (node: ObjectTreeNode): ObjectTreeNode | null => {
     if (node.type === "file" && node.name.toLowerCase().endsWith(".mp3")) {
       return node;
@@ -510,9 +532,19 @@ export default function Stem420() {
         totalObjects={objects.length}
         onRefresh={refreshObjectList}
         onFolderClick={handleFolderClick}
-        isFolderClickable={(node) =>
-          isMd5Folder(node) || isInputFolder(node) || isOutputFolder(node)
-        }
+        isFolderClickable={(node) => {
+          if (isInputFolder(node)) {
+            const md5 = extractMd5FromPath(node.path);
+
+            if (md5 && outputFolderExistsForMd5(md5)) {
+              return false;
+            }
+          }
+
+          return (
+            isMd5Folder(node) || isInputFolder(node) || isOutputFolder(node)
+          );
+        }}
         onFileClick={handleFileClick}
       />
       <UploadControls
