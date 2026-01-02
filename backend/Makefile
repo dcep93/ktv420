@@ -29,5 +29,8 @@ server:
 mypy:
 	mypy stem420 --disallow-untyped-defs
 
+oneoff:
+	python3 -u -m stem420.oneoff
+
 list:  # Meta target to list other targets.
 	@$(MAKE) -pRrq -f $(THIS_FILE) : 2>/dev/null | awk -v RS= -F: '/^# File/,/^# Finished Make data base/ {if ($$1 !~ "^[#.]") {print $$1}}' | sort | egrep -v -e '^[^[:alnum:]]' -e '^$@$$' | xargs
