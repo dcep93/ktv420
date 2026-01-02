@@ -44,6 +44,12 @@ const visualizerOptions: Array<{
   { value: "opal-current", label: "Opal Current", hint: "Opalescent Waves" },
   { value: "solstice-waves", label: "Solstice Waves", hint: "Solar Horizon" },
   { value: "ripple-weave", label: "Ripple Weave", hint: "Braided Ribbons" },
+  { value: "ectoplasm", label: "Ectoplasm", hint: "Plasma Bloom" },
+  { value: "static-shock", label: "Static Shock", hint: "Electric Bolts" },
+  { value: "snowstorm", label: "Snowstorm", hint: "Blizzard Scatter" },
+  { value: "kaleidoscope", label: "Kaleidoscope", hint: "Mirrored Rays" },
+  { value: "highway", label: "Highway", hint: "Neon Lanes" },
+  { value: "delay-pedal", label: "Delay Pedal", hint: "Echo Ripples" },
 ];
 
 export default function Player({ record, onClose }: PlayerProps) {

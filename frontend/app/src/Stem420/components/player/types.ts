@@ -20,7 +20,13 @@ export type VisualizerType =
   | "hollow-echoes"
   | "opal-current"
   | "solstice-waves"
-  | "ripple-weave";
+  | "ripple-weave"
+  | "ectoplasm"
+  | "static-shock"
+  | "snowstorm"
+  | "kaleidoscope"
+  | "highway"
+  | "delay-pedal";
 
 export type PlayerProps = {
   record: CachedOutputRecord;
