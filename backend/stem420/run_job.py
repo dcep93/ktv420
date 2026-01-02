@@ -4,6 +4,7 @@ import shutil
 import threading
 import time
 import traceback
+import wave
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Dict, List, Tuple
@@ -85,8 +86,85 @@ def _download_mp3(client: storage.Client, gcs_path: str, dest: Path) -> None:
     _STATE.log(f"run_job.download.done path={dest}")
 
 
-def _run_demucs(mp3_path: Path, output_dir: Path) -> Path:
-    _STATE.log(f"run_job.demucs.start input={mp3_path} output_dir={output_dir}")
+def _decode_to_wav(mp3_path: Path, wav_path: Path) -> Path:
+    _STATE.log(f"run_job.decode.start input={mp3_path} output={wav_path}")
+    result = subprocess.run(  # noqa: S603
+        ["ffmpeg", "-y", "-i", str(mp3_path), str(wav_path)],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        _STATE.log(
+            "run_job.decode.failed "
+            f"returncode={result.returncode} stdout={result.stdout!r} "
+            f"stderr={result.stderr!r}"
+        )
+        raise subprocess.CalledProcessError(
+            result.returncode, result.args, output=result.stdout, stderr=result.stderr
+        )
+    _STATE.log("run_job.decode.done")
+    return wav_path
+
+
+def _wav_info(wav_path: Path) -> Tuple[int, int]:
+    with wave.open(str(wav_path), "rb") as f:
+        sample_rate = f.getframerate()
+        nframes = f.getnframes()
+    return sample_rate, nframes
+
+
+def _force_length_samples(input_wav: Path, output_wav: Path, ref_samples: int) -> None:
+    result = subprocess.run(  # noqa: S603
+        [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(input_wav),
+            "-af",
+            f"apad,atrim=end_sample={ref_samples}",
+            str(output_wav),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        _STATE.log(
+            "run_job.align.failed "
+            f"returncode={result.returncode} stdout={result.stdout!r} "
+            f"stderr={result.stderr!r}"
+        )
+        raise subprocess.CalledProcessError(
+            result.returncode, result.args, output=result.stdout, stderr=result.stderr
+        )
+
+
+def _encode_flac(input_wav: Path, flac_path: Path) -> None:
+    result = subprocess.run(  # noqa: S603
+        [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(input_wav),
+            "-compression_level",
+            "8",
+            str(flac_path),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        _STATE.log(
+            "run_job.encode_flac.failed "
+            f"returncode={result.returncode} stdout={result.stdout!r} "
+            f"stderr={result.stderr!r}"
+        )
+        raise subprocess.CalledProcessError(
+            result.returncode, result.args, output=result.stdout, stderr=result.stderr
+        )
+
+
+def _run_demucs(audio_path: Path, output_dir: Path) -> Path:
+    _STATE.log(f"run_job.demucs.start input={audio_path} output_dir={output_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     result = subprocess.run(  # noqa: S603
@@ -94,11 +172,7 @@ def _run_demucs(mp3_path: Path, output_dir: Path) -> Path:
             "demucs",
             "--out",
             str(output_dir),
-            # compact stems:
-            "--mp3",
-            "--mp3-bitrate",
-            "64",  # try 48/64/96; 64 is usually fine for “just stems”
-            str(mp3_path),
+            str(audio_path),
         ],
         capture_output=True,
         text=True,
@@ -129,6 +203,18 @@ def _run_demucs(mp3_path: Path, output_dir: Path) -> Path:
     return output_dir
 
 
+def _align_and_encode_stems_to_flac(output_dir: Path, ref_samples: int) -> None:
+    for stem_file in list(output_dir.iterdir()):
+        if stem_file.suffix.lower() != ".wav" or not stem_file.is_file():
+            continue
+        aligned_wav = stem_file.with_name(stem_file.stem + ".aligned.wav")
+        _force_length_samples(stem_file, aligned_wav, ref_samples)
+        flac_path = stem_file.with_suffix(".flac")
+        _encode_flac(aligned_wav, flac_path)
+        stem_file.unlink(missing_ok=True)
+        aligned_wav.unlink(missing_ok=True)
+
+
 def _upload_directory(client: storage.Client, directory: Path, gcs_path: str) -> None:
     bucket_name, base_blob_path = _parse_gcs_path(gcs_path)
     bucket = client.bucket(bucket_name)
@@ -147,12 +233,29 @@ def _upload_directory(client: storage.Client, directory: Path, gcs_path: str) ->
     _STATE.log("run_job.upload.done")
 
 
-def _write_metadata(output_dir: Path, duration_s: float) -> Path:
+def _write_metadata(
+    output_dir: Path,
+    processing_duration_s: float,
+    ref_samples: int,
+    ref_sample_rate: int,
+) -> Path:
     metadata_path = output_dir / "_metadata.json"
-    metadata = {"duration_s": duration_s}
+    ref_duration_s = ref_samples / ref_sample_rate if ref_sample_rate else 0.0
+    metadata = {
+        "duration_s": processing_duration_s,
+        "ref_samples": ref_samples,
+        "ref_sample_rate": ref_sample_rate,
+        "ref_duration_s": ref_duration_s,
+        "aligned_format": "flac",
+        "alignment_method": "apad+atrim end_sample",
+    }
     output_dir.mkdir(parents=True, exist_ok=True)
     metadata_path.write_text(json.dumps(metadata))
-    _STATE.log(f"run_job.metadata.written path={metadata_path} duration_s={duration_s}")
+    _STATE.log(
+        "run_job.metadata.written "
+        f"path={metadata_path} processing_duration_s={processing_duration_s} "
+        f"ref_samples={ref_samples} ref_sample_rate={ref_sample_rate}"
+    )
     return metadata_path
 
 
@@ -167,10 +270,16 @@ def _process_request(request: Request) -> None:
             tmp_dir_path = Path(tmp_dir)
             mp3_path = tmp_dir_path / "input.mp3"
             _download_mp3(client, request.mp3_path, mp3_path)
+            reference_wav = tmp_dir_path / "reference.wav"
+            _decode_to_wav(mp3_path, reference_wav)
+            ref_sample_rate, ref_samples = _wav_info(reference_wav)
             demucs_output_dir = tmp_dir_path / "demucs_output"
-            _run_demucs(mp3_path, demucs_output_dir)
+            _run_demucs(reference_wav, demucs_output_dir)
+            _align_and_encode_stems_to_flac(demucs_output_dir, ref_samples)
             duration_s = time.perf_counter() - start_time
-            _write_metadata(demucs_output_dir, duration_s)
+            _write_metadata(
+                demucs_output_dir, duration_s, ref_samples, ref_sample_rate
+            )
 
             # demucs output is typically nested, upload all generated stems
             _upload_directory(client, demucs_output_dir, request.output_path)
