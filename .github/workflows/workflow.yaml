@@ -44,4 +44,4 @@ jobs:
 
       - run: bash .github/workflows/record_sha.sh
       - run: bash .github/workflows/deploy_to_firebase.sh '${{ secrets.SA_KEY }}'
-      - run: true || bash .github/workflows/deploy_to_cloud_run.sh '${{ secrets.SA_KEY_BILLING }}'
+      - run: bash .github/workflows/deploy_to_cloud_run.sh '${{ secrets.SA_KEY_BILLING }}'
