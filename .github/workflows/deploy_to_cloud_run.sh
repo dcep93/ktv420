@@ -70,8 +70,8 @@ gcloud beta run deploy "stem420" \
   --platform managed \
   --allow-unauthenticated \
   --no-cpu-throttling \
-  --cpu 8 \
-  --memory 4Gi \
+  --cpu 2 \
+  --memory 2Gi \
   --min-instances 0 \
   --max-instances 1 \
   --timeout 300 \

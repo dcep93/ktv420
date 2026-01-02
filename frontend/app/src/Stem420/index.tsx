@@ -457,13 +457,13 @@ export default function Stem420() {
 
   return (
     <div>
-      <pre>{JSON.stringify(sha, null, 2)}</pre>
       <pre
         onClick={() => void fetchRootResponse()}
         style={{ cursor: "pointer" }}
       >
-        {rootResponseText}
+        {JSON.stringify(sha, null, 2)}
       </pre>
+      <pre>{rootResponseText}</pre>
       <ObjectTreeView
         isBusy={isBusy}
         isListing={isListing}
