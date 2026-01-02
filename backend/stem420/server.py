@@ -2,7 +2,8 @@ import json
 import os
 import time
 import traceback
-import typing
+from dataclasses import dataclass, field
+from typing import Any
 
 from fastapi import FastAPI, Response  # type: ignore
 from fastapi.middleware.cors import CORSMiddleware  # type: ignore
@@ -14,26 +15,34 @@ from . import run_job
 NUM_WORKERS = 1
 
 
-class Vars:
-    start_time = time.time()
-    manager: run_job.Manager
-    health = 0
-    sha: typing.Any
+@dataclass
+class ServerState:
+    start_time: float = field(default_factory=time.time)
+    manager: run_job.Manager | None = None
+    health: int = 0
+    sha: Any | None = None
+
+    @property
+    def uptime_seconds(self) -> float:
+        return time.time() - self.start_time
+
+
+state = ServerState()
+
+
+def _load_sha_metadata() -> Any:
+    sha_path = os.path.join(os.path.dirname(__file__), "sha.json")
+    with open(sha_path) as fh:
+        return json.load(fh)
+
+
+def _build_manager() -> run_job.Manager:
+    return run_job.Manager(lambda: run_job.run_job, NUM_WORKERS)
 
 
 def init() -> None:
-    with open(
-        os.path.join(
-            os.path.dirname(__file__),
-            "sha.json",
-        )
-    ) as fh:
-        Vars.sha = json.load(fh)
-
-    Vars.manager = run_job.Manager(
-        lambda: run_job.run_job,
-        NUM_WORKERS,
-    )
+    state.sha = _load_sha_metadata()
+    state.manager = _build_manager()
 
 
 web_app = FastAPI()
@@ -48,46 +57,46 @@ web_app.add_middleware(
 
 @web_app.on_event("shutdown")
 def shutdown() -> None:
-    Vars.manager.close()
+    if state.manager:
+        state.manager.close()
 
 
 @web_app.get("/")
-def get_() -> JSONResponse:
-    now = time.time()
-    alive_age_s = now - Vars.start_time
+def get_root() -> JSONResponse:
+    uptime_seconds = state.uptime_seconds
     status_code = 200
     content = {
-        "health_count": Vars.health,
-        "alive_age_s": alive_age_s,
-        "alive_age_h": alive_age_s / 3600,
+        "health_count": state.health,
+        "alive_age_s": uptime_seconds,
+        "alive_age_h": uptime_seconds / 3600,
         "status_code": status_code,
-        "sha": Vars.sha,
+        "sha": state.sha,
         "run_job": run_job.get_state(),
     }
-    return JSONResponse(
-        status_code=status_code,
-        content=content,
-    )
+    return JSONResponse(status_code=status_code, content=content)
 
 
 @web_app.get("/health")
 def get_health() -> JSONResponse:
-    Vars.health += 1
-    rval = get_()
+    state.health += 1
+    rval = get_root()
     logger.log(bytes(rval.body).decode("utf-8"))
     return rval
 
 
 @web_app.get("/start_time")
 def get_start_time() -> Response:
-    return Response(Vars.start_time)
+    return Response(str(state.start_time))
 
 
 @web_app.post("/run_job")
 def post_run_job(payload: run_job.Request) -> JSONResponse:
     logger.log("server.receive")
     try:
-        screenshot_response = Vars.manager.run(payload)
+        if not state.manager:
+            raise RuntimeError("server not initialized")
+
+        screenshot_response = state.manager.run(payload)
         resp = screenshot_response.model_dump()
         logger.log("server.respond")
         return JSONResponse(resp)

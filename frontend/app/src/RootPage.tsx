@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import "./RootPage.css";
 import Player from "./Stem420/components/Player";
@@ -50,31 +50,33 @@ export default function RootPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isFetchingSelection, setIsFetchingSelection] = useState(false);
 
-  useEffect(() => {
-    const loadObjects = async () => {
-      setIsLoading(true);
-      setError(null);
-      setStatus("Checking bucket contents...");
+  const resetStatus = () => setStatus(null);
 
-      try {
-        const listedObjects = await listBucketObjects();
-        setObjects(listedObjects);
-        setObjectTree(buildObjectTree(listedObjects));
-      } catch (loadError) {
-        const formattedMessage = formatErrorMessage(
-          "listBucketObjects",
-          loadError
-        );
-        console.error(formattedMessage, loadError);
-        setError(formattedMessage);
-      } finally {
-        setIsLoading(false);
-        setStatus(null);
-      }
-    };
+  const refreshObjectTree = useCallback(async (statusMessage: string | null = null) => {
+    setIsLoading(true);
+    setError(null);
+    setStatus(statusMessage);
 
-    void loadObjects();
+    try {
+      const listedObjects = await listBucketObjects();
+      setObjects(listedObjects);
+      setObjectTree(buildObjectTree(listedObjects));
+    } catch (loadError) {
+      const formattedMessage = formatErrorMessage(
+        "listBucketObjects",
+        loadError
+      );
+      console.error(formattedMessage, loadError);
+      setError(formattedMessage);
+    } finally {
+      setIsLoading(false);
+      resetStatus();
+    }
   }, []);
+
+  useEffect(() => {
+    void refreshObjectTree("Checking bucket contents...");
+  }, [refreshObjectTree]);
 
   const inputOptions = useMemo<InputOption[]>(() => {
     const options = objects
@@ -106,7 +108,7 @@ export default function RootPage() {
     setError(null);
 
     if (!value) {
-      setStatus(null);
+      resetStatus();
       return;
     }
 
@@ -119,6 +121,10 @@ export default function RootPage() {
       return;
     }
 
+    await loadSelection(selectedOption);
+  };
+
+  const loadSelection = async (selectedOption: InputOption) => {
     const md5Node = findMd5Node(objectTree, selectedOption.md5);
 
     if (!md5Node) {
@@ -170,25 +176,7 @@ export default function RootPage() {
   };
 
   const handleRefresh = async () => {
-    setStatus("Refreshing bucket contents...");
-    setError(null);
-    setIsLoading(true);
-
-    try {
-      const listedObjects = await listBucketObjects();
-      setObjects(listedObjects);
-      setObjectTree(buildObjectTree(listedObjects));
-    } catch (refreshError) {
-      const formattedMessage = formatErrorMessage(
-        "listBucketObjects",
-        refreshError
-      );
-      console.error(formattedMessage, refreshError);
-      setError(formattedMessage);
-    } finally {
-      setIsLoading(false);
-      setStatus(null);
-    }
+    await refreshObjectTree("Refreshing bucket contents...");
   };
 
   return (

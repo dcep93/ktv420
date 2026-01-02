@@ -84,6 +84,25 @@ def _make_storage_client() -> storage.Client:
         )
 
 
+def _run_command(command: list[str], success_message: str, failure_message: str) -> None:
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        _STATE.log(
+            f"{failure_message} "
+            f"returncode={result.returncode} stdout={result.stdout!r} "
+            f"stderr={result.stderr!r}"
+        )
+        raise subprocess.CalledProcessError(
+            result.returncode, result.args, output=result.stdout, stderr=result.stderr
+        )
+
+    _STATE.log(success_message)
+
+
 def _parse_gcs_path(gcs_path: str) -> Tuple[str, str]:
     if not gcs_path.startswith("gs://"):
         msg = f"Invalid GCS path: {gcs_path}"
@@ -115,21 +134,11 @@ def _download_mp3(client: storage.Client, gcs_path: str, dest: Path) -> None:
 
 def _decode_to_wav(mp3_path: Path, wav_path: Path) -> Path:
     _STATE.log(f"run_job.decode.start input={mp3_path} output={wav_path}")
-    result = subprocess.run(
+    _run_command(
         ["ffmpeg", "-y", "-i", str(mp3_path), str(wav_path)],
-        capture_output=True,
-        text=True,
+        "run_job.decode.done",
+        "run_job.decode.failed",
     )
-    if result.returncode != 0:
-        _STATE.log(
-            "run_job.decode.failed "
-            f"returncode={result.returncode} stdout={result.stdout!r} "
-            f"stderr={result.stderr!r}"
-        )
-        raise subprocess.CalledProcessError(
-            result.returncode, result.args, output=result.stdout, stderr=result.stderr
-        )
-    _STATE.log("run_job.decode.done")
     return wav_path
 
 
@@ -149,7 +158,7 @@ def _force_length_samples(
         f"apad=pad_len={ref_samples},"
         f"atrim=end_sample={ref_samples}"
     )
-    result = subprocess.run(
+    _run_command(
         [
             "ffmpeg",
             "-y",
@@ -159,22 +168,13 @@ def _force_length_samples(
             filter_chain,
             str(output_wav),
         ],
-        capture_output=True,
-        text=True,
+        "run_job.align.done",
+        "run_job.align.failed",
     )
-    if result.returncode != 0:
-        _STATE.log(
-            "run_job.align.failed "
-            f"returncode={result.returncode} stdout={result.stdout!r} "
-            f"stderr={result.stderr!r}"
-        )
-        raise subprocess.CalledProcessError(
-            result.returncode, result.args, output=result.stdout, stderr=result.stderr
-        )
 
 
 def _encode_mp3(input_wav: Path, mp3_path: Path) -> None:
-    result = subprocess.run(
+    _run_command(
         [
             "ffmpeg",
             "-y",
@@ -186,40 +186,20 @@ def _encode_mp3(input_wav: Path, mp3_path: Path) -> None:
             "2",
             str(mp3_path),
         ],
-        capture_output=True,
-        text=True,
+        "run_job.encode_mp3.done",
+        "run_job.encode_mp3.failed",
     )
-    if result.returncode != 0:
-        _STATE.log(
-            "run_job.encode_mp3.failed "
-            f"returncode={result.returncode} stdout={result.stdout!r} "
-            f"stderr={result.stderr!r}"
-        )
-        raise subprocess.CalledProcessError(
-            result.returncode, result.args, output=result.stdout, stderr=result.stderr
-        )
 
 
 def _run_demucs(audio_path: Path, output_dir: Path) -> Path:
     _STATE.log(f"run_job.demucs.start input={audio_path} output_dir={output_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    result = subprocess.run(
+    _run_command(
         ["demucs", "--out", str(output_dir), str(audio_path)],
-        capture_output=True,
-        text=True,
+        "run_job.demucs.done",
+        "run_job.demucs.failed",
     )
-    if result.returncode != 0:
-        _STATE.log(
-            "run_job.demucs.failed "
-            f"returncode={result.returncode} stdout={result.stdout!r} "
-            f"stderr={result.stderr!r}"
-        )
-        raise subprocess.CalledProcessError(
-            result.returncode, result.args, output=result.stdout, stderr=result.stderr
-        )
-
-    _STATE.log("run_job.demucs.done")
 
     model_dirs = [p for p in output_dir.iterdir() if p.is_dir()]
     for model_dir in model_dirs:
