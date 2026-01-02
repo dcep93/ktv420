@@ -8,6 +8,8 @@ type ObjectTreeViewProps = {
   totalObjects: number;
   onRefresh: () => void;
   onFileClick: (node: ObjectTreeNode) => Promise<void> | void;
+  onFolderClick?: (node: ObjectTreeNode) => Promise<void> | void;
+  isFolderClickable?: (node: ObjectTreeNode) => boolean;
 };
 
 export default function ObjectTreeView({
@@ -18,11 +20,15 @@ export default function ObjectTreeView({
   totalObjects,
   onRefresh,
   onFileClick,
+  onFolderClick,
+  isFolderClickable,
 }: ObjectTreeViewProps) {
   const renderObjects = (nodes: ObjectTreeNode[]) => (
     <ul style={{ marginTop: "0.5rem" }}>
       {nodes.map((node) => {
         const isFolder = node.type === "folder";
+        const folderIsClickable =
+          isFolder && isFolderClickable ? isFolderClickable(node) : false;
         const isMp3File =
           node.type === "file" && node.name.toLowerCase().endsWith(".mp3");
         const isJsonFile =
@@ -32,7 +38,25 @@ export default function ObjectTreeView({
         return (
           <li key={node.path}>
             {isFolder ? (
-              <code>{node.name}/</code>
+              folderIsClickable ? (
+                <button
+                  type="button"
+                  onClick={() => onFolderClick && void onFolderClick(node)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    padding: 0,
+                    color: "white",
+                    textDecoration: "underline",
+                    cursor: "pointer",
+                  }}
+                  disabled={isBusy}
+                >
+                  <code style={{ color: "inherit" }}>{node.name}/</code>
+                </button>
+              ) : (
+                <code>{node.name}/</code>
+              )
             ) : isClickableFile ? (
               <>
                 <button
