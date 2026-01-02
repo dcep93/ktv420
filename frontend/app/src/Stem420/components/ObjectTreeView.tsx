@@ -34,21 +34,24 @@ export default function ObjectTreeView({
             {isFolder ? (
               <code>{node.name}/</code>
             ) : isClickableFile ? (
-              <button
-                type="button"
-                onClick={() => void onFileClick(node)}
-                style={{
-                  background: "none",
-                  border: "none",
-                  padding: 0,
-                  color: "blue",
-                  textDecoration: "underline",
-                  cursor: "pointer",
-                }}
-                disabled={isBusy}
-              >
-                <code>{node.name}</code>
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => void onFileClick(node)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    padding: 0,
+                    color: "white",
+                    textDecoration: "underline",
+                    cursor: "pointer",
+                  }}
+                  disabled={isBusy}
+                >
+                  <code style={{ color: "inherit" }}>{node.name}</code>
+                </button>{" "}
+                — {node.size?.toLocaleString()} bytes
+              </>
             ) : (
               <>
                 <code>{node.name}</code> — {node.size?.toLocaleString()} bytes
