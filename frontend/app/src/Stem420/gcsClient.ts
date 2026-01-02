@@ -125,3 +125,60 @@ export async function fetchObjectBlob(objectPath: string): Promise<Blob> {
     throw new Error(formatErrorMessage(functionName, error));
   }
 }
+
+export async function deleteObjectsWithPrefix(prefix: string): Promise<number> {
+  const functionName = "deleteObjectsWithPrefix";
+
+  try {
+    const normalizedPrefix = prefix.endsWith("/") ? prefix : `${prefix}/`;
+    let pageToken: string | undefined;
+    let deletedCount = 0;
+
+    do {
+      const listUrl = new URL(
+        `https://storage.googleapis.com/storage/v1/b/${BUCKET_NAME}/o`
+      );
+
+      listUrl.searchParams.set("prefix", normalizedPrefix);
+
+      if (pageToken) {
+        listUrl.searchParams.set("pageToken", pageToken);
+      }
+
+      const listResponse = await fetch(listUrl.toString());
+
+      if (!listResponse.ok) {
+        throw new Error(
+          `Failed to list objects: ${listResponse.status} ${listResponse.statusText}`
+        );
+      }
+
+      const listData = (await listResponse.json()) as {
+        items?: { name: string }[];
+        nextPageToken?: string;
+      };
+
+      const items = listData.items ?? [];
+
+      for (const item of items) {
+        const encodedName = encodeURIComponent(item.name);
+        const deleteUrl = `https://storage.googleapis.com/storage/v1/b/${BUCKET_NAME}/o/${encodedName}`;
+        const deleteResponse = await fetch(deleteUrl, { method: "DELETE" });
+
+        if (!deleteResponse.ok) {
+          throw new Error(
+            `Failed to delete ${item.name}: ${deleteResponse.status} ${deleteResponse.statusText}`
+          );
+        }
+
+        deletedCount += 1;
+      }
+
+      pageToken = listData.nextPageToken;
+    } while (pageToken);
+
+    return deletedCount;
+  } catch (error) {
+    throw new Error(formatErrorMessage(functionName, error));
+  }
+}

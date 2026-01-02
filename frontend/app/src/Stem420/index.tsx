@@ -7,6 +7,7 @@ import { formatErrorMessage } from "./errors";
 import {
   BUCKET_NAME,
   computeMd5,
+  deleteObjectsWithPrefix,
   fetchObjectBlob,
   fetchObjectContents,
   listBucketObjects,
@@ -278,6 +279,9 @@ export default function Stem420() {
   const isInputFolder = (node: ObjectTreeNode) =>
     node.type === "folder" && node.name.toLowerCase() === "input";
 
+  const isOutputFolder = (node: ObjectTreeNode) =>
+    node.type === "folder" && node.name.toLowerCase() === "output";
+
   const findFirstMp3File = (node: ObjectTreeNode): ObjectTreeNode | null => {
     if (node.type === "file" && node.name.toLowerCase().endsWith(".mp3")) {
       return node;
@@ -340,6 +344,38 @@ export default function Stem420() {
     }
   };
 
+  const handleDeleteOutputFolder = async (node: ObjectTreeNode) => {
+    const functionName = "handleDeleteOutputFolder";
+    const normalizedPath = node.path.endsWith("/")
+      ? node.path
+      : `${node.path}/`;
+
+    if (!window.confirm(`Delete all files under ${normalizedPath}?`)) {
+      return;
+    }
+
+    setIsDeleting(true);
+
+    try {
+      const deletedCount = await deleteObjectsWithPrefix(normalizedPath);
+
+      await refreshObjectList();
+
+      const deletedMessage =
+        deletedCount > 0
+          ? `Deleted ${deletedCount} object(s) from ${normalizedPath}.`
+          : `No objects found under ${normalizedPath}.`;
+
+      alert(deletedMessage);
+    } catch (error) {
+      const formattedMessage = formatErrorMessage(functionName, error);
+      console.error(formattedMessage, error);
+      alert(formattedMessage);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const handleFolderClick = async (node: ObjectTreeNode) => {
     const functionName = "handleFolderClick";
 
@@ -356,6 +392,11 @@ export default function Stem420() {
       }
 
       await triggerJobForMp3(mp3File.path);
+      return;
+    }
+
+    if (isOutputFolder(node)) {
+      await handleDeleteOutputFolder(node);
       return;
     }
 
@@ -450,9 +491,7 @@ export default function Stem420() {
   }, []);
 
   const rootResponseText =
-    rootResponse === null
-      ? "Fetching root response..."
-      : JSON.stringify(rootResponse, null, 2);
+    rootResponse === null ? null : JSON.stringify(rootResponse, null, 2);
 
   return (
     <div>
@@ -471,7 +510,9 @@ export default function Stem420() {
         totalObjects={objects.length}
         onRefresh={refreshObjectList}
         onFolderClick={handleFolderClick}
-        isFolderClickable={(node) => isMd5Folder(node) || isInputFolder(node)}
+        isFolderClickable={(node) =>
+          isMd5Folder(node) || isInputFolder(node) || isOutputFolder(node)
+        }
         onFileClick={handleFileClick}
       />
       <UploadControls
