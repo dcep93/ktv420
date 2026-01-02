@@ -1316,81 +1316,140 @@ export function drawVisualizer({
     const centerX = width / 2;
     const centerY = height / 2;
     const maxRadius = Math.sqrt(width * width + height * height) / 2;
-    const energy =
+    const totalEnergy =
       freqLength > 0
         ? frequencyData.reduce((sum, value) => sum + value, 0) / (freqLength * 255)
         : 0;
+    const bassEnergy =
+      freqLength > 0
+        ? frequencyData
+            .slice(0, Math.max(4, Math.floor(freqLength / 12)))
+            .reduce((sum, value) => sum + value, 0) /
+          (Math.max(4, Math.floor(freqLength / 12)) * 255)
+        : 0;
+    const shimmer =
+      timeLength > 0
+        ? timeData.reduce((sum, value) => sum + Math.abs((value ?? 128) - 128), 0) /
+          (timeLength * 128)
+        : 0;
 
-    const sky = context.createRadialGradient(centerX, centerY, 0, centerX, centerY, maxRadius);
-    sky.addColorStop(0, "#2b1b3a");
-    sky.addColorStop(0.45, "#211237");
-    sky.addColorStop(1, "#0a0b12");
-    context.fillStyle = sky;
+    const baseHue = (currentTime * 50 + totalEnergy * 220) % 360;
+    const backdrop = context.createRadialGradient(
+      centerX,
+      centerY,
+      0,
+      centerX,
+      centerY,
+      maxRadius
+    );
+    backdrop.addColorStop(0, `hsl(${(baseHue + 40) % 360}, 65%, ${18 + totalEnergy * 18}%)`);
+    backdrop.addColorStop(0.45, `hsl(${(baseHue + 120) % 360}, 60%, ${12 + totalEnergy * 20}%)`);
+    backdrop.addColorStop(1, `hsl(${(baseHue + 200) % 360}, 70%, 8%)`);
+    context.fillStyle = backdrop;
     context.fillRect(0, 0, width, height);
 
     context.save();
     context.translate(centerX, centerY);
-    const slices = 16;
+    const slices = performanceMode ? 12 : 18;
     const wedge = (Math.PI * 2) / slices;
-    const pulse = 0.7 + Math.sin(currentTime * 1.6 + energy * 2) * 0.25 + energy * 0.5;
+    const pulse = 0.85 + bassEnergy * 0.45 + Math.sin(currentTime * 2) * 0.08;
 
-    const drawWedge = (flip = false) => {
-      const points = 110;
+    const radiusAt = (t: number) => {
+      const idx = Math.floor(t * (timeLength - 1));
+      const osc = ((timeData[idx] ?? 128) - 128) / 128;
+      const ripple = Math.sin(t * Math.PI * 6 + currentTime * 1.4) * 0.12;
+      const depth = 0.25 + t * 0.9;
+      return depth * maxRadius * (0.65 + Math.abs(osc) * 0.9 + ripple * (0.4 + shimmer));
+    };
+
+    const drawPetal = (flip = false) => {
+      const steps = performanceMode ? 80 : 120;
       context.beginPath();
       context.moveTo(0, 0);
-      for (let i = 0; i <= points; i++) {
-        const t = i / points;
-        const idx = Math.floor(t * (timeLength - 1));
-        const osc = ((timeData[idx] ?? 128) - 128) / 128;
-        const radius = (0.2 + t * 0.85) * maxRadius * (0.5 + Math.abs(osc) * 0.9) * pulse;
-        const angle = wedge * (flip ? 1 - t : t);
-        context.lineTo(Math.cos(angle) * radius, Math.sin(angle) * radius);
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        const radius = radiusAt(t) * pulse;
+        const theta = wedge * (flip ? 1 - t : t);
+        context.lineTo(Math.cos(theta) * radius, Math.sin(theta) * radius);
       }
       context.closePath();
     };
 
     for (let slice = 0; slice < slices; slice++) {
       context.save();
-      context.rotate(slice * wedge + currentTime * (0.2 + energy * 0.5));
-      const hue = (slice * 24 + energy * 260 + currentTime * 80) % 360;
-      const lightness = 55 + energy * 20;
-      context.fillStyle = `hsla(${hue}, 80%, ${lightness}%, 0.22)`;
-      context.strokeStyle = `hsla(${hue}, 90%, ${lightness + 10}%, ${0.5 + energy * 0.3})`;
-      context.lineWidth = 1.5;
-      drawWedge();
+      context.rotate(slice * wedge + currentTime * (0.14 + totalEnergy * 0.45));
+      const hue = (baseHue + slice * 18 + shimmer * 90) % 360;
+      const lightness = 52 + totalEnergy * 22;
+      const saturation = 78 + shimmer * 12;
+      const fill = context.createLinearGradient(0, 0, maxRadius * 0.6, maxRadius);
+      fill.addColorStop(0, `hsla(${hue}, ${saturation}%, ${lightness + 10}%, 0.26)`);
+      fill.addColorStop(1, `hsla(${(hue + 80) % 360}, ${saturation + 8}%, ${lightness}%, 0.18)`);
+      context.fillStyle = fill;
+      context.strokeStyle = `hsla(${(hue + 40) % 360}, 95%, ${lightness + 12}%, ${0.55 +
+        totalEnergy * 0.25})`;
+      context.lineWidth = performanceMode ? 1.3 : 1.8;
+
+      drawPetal();
       context.fill();
       context.stroke();
 
       context.scale(-1, 1);
-      drawWedge(true);
+      drawPetal(true);
       context.fill();
       context.stroke();
       context.restore();
     }
 
-    context.globalCompositeOperation = "lighter";
-    const ringCount = 6;
+    context.globalCompositeOperation = "screen";
+    const laceLayers = performanceMode ? 4 : 6;
+    for (let layer = 0; layer < laceLayers; layer++) {
+      const progress = layer / laceLayers;
+      const radius = (0.2 + progress * 0.85) * maxRadius;
+      const hue = (baseHue + progress * 120 + shimmer * 60) % 360;
+      const spokes = performanceMode ? 24 : 32;
+      const glow = 6 + totalEnergy * 16 + progress * 12;
+      for (let spoke = 0; spoke < spokes; spoke++) {
+        const angle = (spoke / spokes) * Math.PI * 2 + currentTime * 0.25 + layer * 0.15;
+        const variance = Math.sin(angle * 3 + currentTime * 1.3) * (10 + totalEnergy * 40);
+        context.beginPath();
+        context.moveTo(
+          Math.cos(angle) * (radius - 14 - variance * 0.3),
+          Math.sin(angle) * (radius - 14 - variance * 0.3)
+        );
+        context.lineTo(Math.cos(angle) * (radius + variance), Math.sin(angle) * (radius + variance));
+        context.strokeStyle = `hsla(${hue}, 90%, ${50 + progress * 30}%, ${0.18 +
+          totalEnergy * 0.3})`;
+        context.lineWidth = performanceMode ? 1 : 1.4;
+        context.shadowBlur = glow;
+        context.shadowColor = `hsla(${hue}, 90%, 65%, 0.7)`;
+        context.stroke();
+      }
+    }
+
+    context.shadowBlur = 0;
+    const ringCount = performanceMode ? 5 : 8;
     for (let ring = 0; ring < ringCount; ring++) {
       const progress = ring / ringCount;
-      const radius = (0.15 + progress * 0.8) * maxRadius;
-      const hue = (progress * 210 + currentTime * 60 + energy * 300) % 360;
-      const pulseWidth = 1.2 + Math.sin(currentTime * 2 + ring) * 0.6;
+      const radius = (0.12 + progress * 0.86) * maxRadius;
+      const hue = (baseHue + progress * 160 + bassEnergy * 80) % 360;
+      const alpha = 0.16 + totalEnergy * 0.35 + progress * 0.1;
       context.beginPath();
       context.arc(0, 0, radius, 0, Math.PI * 2);
-      context.strokeStyle = `hsla(${hue}, 95%, ${45 + progress * 35}%, ${0.18 + energy * 0.3})`;
-      context.lineWidth = pulseWidth;
+      context.strokeStyle = `hsla(${hue}, 95%, ${45 + progress * 35}%, ${alpha})`;
+      context.lineWidth = 1.4 + Math.sin(currentTime * 2 + ring) * 0.6;
       context.stroke();
     }
 
-    const moteCount = 70;
+    const moteCount = performanceMode ? 80 : 140;
     for (let i = 0; i < moteCount; i++) {
       const t = i / moteCount;
-      const hue = (t * 360 + energy * 240 + currentTime * 40) % 360;
-      const radius = (0.2 + Math.sin(currentTime * 0.8 + i) * 0.1 + t * 0.8) * maxRadius;
-      const theta = wedge * i + currentTime * 0.5 + energy * 3;
+      const hue = (baseHue + t * 260 + shimmer * 80) % 360;
+      const radius = (0.05 + t * 0.95) * maxRadius;
+      const theta = wedge * i * 0.5 + currentTime * (0.6 + totalEnergy * 0.6);
+      const flicker = 0.2 + totalEnergy * 0.6 + Math.sin(currentTime * 3 + i) * 0.12;
       context.beginPath();
-      context.arc(Math.cos(theta) * radius, Math.sin(theta) * radius, 2 + energy * 3, 0, Math.PI * 2);
-      context.fillStyle = `hsla(${hue}, 95%, 70%, 0.25)`;
+      context.arc(Math.cos(theta) * radius, Math.sin(theta) * radius, 1.2 + flicker * 2.6, 0, Math.PI * 2);
+      context.fillStyle = `hsla(${hue}, 95%, 68%, ${0.15 + flicker * 0.35})`;
       context.fill();
     }
 
