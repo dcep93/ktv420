@@ -28,9 +28,8 @@ export default function Player({ record, onClose }: PlayerProps) {
     {}
   );
   const [volumes, setVolumes] = useState<Record<string, number>>({});
-  const [visualizerType, setVisualizerType] = useState<VisualizerType>(
-    "laser-ladders"
-  );
+  const [visualizerType, setVisualizerType] =
+    useState<VisualizerType>("laser-ladders");
 
   const audioRefs = useRef<Record<string, HTMLAudioElement | null>>({});
   const durationMap = useRef<Record<string, number>>({});
@@ -332,11 +331,27 @@ export default function Player({ record, onClose }: PlayerProps) {
           context.lineWidth = 2;
           context.stroke();
 
+          const pastWindowSeconds = 5;
+          const futureWindowSeconds = 25;
+          const totalWindowSeconds = pastWindowSeconds + futureWindowSeconds;
+          const presentX = (pastWindowSeconds / totalWindowSeconds) * width;
+          const futureWidth =
+            (futureWindowSeconds / totalWindowSeconds) * width;
+
           context.fillStyle = "rgba(20, 195, 255, 0.15)";
-          context.fillRect(width * 0.6, 0, width * 0.4, height);
+          context.fillRect(presentX, 0, futureWidth, height);
+
+          context.strokeStyle = "rgba(255, 255, 255, 0.6)";
+          context.lineWidth = 1.5;
+          context.beginPath();
+          context.moveTo(presentX, 0);
+          context.lineTo(presentX, height);
+          context.stroke();
+
           context.fillStyle = "#fff";
           context.font = "11px sans-serif";
-          context.fillText("Peeking into the future", width * 0.62, height - 8);
+          context.fillText("Past 5s", 8, height - 20);
+          context.fillText("Future 25s", presentX + 8, height - 8);
         }
       });
 
@@ -412,25 +427,6 @@ export default function Player({ record, onClose }: PlayerProps) {
     }
 
     audio.volume = value;
-
-    if (!isPlaying) {
-      return;
-    }
-
-    const primaryAudio = primaryTrackId
-      ? audioRefs.current[primaryTrackId]
-      : null;
-    const referenceTime = primaryAudio?.currentTime ?? currentTime;
-
-    if (Math.abs(audio.currentTime - referenceTime) > 0.01) {
-      audio.currentTime = referenceTime;
-    }
-
-    if (audio.paused) {
-      void audio.play().catch((error) => {
-        console.error("Failed to resume audio after volume change", error);
-      });
-    }
   };
 
   const formattedTime = (time: number) => {
