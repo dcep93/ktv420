@@ -1010,25 +1010,22 @@ export default function Player({ record, onClose }: PlayerProps) {
         }
 
         return new Promise<void>((resolve) => {
-          let timeoutId: number | undefined;
+          const handleSeeked = () => {
+            finalize();
+          };
+
+          const timeoutId = window.setTimeout(handleSeeked, 500);
 
           const finalize = () => {
-            if (timeoutId !== undefined) {
-              window.clearTimeout(timeoutId);
-            }
+            window.clearTimeout(timeoutId);
 
             audio.removeEventListener("seeked", handleSeeked);
             audio.removeEventListener("error", handleSeeked);
             resolve();
           };
 
-          const handleSeeked = () => {
-            finalize();
-          };
-
           audio.addEventListener("seeked", handleSeeked);
           audio.addEventListener("error", handleSeeked);
-          timeoutId = window.setTimeout(handleSeeked, 500);
 
           audio.currentTime = targetTime;
         });
@@ -1214,14 +1211,15 @@ export default function Player({ record, onClose }: PlayerProps) {
           Close
         </button>
       </div>
-      <div style={{ marginTop: "0.75rem" }}>
-        <button
-          type="button"
-          onClick={() => void handlePlayPause()}
-          style={{ marginRight: "0.5rem" }}
-        >
-          {isPlaying ? "Pause" : "Play"}
-        </button>
+      <div
+        style={{
+          marginTop: "0.75rem",
+          display: "flex",
+          alignItems: "center",
+          gap: "0.5rem",
+          flexWrap: "wrap",
+        }}
+      >
         <input
           type="range"
           min={0}
@@ -1234,13 +1232,18 @@ export default function Player({ record, onClose }: PlayerProps) {
           onPointerCancel={handleSeekEnd}
           style={{
             width: "60%",
-            marginRight: "0.5rem",
+            minWidth: "240px",
             verticalAlign: "middle",
           }}
         />
-        <span>
+        <span style={{ marginRight: "0.5rem" }}>
           {formattedTime(currentTime)} / {formattedTime(duration)}
         </span>
+      </div>
+      <div style={{ marginTop: "0.5rem" }}>
+        <button type="button" onClick={() => void handlePlayPause()}>
+          {isPlaying ? "Pause" : "Play"}
+        </button>
       </div>
       <div style={{ marginTop: "0.75rem", display: "flex", gap: "0.5rem" }}>
         <label htmlFor="visualizer-type" style={{ fontWeight: 600 }}>
