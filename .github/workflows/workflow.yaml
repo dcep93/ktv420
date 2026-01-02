@@ -42,7 +42,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}
 
-      - run: false
       - run: bash .github/workflows/record_sha.sh
       - run: bash .github/workflows/deploy_to_firebase.sh '${{ secrets.SA_KEY }}'
       - run: bash .github/workflows/deploy_to_cloud_run.sh '${{ secrets.SA_KEY_BILLING }}'
