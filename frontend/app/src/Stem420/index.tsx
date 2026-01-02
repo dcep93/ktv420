@@ -10,7 +10,6 @@ import {
   listBucketObjects,
 } from "./gcsClient";
 import { buildObjectTree } from "./objectTree";
-import sha from "./sha.json";
 import { type GcsObject, type ObjectTreeNode } from "./types";
 
 export default function Stem420() {
@@ -18,9 +17,38 @@ export default function Stem420() {
   const [isUploading, setIsUploading] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isListing, setIsListing] = useState(false);
+  const [rootResponse, setRootResponse] = useState<unknown | null>(null);
   const [objects, setObjects] = useState<GcsObject[]>([]);
   const [objectTree, setObjectTree] = useState<ObjectTreeNode[]>([]);
   const [listError, setListError] = useState<string | null>(null);
+
+  const fetchRootResponse = async () => {
+    const functionName = "fetchRootResponse";
+
+    try {
+      const response = await fetch("https://stem420-854199998954.us-east1.run.app/");
+      const responseText = await response.text();
+      let parsedResponse: unknown = responseText;
+
+      try {
+        parsedResponse = JSON.parse(responseText);
+      } catch {
+        parsedResponse = responseText;
+      }
+
+      setRootResponse(parsedResponse);
+
+      if (!response.ok) {
+        throw new Error(
+          `Request failed with status ${response.status}: ${response.statusText}`
+        );
+      }
+    } catch (error) {
+      const formattedMessage = formatErrorMessage(functionName, error);
+      console.error(formattedMessage, error);
+      setRootResponse({ error: formattedMessage });
+    }
+  };
 
   const isBusy = isUploading || isDeleting;
 
@@ -257,12 +285,23 @@ export default function Stem420() {
   };
 
   useEffect(() => {
+    void fetchRootResponse();
     void refreshObjectList();
   }, []);
 
+  const rootResponseText =
+    rootResponse === null
+      ? "Fetching root response..."
+      : JSON.stringify(rootResponse, null, 2);
+
   return (
     <div>
-      <div>testing123 {JSON.stringify(sha)}</div>
+      <pre
+        onClick={() => void fetchRootResponse()}
+        style={{ cursor: "pointer" }}
+      >
+        {rootResponseText}
+      </pre>
       <ObjectTreeView
         isBusy={isBusy}
         isListing={isListing}

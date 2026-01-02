@@ -148,7 +148,7 @@ def _upload_directory(client: storage.Client, directory: Path, gcs_path: str) ->
 
 
 def _write_metadata(output_dir: Path, duration_s: float) -> Path:
-    metadata_path = output_dir / "metadata.json"
+    metadata_path = output_dir / "_metadata.json"
     metadata = {"duration_s": duration_s}
     output_dir.mkdir(parents=True, exist_ok=True)
     metadata_path.write_text(json.dumps(metadata))
