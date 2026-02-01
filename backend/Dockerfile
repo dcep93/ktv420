@@ -25,6 +25,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ffmpeg \
+        make \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /opt/venv /opt/venv
