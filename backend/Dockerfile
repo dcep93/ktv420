@@ -13,6 +13,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 COPY requirements.txt ./
 RUN pip install --no-cache-dir --no-compile -r requirements.txt
+RUN python -m pip uninstall -y pip setuptools wheel
 
 FROM python:3.11-slim
 
