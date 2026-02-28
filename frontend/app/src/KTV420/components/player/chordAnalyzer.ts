@@ -4,6 +4,8 @@ export type ChordSnapshot = {
   confidence: number
 }
 
+const REFERENCE_OCTAVE = 4
+
 type ChordQuality =
   | "major"
   | "minor"
@@ -381,11 +383,18 @@ const formatChordLabel = (root: number, quality: ChordQuality): string => {
   }
 }
 
+const formatTonalCenter = (root: number): string => {
+  const note = NOTE_LABELS[root] ?? "?"
+  const midi = (REFERENCE_OCTAVE + 1) * 12 + root
+  const frequency = 440 * Math.pow(2, (midi - 69) / 12)
+  return `${note}${REFERENCE_OCTAVE} ${frequency.toFixed(2)}Hz`
+}
+
 const pickBestChord = (
   pitchEnergies: number[],
   bassEnergies: number[],
   minimumConfidence: number
-): { chord: string; confidence: number } => {
+): { chord: string; confidence: number; tonalCenter: string | null } => {
   const bassAverage =
     bassEnergies.reduce((sum, value) => sum + value, 0) / bassEnergies.length
   const clarity = computePitchClarity(pitchEnergies)
@@ -416,10 +425,14 @@ const pickBestChord = (
   }
 
   if (best.confidence < dynamicMinimum) {
-    return { chord: "Unclear", confidence: best.confidence }
+    return { chord: "Unclear", confidence: best.confidence, tonalCenter: null }
   }
 
-  return { chord: best.chord, confidence: best.confidence }
+  const rootLabel = best.chord.match(/^[A-G]#?/)
+  const root = NOTE_LABELS.findIndex((note) => note === rootLabel?.[0])
+  const tonalCenter = root >= 0 ? formatTonalCenter(root) : null
+
+  return { chord: best.chord, confidence: best.confidence, tonalCenter }
 }
 
 const yieldToBrowser = () =>
@@ -535,7 +548,7 @@ export const analyzeChordTimeline = async (
       windowed,
       sampleRate
     )
-    const { chord, confidence } = pickBestChord(
+    const { chord, confidence, tonalCenter } = pickBestChord(
       energies,
       bassEnergies,
       minimumConfidence
@@ -543,7 +556,7 @@ export const analyzeChordTimeline = async (
 
     frames.push({
       time: start / sampleRate,
-      chord,
+      chord: tonalCenter ? `${chord} (${tonalCenter})` : chord,
       confidence,
     })
 
