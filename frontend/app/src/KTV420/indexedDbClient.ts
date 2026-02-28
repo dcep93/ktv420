@@ -24,6 +24,7 @@ export type CachedChordAnalysisRecord = {
   md5: string;
   timeline: CachedChordSnapshot[];
   analyzedAt: number;
+  analyzerVersion?: number;
 };
 
 function openDatabase(): Promise<IDBDatabase> {
@@ -136,13 +137,15 @@ export async function clearCachedOutputs(): Promise<void> {
 
 export async function cacheChordTimeline(
   md5: string,
-  timeline: CachedChordSnapshot[]
+  timeline: CachedChordSnapshot[],
+  analyzerVersion?: number
 ): Promise<void> {
   await runTransaction(CHORD_STORE_NAME, "readwrite", (store) => {
     const record: CachedChordAnalysisRecord = {
       md5,
       timeline,
       analyzedAt: Date.now(),
+      analyzerVersion,
     };
     store.put(record);
   });

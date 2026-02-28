@@ -23,6 +23,7 @@ import {
 } from "./player/audioEffects";
 import {
   analyzeChordTimeline,
+  CHORD_ANALYZER_VERSION,
   type ChordSnapshot,
 } from "./player/chordAnalyzer";
 import { TrackRow } from "./player/TrackRow";
@@ -789,7 +790,7 @@ export default function Player({ record, onClose }: PlayerProps) {
       try {
         const cachedRecord = await getCachedChordTimeline(record.md5);
 
-        if (cachedRecord) {
+        if (cachedRecord?.analyzerVersion === CHORD_ANALYZER_VERSION) {
           const cachedTimeline = cachedRecord.timeline ?? [];
           setChordTimeline(cachedTimeline);
           setChordStatus(
@@ -821,7 +822,11 @@ export default function Player({ record, onClose }: PlayerProps) {
         );
 
         try {
-          await cacheChordTimeline(record.md5, timeline);
+          await cacheChordTimeline(
+            record.md5,
+            timeline,
+            CHORD_ANALYZER_VERSION
+          );
         } catch (cacheError) {
           console.warn("Failed to cache chord timeline", cacheError);
         }

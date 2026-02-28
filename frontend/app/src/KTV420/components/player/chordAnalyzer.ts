@@ -4,6 +4,8 @@ export type ChordSnapshot = {
   confidence: number
 }
 
+export const CHORD_ANALYZER_VERSION = 4
+
 const REFERENCE_OCTAVE = 4
 const STANDARD_A4_FREQUENCY = 440
 
@@ -70,7 +72,7 @@ const MAX_MIDI_NOTE = 79 // G5
 const HARMONIC_WEIGHTS = [1, 0.6, 0.34, 0.2]
 const TUNING_SCAN_MIN_CENTS = -70
 const TUNING_SCAN_MAX_CENTS = 70
-const TUNING_FINE_STEP_CENTS = 2
+const TUNING_FINE_STEP_CENTS = 1
 const MIN_REFERENCE_A4 = 415
 const MAX_REFERENCE_A4 = 466
 const EXTENSION_INTERVALS: Record<ChordQuality, number | null> = {
@@ -185,6 +187,10 @@ const goertzelMagnitude = (
   sampleRate: number,
   targetFrequency: number
 ): number => {
+  if (targetFrequency <= 0 || targetFrequency >= sampleRate / 2) {
+    return 0
+  }
+
   // Lightweight spectral measurement specialized for a single target frequency.
   const normalizedFrequency = targetFrequency / sampleRate
   const coefficient = 2 * Math.cos(2 * Math.PI * normalizedFrequency)
@@ -203,29 +209,6 @@ const goertzelMagnitude = (
   const imag = q2 * Math.sin(2 * Math.PI * normalizedFrequency)
 
   return Math.sqrt(real * real + imag * imag)
-}
-
-const weightedMedian = (
-  values: Array<{ value: number; weight: number }>
-): number | null => {
-  if (!values.length) {
-    return null
-  }
-
-  const sorted = [...values].sort((a, b) => a.value - b.value)
-  const totalWeight =
-    sorted.reduce((sum, entry) => sum + Math.max(0, entry.weight), 0) + 1e-6
-  const midpoint = totalWeight / 2
-  let running = 0
-
-  for (const entry of sorted) {
-    running += Math.max(0, entry.weight)
-    if (running >= midpoint) {
-      return entry.value
-    }
-  }
-
-  return sorted[sorted.length - 1]?.value ?? null
 }
 
 const normalizePitchEnergies = (energies: number[], smoothing = 0.18): number[] => {
@@ -249,6 +232,29 @@ const computePitchClarity = (energies: number[]): number => {
   const sorted = [...energies].sort((a, b) => b - a)
   const topEnergy = (sorted[0] ?? 0) + (sorted[1] ?? 0) + (sorted[2] ?? 0)
   return topEnergy / total
+}
+
+const weightedMedian = (
+  values: Array<{ value: number; weight: number }>
+): number | null => {
+  if (!values.length) {
+    return null
+  }
+
+  const sorted = [...values].sort((a, b) => a.value - b.value)
+  const totalWeight =
+    sorted.reduce((sum, entry) => sum + Math.max(0, entry.weight), 0) + 1e-6
+  const midpoint = totalWeight / 2
+  let running = 0
+
+  for (const entry of sorted) {
+    running += Math.max(0, entry.weight)
+    if (running >= midpoint) {
+      return entry.value
+    }
+  }
+
+  return sorted[sorted.length - 1]?.value ?? null
 }
 
 const computePitchClassEnergies = (
@@ -422,16 +428,17 @@ const estimateReferenceTuning = (
     return STANDARD_A4_FREQUENCY
   }
 
-  const frameCount = 8
+  const frameCount = 18
   const span = Math.max(1, samples.length - frameSize)
-  const candidateFrames: Float32Array[] = []
+  const candidateFrames: Array<{ rms: number; frame: Float32Array }> = []
 
   for (let frameIndex = 0; frameIndex < frameCount; frameIndex++) {
     const start = Math.floor((span * frameIndex) / Math.max(1, frameCount - 1))
     const frame = samples.subarray(start, start + frameSize)
     const windowed = applyHannWindow(frame)
-    if (computeRms(windowed) > 0.01) {
-      candidateFrames.push(windowed)
+    const rms = computeRms(windowed)
+    if (rms > 0.01) {
+      candidateFrames.push({ rms, frame: windowed })
     }
   }
 
@@ -439,6 +446,7 @@ const estimateReferenceTuning = (
     return STANDARD_A4_FREQUENCY
   }
 
+  const rankedFrames = [...candidateFrames].sort((a, b) => b.rms - a.rms).slice(0, 12)
   const midiNotes: number[] = []
   for (let midi = 40; midi <= 76; midi += 1) {
     midiNotes.push(midi)
@@ -446,50 +454,28 @@ const estimateReferenceTuning = (
 
   const centsSamples: Array<{ value: number; weight: number }> = []
 
-  candidateFrames.forEach((frame) => {
-    const coarseCandidates = midiNotes
-      .map((midi) => {
-        const standardFundamental =
-          STANDARD_A4_FREQUENCY * Math.pow(2, (midi - 69) / 12)
-        if (standardFundamental >= sampleRate / 2) {
-          return null
-        }
+  rankedFrames.forEach(({ frame, rms }) => {
+    const frameCandidates: Array<{ cents: number; weight: number }> = []
 
-        const harmonic2 = standardFundamental * 2
-        const baseMagnitude =
-          goertzelMagnitude(frame, sampleRate, standardFundamental) +
-          (harmonic2 < sampleRate / 2
-            ? goertzelMagnitude(frame, sampleRate, harmonic2) * 0.4
-            : 0)
-
-        return { midi, baseMagnitude }
-      })
-      .filter((entry): entry is { midi: number; baseMagnitude: number } => Boolean(entry))
-      .sort((a, b) => b.baseMagnitude - a.baseMagnitude)
-      .slice(0, 10)
-
-    coarseCandidates.forEach(({ midi, baseMagnitude }) => {
+    midiNotes.forEach((midi) => {
       let bestCents = 0
-      let bestMagnitude = -Infinity
+      let bestMagnitude = 0
 
       for (
         let cents = TUNING_SCAN_MIN_CENTS;
         cents <= TUNING_SCAN_MAX_CENTS;
         cents += TUNING_FINE_STEP_CENTS
       ) {
-        const tuningScale = Math.pow(2, cents / 1200)
         const tunedFundamental =
-          STANDARD_A4_FREQUENCY * Math.pow(2, (midi - 69) / 12) * tuningScale
-        if (tunedFundamental >= sampleRate / 2) {
-          continue
-        }
-
-        const tunedHarmonic2 = tunedFundamental * 2
+          STANDARD_A4_FREQUENCY *
+          Math.pow(2, (midi - 69) / 12) *
+          Math.pow(2, cents / 1200)
+        const harmonic2 = tunedFundamental * 2
+        const harmonic3 = tunedFundamental * 3
         const magnitude =
           goertzelMagnitude(frame, sampleRate, tunedFundamental) +
-          (tunedHarmonic2 < sampleRate / 2
-            ? goertzelMagnitude(frame, sampleRate, tunedHarmonic2) * 0.4
-            : 0)
+          goertzelMagnitude(frame, sampleRate, harmonic2) * 0.45 +
+          goertzelMagnitude(frame, sampleRate, harmonic3) * 0.25
 
         if (magnitude > bestMagnitude) {
           bestMagnitude = magnitude
@@ -498,20 +484,30 @@ const estimateReferenceTuning = (
       }
 
       if (bestMagnitude > 0) {
-        centsSamples.push({
-          value: bestCents,
-          weight: Math.log1p(bestMagnitude) + Math.log1p(baseMagnitude),
+        frameCandidates.push({
+          cents: bestCents,
+          weight: Math.log1p(bestMagnitude),
         })
       }
     })
+
+    frameCandidates
+      .sort((a, b) => b.weight - a.weight)
+      .slice(0, 10)
+      .forEach((candidate) => {
+        centsSamples.push({
+          value: candidate.cents,
+          weight: candidate.weight * (0.6 + rms * 4),
+        })
+      })
   })
 
-  const medianCents = weightedMedian(centsSamples)
-  if (medianCents === null) {
+  const tunedCents = weightedMedian(centsSamples)
+  if (tunedCents === null) {
     return STANDARD_A4_FREQUENCY
   }
 
-  const referenceA4 = STANDARD_A4_FREQUENCY * Math.pow(2, medianCents / 1200)
+  const referenceA4 = STANDARD_A4_FREQUENCY * Math.pow(2, tunedCents / 1200)
   return Math.min(MAX_REFERENCE_A4, Math.max(MIN_REFERENCE_A4, referenceA4))
 }
 
