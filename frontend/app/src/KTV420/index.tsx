@@ -326,6 +326,33 @@ export default function Stem420() {
     });
   };
 
+  const handleDeleteFolder = async (node: ObjectTreeNode) => {
+    const functionName = "handleDeleteFolder";
+    const normalizedPath = node.path.endsWith("/")
+      ? node.path
+      : `${node.path}/`;
+
+    await withAsyncFlag(setIsDeleting, async () => {
+      try {
+        const deletedCount = await deleteObjectsWithPrefix(normalizedPath);
+
+        await refreshObjectList();
+        setActiveRecord(undefined);
+
+        const deletedMessage =
+          deletedCount > 0
+            ? `Deleted ${deletedCount} object(s) from ${normalizedPath}.`
+            : `No objects found under ${normalizedPath}.`;
+
+        alert(deletedMessage);
+      } catch (error) {
+        const formattedMessage = formatErrorMessage(functionName, error);
+        console.error(formattedMessage, error);
+        alert(formattedMessage);
+      }
+    });
+  };
+
   const handleFolderClick = async (node: ObjectTreeNode) => {
     const functionName = "handleFolderClick";
 
@@ -358,6 +385,15 @@ export default function Stem420() {
 
     if (!md5) {
       console.error(formatErrorMessage(functionName, "Unable to locate MD5"));
+      return;
+    }
+
+    const shouldDeleteMd5Folder = window.confirm(
+      `Delete all files under ${node.path}/?\n\nSelect “Cancel” to keep the folder and cache files locally instead.`
+    );
+
+    if (shouldDeleteMd5Folder) {
+      await handleDeleteFolder(node);
       return;
     }
 
@@ -468,8 +504,8 @@ export default function Stem420() {
             folder to delete its files.
           </li>
           <li>
-            Select an MD5 folder to cache outputs locally and preview them in
-            the player.
+            Select an MD5 folder to delete it after confirmation, or cancel to
+            cache outputs locally and preview them in the player.
           </li>
           <li>
             Use “Clear cache” to remove locally stored outputs without touching
