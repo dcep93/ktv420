@@ -68,6 +68,11 @@ const CHORD_TEMPLATES: Array<{
 const MIN_MIDI_NOTE = 36 // C2
 const MAX_MIDI_NOTE = 79 // G5
 const HARMONIC_WEIGHTS = [1, 0.6, 0.34, 0.2]
+const TUNING_SCAN_MIN_CENTS = -70
+const TUNING_SCAN_MAX_CENTS = 70
+const TUNING_FINE_STEP_CENTS = 2
+const MIN_REFERENCE_A4 = 415
+const MAX_REFERENCE_A4 = 466
 const EXTENSION_INTERVALS: Record<ChordQuality, number | null> = {
   major: null,
   minor: null,
@@ -198,6 +203,29 @@ const goertzelMagnitude = (
   const imag = q2 * Math.sin(2 * Math.PI * normalizedFrequency)
 
   return Math.sqrt(real * real + imag * imag)
+}
+
+const weightedMedian = (
+  values: Array<{ value: number; weight: number }>
+): number | null => {
+  if (!values.length) {
+    return null
+  }
+
+  const sorted = [...values].sort((a, b) => a.value - b.value)
+  const totalWeight =
+    sorted.reduce((sum, entry) => sum + Math.max(0, entry.weight), 0) + 1e-6
+  const midpoint = totalWeight / 2
+  let running = 0
+
+  for (const entry of sorted) {
+    running += Math.max(0, entry.weight)
+    if (running >= midpoint) {
+      return entry.value
+    }
+  }
+
+  return sorted[sorted.length - 1]?.value ?? null
 }
 
 const normalizePitchEnergies = (energies: number[], smoothing = 0.18): number[] => {
@@ -416,38 +444,75 @@ const estimateReferenceTuning = (
     midiNotes.push(midi)
   }
 
-  let bestA4 = STANDARD_A4_FREQUENCY
-  let bestScore = -Infinity
+  const centsSamples: Array<{ value: number; weight: number }> = []
 
-  for (let cents = -50; cents <= 50; cents += 1) {
-    const candidateA4 = STANDARD_A4_FREQUENCY * Math.pow(2, cents / 1200)
-    let score = 0
-
-    candidateFrames.forEach((frame) => {
-      midiNotes.forEach((midi) => {
-        const fundamental = candidateA4 * Math.pow(2, (midi - 69) / 12)
-        if (fundamental >= sampleRate / 2) {
-          return
+  candidateFrames.forEach((frame) => {
+    const coarseCandidates = midiNotes
+      .map((midi) => {
+        const standardFundamental =
+          STANDARD_A4_FREQUENCY * Math.pow(2, (midi - 69) / 12)
+        if (standardFundamental >= sampleRate / 2) {
+          return null
         }
 
-        const harmonic2 = fundamental * 2
-        const magnitude =
-          goertzelMagnitude(frame, sampleRate, fundamental) +
+        const harmonic2 = standardFundamental * 2
+        const baseMagnitude =
+          goertzelMagnitude(frame, sampleRate, standardFundamental) +
           (harmonic2 < sampleRate / 2
-            ? goertzelMagnitude(frame, sampleRate, harmonic2) * 0.45
+            ? goertzelMagnitude(frame, sampleRate, harmonic2) * 0.4
             : 0)
-        const tilt = 1 / Math.sqrt(Math.max(1, fundamental / 55))
-        score += Math.log1p(magnitude) * tilt
-      })
-    })
 
-    if (score > bestScore) {
-      bestScore = score
-      bestA4 = candidateA4
-    }
+        return { midi, baseMagnitude }
+      })
+      .filter((entry): entry is { midi: number; baseMagnitude: number } => Boolean(entry))
+      .sort((a, b) => b.baseMagnitude - a.baseMagnitude)
+      .slice(0, 10)
+
+    coarseCandidates.forEach(({ midi, baseMagnitude }) => {
+      let bestCents = 0
+      let bestMagnitude = -Infinity
+
+      for (
+        let cents = TUNING_SCAN_MIN_CENTS;
+        cents <= TUNING_SCAN_MAX_CENTS;
+        cents += TUNING_FINE_STEP_CENTS
+      ) {
+        const tuningScale = Math.pow(2, cents / 1200)
+        const tunedFundamental =
+          STANDARD_A4_FREQUENCY * Math.pow(2, (midi - 69) / 12) * tuningScale
+        if (tunedFundamental >= sampleRate / 2) {
+          continue
+        }
+
+        const tunedHarmonic2 = tunedFundamental * 2
+        const magnitude =
+          goertzelMagnitude(frame, sampleRate, tunedFundamental) +
+          (tunedHarmonic2 < sampleRate / 2
+            ? goertzelMagnitude(frame, sampleRate, tunedHarmonic2) * 0.4
+            : 0)
+
+        if (magnitude > bestMagnitude) {
+          bestMagnitude = magnitude
+          bestCents = cents
+        }
+      }
+
+      if (bestMagnitude > 0) {
+        centsSamples.push({
+          value: bestCents,
+          weight: Math.log1p(bestMagnitude) + Math.log1p(baseMagnitude),
+        })
+      }
+    })
+  })
+
+  const medianCents = weightedMedian(centsSamples)
+  if (medianCents === null) {
+    return STANDARD_A4_FREQUENCY
   }
 
-  return bestA4
+  const referenceA4 = STANDARD_A4_FREQUENCY * Math.pow(2, medianCents / 1200)
+  return Math.min(MAX_REFERENCE_A4, Math.max(MIN_REFERENCE_A4, referenceA4))
 }
 
 const formatTonalCenter = (referenceA4: number): string => {
@@ -494,9 +559,7 @@ const pickBestChord = (
     return { chord: "Unclear", confidence: best.confidence, tonalCenter: null }
   }
 
-  const rootLabel = best.chord.match(/^[A-G]#?/)
-  const root = NOTE_LABELS.findIndex((note) => note === rootLabel?.[0])
-  const tonalCenter = root >= 0 ? formatTonalCenter(referenceA4) : null
+  const tonalCenter = formatTonalCenter(referenceA4)
 
   return { chord: best.chord, confidence: best.confidence, tonalCenter }
 }
