@@ -5,6 +5,7 @@ export type ChordSnapshot = {
 }
 
 const REFERENCE_OCTAVE = 4
+const STANDARD_A4_FREQUENCY = 440
 
 type ChordQuality =
   | "major"
@@ -83,17 +84,17 @@ const EXTENSION_INTERVALS: Record<ChordQuality, number | null> = {
   unknown: null,
 }
 
-const harmonicFrequenciesByPitchClass = (() => {
+const buildHarmonicFrequenciesByPitchClass = (referenceA4: number): number[][] => {
   const pitchClassBuckets: number[][] = Array.from({ length: 12 }, () => [])
 
   for (let midi = MIN_MIDI_NOTE; midi <= MAX_MIDI_NOTE; midi++) {
     const pitchClass = midi % 12
-    const frequency = 440 * Math.pow(2, (midi - 69) / 12)
+    const frequency = referenceA4 * Math.pow(2, (midi - 69) / 12)
     pitchClassBuckets[pitchClass]?.push(frequency)
   }
 
   return pitchClassBuckets
-})()
+}
 
 const createMonoBuffer = (buffer: AudioBuffer): Float32Array => {
   const { length, numberOfChannels } = buffer
@@ -224,7 +225,8 @@ const computePitchClarity = (energies: number[]): number => {
 
 const computePitchClassEnergies = (
   frame: Float32Array,
-  sampleRate: number
+  sampleRate: number,
+  harmonicFrequenciesByPitchClass: number[][]
 ): { energies: number[]; bassEnergies: number[] } => {
   const energies: number[] = []
   const bassEnergies: number[] = []
@@ -383,17 +385,81 @@ const formatChordLabel = (root: number, quality: ChordQuality): string => {
   }
 }
 
-const formatTonalCenter = (): string => {
-  // Keep frequency reporting anchored to the A440 reference regardless of chord root.
-  const a4Midi = 69
-  const frequency = 440 * Math.pow(2, (a4Midi - 69) / 12)
+const estimateReferenceTuning = (
+  samples: Float32Array,
+  sampleRate: number
+): number => {
+  const frameSize = Math.min(4096, samples.length)
+  if (frameSize < 1024) {
+    return STANDARD_A4_FREQUENCY
+  }
+
+  const frameCount = 8
+  const span = Math.max(1, samples.length - frameSize)
+  const candidateFrames: Float32Array[] = []
+
+  for (let frameIndex = 0; frameIndex < frameCount; frameIndex++) {
+    const start = Math.floor((span * frameIndex) / Math.max(1, frameCount - 1))
+    const frame = samples.subarray(start, start + frameSize)
+    const windowed = applyHannWindow(frame)
+    if (computeRms(windowed) > 0.01) {
+      candidateFrames.push(windowed)
+    }
+  }
+
+  if (!candidateFrames.length) {
+    return STANDARD_A4_FREQUENCY
+  }
+
+  const midiNotes: number[] = []
+  for (let midi = 40; midi <= 76; midi += 1) {
+    midiNotes.push(midi)
+  }
+
+  let bestA4 = STANDARD_A4_FREQUENCY
+  let bestScore = -Infinity
+
+  for (let cents = -50; cents <= 50; cents += 1) {
+    const candidateA4 = STANDARD_A4_FREQUENCY * Math.pow(2, cents / 1200)
+    let score = 0
+
+    candidateFrames.forEach((frame) => {
+      midiNotes.forEach((midi) => {
+        const fundamental = candidateA4 * Math.pow(2, (midi - 69) / 12)
+        if (fundamental >= sampleRate / 2) {
+          return
+        }
+
+        const harmonic2 = fundamental * 2
+        const magnitude =
+          goertzelMagnitude(frame, sampleRate, fundamental) +
+          (harmonic2 < sampleRate / 2
+            ? goertzelMagnitude(frame, sampleRate, harmonic2) * 0.45
+            : 0)
+        const tilt = 1 / Math.sqrt(Math.max(1, fundamental / 55))
+        score += Math.log1p(magnitude) * tilt
+      })
+    })
+
+    if (score > bestScore) {
+      bestScore = score
+      bestA4 = candidateA4
+    }
+  }
+
+  return bestA4
+}
+
+const formatTonalCenter = (referenceA4: number): string => {
+  const frequency = referenceA4
   return `A${REFERENCE_OCTAVE} ${frequency.toFixed(2)}Hz`
 }
 
 const pickBestChord = (
   pitchEnergies: number[],
   bassEnergies: number[],
-  minimumConfidence: number
+  minimumConfidence: number,
+  referenceA4: number
 ): { chord: string; confidence: number; tonalCenter: string | null } => {
   const bassAverage =
     bassEnergies.reduce((sum, value) => sum + value, 0) / bassEnergies.length
@@ -430,7 +496,7 @@ const pickBestChord = (
 
   const rootLabel = best.chord.match(/^[A-G]#?/)
   const root = NOTE_LABELS.findIndex((note) => note === rootLabel?.[0])
-  const tonalCenter = root >= 0 ? formatTonalCenter() : null
+  const tonalCenter = root >= 0 ? formatTonalCenter(referenceA4) : null
 
   return { chord: best.chord, confidence: best.confidence, tonalCenter }
 }
@@ -521,6 +587,10 @@ export const analyzeChordTimeline = async (
   )
   const windowSize = Math.max(1, Math.floor(sampleRate * windowSeconds))
   const hopSize = Math.max(1, Math.floor(sampleRate * hopSeconds))
+  const referenceA4 = estimateReferenceTuning(samples, sampleRate)
+  const harmonicFrequenciesByPitchClass = buildHarmonicFrequenciesByPitchClass(
+    referenceA4
+  )
 
   const frames: ChordSnapshot[] = []
   let frameIndex = 0
@@ -546,12 +616,14 @@ export const analyzeChordTimeline = async (
 
     const { energies, bassEnergies } = computePitchClassEnergies(
       windowed,
-      sampleRate
+      sampleRate,
+      harmonicFrequenciesByPitchClass
     )
     const { chord, confidence, tonalCenter } = pickBestChord(
       energies,
       bassEnergies,
-      minimumConfidence
+      minimumConfidence,
+      referenceA4
     )
 
     frames.push({
