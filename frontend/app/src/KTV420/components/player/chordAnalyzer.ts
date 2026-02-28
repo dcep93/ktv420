@@ -383,11 +383,11 @@ const formatChordLabel = (root: number, quality: ChordQuality): string => {
   }
 }
 
-const formatTonalCenter = (root: number): string => {
-  const note = NOTE_LABELS[root] ?? "?"
-  const midi = (REFERENCE_OCTAVE + 1) * 12 + root
-  const frequency = 440 * Math.pow(2, (midi - 69) / 12)
-  return `${note}${REFERENCE_OCTAVE} ${frequency.toFixed(2)}Hz`
+const formatTonalCenter = (): string => {
+  // Keep frequency reporting anchored to the A440 reference regardless of chord root.
+  const a4Midi = 69
+  const frequency = 440 * Math.pow(2, (a4Midi - 69) / 12)
+  return `A${REFERENCE_OCTAVE} ${frequency.toFixed(2)}Hz`
 }
 
 const pickBestChord = (
@@ -430,7 +430,7 @@ const pickBestChord = (
 
   const rootLabel = best.chord.match(/^[A-G]#?/)
   const root = NOTE_LABELS.findIndex((note) => note === rootLabel?.[0])
-  const tonalCenter = root >= 0 ? formatTonalCenter(root) : null
+  const tonalCenter = root >= 0 ? formatTonalCenter() : null
 
   return { chord: best.chord, confidence: best.confidence, tonalCenter }
 }
