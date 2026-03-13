@@ -77,5 +77,5 @@ gcloud beta run deploy "stem420" \
   --timeout 300 \
   --liveness-probe httpGet.path=/health
 
-# # gsutil -m rm -r "gs://us.artifacts.${GOOGLE_CLOUD_PROJECT}.appspot.com"
+gsutil -m rm -r "gs://us.artifacts.${GOOGLE_CLOUD_PROJECT}.appspot.com"
 # # gcloud beta app repair
