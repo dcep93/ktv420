@@ -35,6 +35,32 @@ set -euo pipefail
 #   --member="allUsers" \
 #   --role="roles/storage.objectAdmin"
 
+# cat > policy.json <<'EOF'
+# [
+#   {
+#     "name": "delete-old",
+#     "action": { "type": "Delete" },
+#     "condition": {
+#       "tagState": "any",
+#       "olderThan": "1s"
+#     }
+#   },
+#   {
+#     "name": "keep-last-2",
+#     "action": { "type": "Keep" },
+#     "mostRecentVersions": {
+#       "keepCount": 2
+#     }
+#   }
+# ]
+# EOF
+
+# gcloud artifacts repositories set-cleanup-policies us.gcr.io \
+#   --project="${GOOGLE_CLOUD_PROJECT}" \
+#   --location=us \
+#   --policy=policy.json \
+#   --no-dry-run
+
 SA_KEY="$1"
 
 REGION="us-east1"
@@ -76,13 +102,6 @@ gcloud beta run deploy "stem420" \
   --max-instances 1 \
   --timeout 300 \
   --liveness-probe httpGet.path=/health
-
-IMG_BASE="${IMG_URL%:*}"
-
-gcloud artifacts docker images delete \
-  "${IMG_BASE}" \
-  --delete-tags \
-  --quiet
 
 # gsutil -m rm -r "gs://us.artifacts.${GOOGLE_CLOUD_PROJECT}.appspot.com"
 # # gcloud beta app repair
