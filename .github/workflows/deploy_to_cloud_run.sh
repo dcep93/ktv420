@@ -35,32 +35,6 @@ set -euo pipefail
 #   --member="allUsers" \
 #   --role="roles/storage.objectAdmin"
 
-# cat > policy.json <<'EOF'
-# [
-#   {
-#     "name": "delete-old",
-#     "action": { "type": "Delete" },
-#     "condition": {
-#       "tagState": "any",
-#       "olderThan": "1s"
-#     }
-#   },
-#   {
-#     "name": "keep-last-2",
-#     "action": { "type": "Keep" },
-#     "mostRecentVersions": {
-#       "keepCount": 2
-#     }
-#   }
-# ]
-# EOF
-
-# gcloud artifacts repositories set-cleanup-policies us.gcr.io \
-#   --project="${GOOGLE_CLOUD_PROJECT}" \
-#   --location=us \
-#   --policy=policy.json \
-#   --no-dry-run
-
 SA_KEY="$1"
 
 REGION="us-east1"
@@ -84,7 +58,8 @@ echo 'ENTRYPOINT [ "make", "server" ]' >>Dockerfile
 
 gcloud config set builds/use_kaniko True
 gcloud config set builds/kaniko_cache_ttl 8760
-IMG_URL=us.gcr.io/"${GOOGLE_CLOUD_PROJECT}"/stem420/backend:"$(git log -1 --format=format:%H)"
+IMG_PATH=us.gcr.io/"${GOOGLE_CLOUD_PROJECT}"/stem420/backend
+IMG_URL="$IMG_PATH":"$(git log -1 --format=format:%H)"
 gcloud builds submit --project "${GOOGLE_CLOUD_PROJECT}" --tag "${IMG_URL}"
 
 echo deploy_to_cloud_run $GOOGLE_CLOUD_PROJECT
@@ -102,6 +77,20 @@ gcloud beta run deploy "stem420" \
   --max-instances 1 \
   --timeout 300 \
   --liveness-probe httpGet.path=/health
+
+
+gcloud artifacts docker images list \
+  "$IMG_PATH" \
+  --include-tags \
+  --sort-by='~UPDATE_TIME' \
+  --format='get(DIGEST)' \
+| tail -n +2 \
+| xargs -r -I{} \
+  gcloud artifacts docker images delete \
+    "$IMG_PATH"@{} \
+    --delete-tags \
+    --quiet
+
 
 # gsutil -m rm -r "gs://us.artifacts.${GOOGLE_CLOUD_PROJECT}.appspot.com"
 # # gcloud beta app repair
