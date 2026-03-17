@@ -79,18 +79,14 @@ gcloud beta run deploy "stem420" \
   --liveness-probe httpGet.path=/health
 
 
-gcloud artifacts docker images list \
-  "$IMG_PATH" \
-  --include-tags \
-  --sort-by='~UPDATE_TIME' \
-  --format='get(DIGEST)' \
-| tail -n +2 \
+gcloud container images list-tags "$IMG_PATH" \
+  --sort-by=TIMESTAMP \
+  --format='get(digest)' \
+| head -n -1 \
 | xargs -r -I{} \
-  gcloud artifacts docker images delete \
-    "$IMG_PATH"@{} \
-    --delete-tags \
+  gcloud container images delete \
+    "$IMG_PATH@{}" \
     --quiet
-
 
 # gsutil -m rm -r "gs://us.artifacts.${GOOGLE_CLOUD_PROJECT}.appspot.com"
 # # gcloud beta app repair
