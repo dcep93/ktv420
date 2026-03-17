@@ -86,7 +86,8 @@ gcloud container images list-tags "$IMG_PATH" \
 | xargs -r -I{} \
   gcloud container images delete \
     "$IMG_PATH@{}" \
-    --quiet
+    --quiet \
+    --force-delete-tags
 
 # gsutil -m rm -r "gs://us.artifacts.${GOOGLE_CLOUD_PROJECT}.appspot.com"
 # # gcloud beta app repair
