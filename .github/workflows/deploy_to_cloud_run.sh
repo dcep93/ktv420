@@ -57,7 +57,7 @@ ARGS=mypy make dockerexecnotty
 echo 'ENTRYPOINT [ "make", "server" ]' >>Dockerfile
 
 gcloud config set builds/use_kaniko True
-gcloud config set builds/kaniko_cache_ttl 8760
+gcloud config set builds/kaniko_cache_ttl 24
 IMG_PATH=us.gcr.io/"${GOOGLE_CLOUD_PROJECT}"/stem420/backend
 IMG_URL="$IMG_PATH":"$(git log -1 --format=format:%H)"
 gcloud builds submit --project "${GOOGLE_CLOUD_PROJECT}" --tag "${IMG_URL}"
