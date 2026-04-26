@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <g transform="translate(32 35) scale(1.22 1.22)">
+    <text
+      x="0"
+      y="0"
+      fill="#ff7bc3"
+      font-family="'Comic Sans MS', 'Comic Sans', cursive"
+      font-size="58"
+      font-weight="400"
+      stroke="#000"
+      stroke-width="3"
+      paint-order="stroke fill"
+      text-anchor="middle"
+      dominant-baseline="middle"
+    >
+      k
+    </text>
+  </g>
+</svg>
