@@ -1,0 +1,592 @@
+(() => {
+  const INSTALL_MARKER = "__ktv420_page_hooks_installed__";
+  const SOURCE = "ktv420_page_hooks";
+
+  if (window[INSTALL_MARKER]) {
+    return;
+  }
+  window[INSTALL_MARKER] = true;
+
+  const post = (event, payload) => {
+    window.postMessage({ source: SOURCE, event, payload }, window.location.origin);
+  };
+
+  const isSpotifyStateUrl = (url) => {
+    const text = String(url || "").toLowerCase();
+    if (!text.includes("spotify")) {
+      return false;
+    }
+
+    return [
+      "connect-state",
+      "/connect/",
+      "player_state",
+      "player-state",
+      "/player",
+      "playback",
+      "currently-playing"
+    ].some((needle) => text.includes(needle));
+  };
+
+  const inspectJsonResponse = async ({ source, url, status, response }) => {
+    if (!(status >= 200 && status < 300) || !isSpotifyStateUrl(url)) {
+      return;
+    }
+
+    try {
+      const text = await response.text();
+      if (!text || !/^[\s[{]/.test(text)) {
+        return;
+      }
+
+      const json = JSON.parse(text);
+      const candidates = extractTrackCandidates(json).slice(0, 80);
+      if (candidates.length > 0) {
+        post("playback-state", {
+          source,
+          url,
+          status,
+          candidates,
+          capturedAt: Date.now()
+        });
+      }
+    } catch {
+      // Spotify returns several non-JSON state-adjacent responses. They are ignored.
+    }
+  };
+
+  const nativeFetch = window.fetch;
+  window.fetch = async function ktv420Fetch(input, init) {
+    const response = await nativeFetch.apply(this, arguments);
+    const url = response.url || (typeof input === "string" ? input : input?.url) || "";
+    inspectJsonResponse({
+      source: "fetch",
+      url,
+      status: response.status,
+      response: response.clone()
+    });
+    return response;
+  };
+
+  const nativeOpen = XMLHttpRequest.prototype.open;
+  const nativeSend = XMLHttpRequest.prototype.send;
+
+  XMLHttpRequest.prototype.open = function ktv420XhrOpen(method, url) {
+    this.__ktv420Url = url;
+    return nativeOpen.apply(this, arguments);
+  };
+
+  XMLHttpRequest.prototype.send = function ktv420XhrSend() {
+    this.addEventListener("loadend", () => {
+      const url = this.responseURL || this.__ktv420Url || "";
+      if (!(this.status >= 200 && this.status < 300) || !isSpotifyStateUrl(url)) {
+        return;
+      }
+
+      try {
+        let body = null;
+        if (this.responseType === "" || this.responseType === "text") {
+          body = this.responseText;
+        } else if (this.responseType === "json") {
+          body = JSON.stringify(this.response);
+        }
+
+        if (!body) {
+          return;
+        }
+
+        inspectJsonResponse({
+          source: "xhr",
+          url,
+          status: this.status,
+          response: new Response(body)
+        });
+      } catch {
+        // Some XHR response types cannot be inspected safely.
+      }
+    });
+
+    return nativeSend.apply(this, arguments);
+  };
+
+  const mediaTracker = installMediaElementTracking();
+  const captureController = createCaptureController(mediaTracker);
+  installCommandBridge(captureController);
+  installMediaSessionProbe();
+
+  function installCommandBridge(controller) {
+    window.addEventListener("message", async (event) => {
+      if (event.source !== window || event.data?.source !== "ktv420_content") {
+        return;
+      }
+
+      const { command, commandId, payload } = event.data;
+      try {
+        let result;
+        if (command === "media-targets") {
+          result = controller.describeTargets();
+        } else if (command === "capture-begin") {
+          result = await controller.begin(payload || {});
+        } else if (command === "capture-mark-start") {
+          result = controller.markAcceptedStart();
+        } else if (command === "capture-state") {
+          result = controller.state();
+        } else if (command === "capture-finish") {
+          result = controller.finish();
+        } else if (command === "capture-abort") {
+          result = controller.abort();
+        } else {
+          throw new Error(`Unknown ktv420 page command: ${command}`);
+        }
+
+        post("command-result", { commandId, ok: true, result });
+      } catch (error) {
+        post("command-result", {
+          commandId,
+          ok: false,
+          error: error?.message || String(error)
+        });
+      }
+    });
+  }
+
+  function installMediaElementTracking() {
+    const elements = new Set();
+
+    const remember = (element) => {
+      if (!isMediaElement(element)) {
+        return element;
+      }
+
+      elements.add(element);
+      return element;
+    };
+
+    document.querySelectorAll("audio, video").forEach(remember);
+
+    const nativeCreateElement = Document.prototype.createElement;
+    Document.prototype.createElement = function ktv420CreateElement(tagName, options) {
+      return remember(nativeCreateElement.apply(this, arguments));
+    };
+
+    const nativeCreateElementNS = Document.prototype.createElementNS;
+    Document.prototype.createElementNS = function ktv420CreateElementNS(namespace, qualifiedName, options) {
+      return remember(nativeCreateElementNS.apply(this, arguments));
+    };
+
+    const nativePlay = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function ktv420Play() {
+      remember(this);
+      return nativePlay.apply(this, arguments);
+    };
+
+    const NativeAudio = window.Audio;
+    if (typeof NativeAudio === "function") {
+      window.Audio = function ktv420Audio(...args) {
+        return remember(new NativeAudio(...args));
+      };
+      window.Audio.prototype = NativeAudio.prototype;
+      Object.setPrototypeOf(window.Audio, NativeAudio);
+    }
+
+    return {
+      remember,
+      all() {
+        document.querySelectorAll("audio, video").forEach(remember);
+        return Array.from(elements).filter((element) => element && !element.__ktv420Forgotten);
+      }
+    };
+  }
+
+  function createCaptureController(mediaTracker) {
+    let currentCapture = null;
+
+    return {
+      describeTargets() {
+        return discoverUsableTargets(mediaTracker).map(describeMediaElement);
+      },
+      async begin({ timeoutMs = 1000 } = {}) {
+        const element = await waitForSingleCaptureTarget(mediaTracker, timeoutMs);
+        currentCapture?.abort();
+        currentCapture = new PagePcmCapture(element);
+        await currentCapture.begin();
+        return {
+          target: describeMediaElement(element),
+          sampleRate: currentCapture.sampleRate,
+          channelCount: currentCapture.channelCount
+        };
+      },
+      markAcceptedStart() {
+        assertCapture(currentCapture);
+        currentCapture.markAcceptedStart();
+        return this.state();
+      },
+      state() {
+        assertCapture(currentCapture);
+        return describeMediaElement(currentCapture.element);
+      },
+      finish() {
+        assertCapture(currentCapture);
+        const result = currentCapture.finish();
+        currentCapture = null;
+        return result;
+      },
+      abort() {
+        currentCapture?.abort();
+        currentCapture = null;
+        return { ok: true };
+      }
+    };
+  }
+
+  class PagePcmCapture {
+    constructor(element) {
+      this.element = element;
+      this.graph = getOrCreateAudioGraph(element);
+      this.context = this.graph.context;
+      this.chunks = [];
+      this.byteLength = 0;
+      this.capturing = false;
+      this.sampleRate = this.context.sampleRate;
+      this.channelCount = 2;
+      this.startMediaTime = 0;
+      this.graph.consumers.add(this);
+    }
+
+    async begin() {
+      if (this.context.state === "suspended") {
+        await this.context.resume();
+      }
+
+      this.chunks = [];
+      this.byteLength = 0;
+      this.channelCount = 2;
+      this.startMediaTime = safeMediaTime(this.element);
+      this.capturing = true;
+    }
+
+    markAcceptedStart() {
+      this.chunks = [];
+      this.byteLength = 0;
+      this.startMediaTime = safeMediaTime(this.element);
+    }
+
+    abort() {
+      this.capturing = false;
+      this.chunks = [];
+      this.byteLength = 0;
+      this.graph.consumers.delete(this);
+    }
+
+    finish() {
+      this.capturing = false;
+      this.graph.consumers.delete(this);
+      const bytes = new Uint8Array(this.byteLength);
+      let offset = 0;
+
+      for (const chunk of this.chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+
+      return {
+        bytesBuffer: bytes.buffer,
+        byteLength: bytes.byteLength,
+        sampleRate: this.sampleRate,
+        channelCount: this.channelCount,
+        startMediaTime: this.startMediaTime
+      };
+    }
+
+    handleAudioProcess(event) {
+      if (!this.capturing) {
+        return;
+      }
+
+      const input = event.inputBuffer;
+      const channels = Math.min(2, input.numberOfChannels || 1);
+      this.channelCount = channels;
+      const frameCount = input.length;
+      const bytes = new Uint8Array(frameCount * channels * 2);
+      const view = new DataView(bytes.buffer);
+      const channelData = [];
+
+      for (let channel = 0; channel < channels; channel += 1) {
+        channelData.push(input.getChannelData(channel));
+      }
+
+      let byteOffset = 0;
+      for (let frame = 0; frame < frameCount; frame += 1) {
+        for (let channel = 0; channel < channels; channel += 1) {
+          const sample = Math.max(-1, Math.min(1, channelData[channel][frame] || 0));
+          const int16 = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+          view.setInt16(byteOffset, int16, true);
+          byteOffset += 2;
+        }
+      }
+
+      this.chunks.push(bytes);
+      this.byteLength += bytes.byteLength;
+    }
+  }
+
+  const audioGraphs = new WeakMap();
+
+  function getOrCreateAudioGraph(element) {
+    const existing = audioGraphs.get(element);
+    if (existing && existing.context.state !== "closed") {
+      return existing;
+    }
+
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    const context = new AudioContextCtor();
+    const source = context.createMediaElementSource(element);
+    const processor = context.createScriptProcessor(4096, 2, 2);
+    const graph = {
+      context,
+      source,
+      processor,
+      consumers: new Set()
+    };
+
+    processor.onaudioprocess = (event) => {
+      for (const consumer of graph.consumers) {
+        consumer.handleAudioProcess(event);
+      }
+    };
+
+    source.connect(processor);
+    source.connect(context.destination);
+    processor.connect(context.destination);
+    audioGraphs.set(element, graph);
+    return graph;
+  }
+
+  async function waitForSingleCaptureTarget(mediaTracker, timeoutMs) {
+    const deadline = performance.now() + timeoutMs;
+    let lastCount = 0;
+    let lastSeen = [];
+
+    while (performance.now() <= deadline) {
+      const targets = discoverUsableTargets(mediaTracker);
+      lastSeen = mediaTracker.all().map(describeMediaElement);
+      lastCount = targets.length;
+
+      if (targets.length === 1) {
+        return targets[0];
+      }
+
+      if (targets.length > 1) {
+        throw new Error(`Expected one Spotify media element, found ${targets.length}.`);
+      }
+
+      await delay(50);
+    }
+
+    throw new Error(
+      `No usable Spotify media element found after ${timeoutMs}ms. Last page-world target count: ${lastCount}. Seen: ${JSON.stringify(lastSeen)}`
+    );
+  }
+
+  function discoverUsableTargets(mediaTracker) {
+    return mediaTracker.all().filter(isUsableCaptureTarget);
+  }
+
+  function isUsableCaptureTarget(element) {
+    return isMediaElement(element) &&
+      Boolean(getMediaSource(element)) &&
+      Number.isFinite(element.duration) &&
+      element.duration > 0 &&
+      element.readyState >= 2 &&
+      element.muted === false &&
+      element.volume > 0 &&
+      element.playbackRate > 0;
+  }
+
+  function describeMediaElement(element) {
+    return {
+      source: getMediaSource(element),
+      currentTime: safeMediaTime(element),
+      duration: Number.isFinite(element.duration) ? element.duration : null,
+      paused: Boolean(element.paused),
+      ended: Boolean(element.ended),
+      readyState: element.readyState,
+      muted: Boolean(element.muted),
+      volume: element.volume,
+      playbackRate: element.playbackRate,
+      tagName: element.tagName
+    };
+  }
+
+  function assertCapture(capture) {
+    if (!capture) {
+      throw new Error("No active ktv420 page capture.");
+    }
+  }
+
+  function isMediaElement(element) {
+    return element instanceof HTMLMediaElement;
+  }
+
+  function getMediaSource(element) {
+    return element.currentSrc || element.src || "";
+  }
+
+  function safeMediaTime(element) {
+    return Number.isFinite(element?.currentTime) ? Math.max(0, element.currentTime) : 0;
+  }
+
+  function delay(ms) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
+  }
+
+  function installMediaSessionProbe() {
+    const emit = () => {
+      const metadata = navigator.mediaSession?.metadata;
+      if (!metadata) {
+        return;
+      }
+
+      post("media-session", {
+        title: metadata.title || "",
+        artist: metadata.artist || "",
+        album: metadata.album || "",
+        artwork: Array.isArray(metadata.artwork) ? metadata.artwork : [],
+        capturedAt: Date.now()
+      });
+    };
+
+    let last = "";
+    window.setInterval(() => {
+      const metadata = navigator.mediaSession?.metadata;
+      const key = metadata ? `${metadata.title || ""}\u0000${metadata.artist || ""}\u0000${metadata.album || ""}` : "";
+      if (key !== last) {
+        last = key;
+        emit();
+      }
+    }, 250);
+
+    emit();
+  }
+
+  function extractTrackCandidates(json) {
+    const candidates = [];
+    const seenObjects = new WeakSet();
+
+    const visit = (value, path, depth) => {
+      if (!value || depth > 12) {
+        return;
+      }
+
+      if (Array.isArray(value)) {
+        value.forEach((item, index) => visit(item, `${path}[${index}]`, depth + 1));
+        return;
+      }
+
+      if (typeof value !== "object") {
+        return;
+      }
+
+      if (seenObjects.has(value)) {
+        return;
+      }
+      seenObjects.add(value);
+
+      const candidate = objectToCandidate(value, path);
+      if (candidate) {
+        candidates.push(candidate);
+      }
+
+      for (const [key, child] of Object.entries(value)) {
+        visit(child, path ? `${path}.${key}` : key, depth + 1);
+      }
+    };
+
+    visit(json, "$", 0);
+    return dedupeCandidates(candidates);
+  }
+
+  function objectToCandidate(object, path) {
+    const keys = Object.keys(object);
+    const uri = firstString(object.uri, object.track_uri, object.trackUri, object.context_uri);
+    const href = firstString(object.href, object.url, object.link);
+    const type = firstString(object.type, object.item_type, object.media_type);
+    const idValue = firstString(object.id, object.track_id, object.trackId, object.gid);
+    const trackId =
+      extractTrackId(uri) ||
+      extractTrackId(href) ||
+      extractTrackId(type === "track" ? idValue : null) ||
+      extractTrackId(path.toLowerCase().includes("track") ? idValue : null);
+
+    if (!trackId) {
+      return null;
+    }
+
+    return {
+      trackId,
+      uri: uri || "",
+      name: firstString(object.name, object.title, object.track_name, object.trackName) || "",
+      artist: extractArtist(object),
+      isPlaying: object.is_playing === true || object.playing === true || object.paused === false,
+      keys,
+      path
+    };
+  }
+
+  function extractArtist(object) {
+    if (Array.isArray(object.artists)) {
+      const artists = object.artists
+        .map((artist) => firstString(artist?.name, artist?.profile?.name, artist?.title))
+        .filter(Boolean);
+      if (artists.length > 0) {
+        return artists.join(", ");
+      }
+    }
+
+    if (object.artist && typeof object.artist === "object") {
+      return firstString(object.artist.name, object.artist.title, object.artist.profile?.name) || "";
+    }
+
+    return firstString(object.artist, object.artist_name, object.artistName, object.subtitle) || "";
+  }
+
+  function extractTrackId(value) {
+    if (!value || typeof value !== "string") {
+      return null;
+    }
+
+    const direct = value.match(/^[A-Za-z0-9]{22}$/);
+    if (direct) {
+      return value;
+    }
+
+    const uri = value.match(/spotify:track:([A-Za-z0-9]{22})/);
+    if (uri) {
+      return uri[1];
+    }
+
+    const path = value.match(/\/track\/([A-Za-z0-9]{22})(?:[/?#]|$)/);
+    return path ? path[1] : null;
+  }
+
+  function firstString(...values) {
+    for (const value of values) {
+      if (typeof value === "string" && value.trim()) {
+        return value.trim();
+      }
+    }
+    return "";
+  }
+
+  function dedupeCandidates(candidates) {
+    const seen = new Set();
+    return candidates.filter((candidate) => {
+      const key = `${candidate.trackId}\u0000${candidate.path}\u0000${candidate.name}\u0000${candidate.artist}`;
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+  }
+})();
