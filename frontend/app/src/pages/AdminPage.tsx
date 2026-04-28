@@ -1,9 +1,9 @@
-import AdminGuide from "./components/AdminGuide";
-import ObjectTreeView from "./components/ObjectTreeView";
-import Player from "../stems/player/Player";
-import StemStatusPanel from "./components/StemStatusPanel";
-import UploadControls from "./components/UploadControls";
-import { useAdminController } from "./hooks/useAdminController";
+import AdminGuide from "../features/admin/components/AdminGuide";
+import ObjectTreeView from "../features/admin/components/ObjectTreeView";
+import StemStatusPanel from "../features/admin/components/StemStatusPanel";
+import UploadControls from "../features/admin/components/UploadControls";
+import { useAdminController } from "../features/admin/hooks/useAdminController";
+import Player from "../features/stems/player/Player";
 
 export default function AdminPage() {
   const admin = useAdminController();

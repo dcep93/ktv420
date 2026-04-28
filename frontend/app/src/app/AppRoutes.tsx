@@ -1,9 +1,9 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 
-import AdminPage from "../features/admin/AdminPage";
-import SamplePage from "../features/sample/SamplePage";
-import IframePage from "../pages/iframe/IframePage";
-import RootPage from "../pages/root/RootPage";
+import AdminPage from "../pages/AdminPage";
+import IframePage from "../pages/IframePage";
+import RootPage from "../pages/RootPage";
+import SamplePage from "../pages/SamplePage";
 
 export default function AppRoutes() {
   return (

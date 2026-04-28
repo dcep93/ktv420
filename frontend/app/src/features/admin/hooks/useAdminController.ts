@@ -159,9 +159,7 @@ export function useAdminController() {
     }
 
     try {
-      const parsedResponse = await runStemJob(objectPath, outputPath);
-
-      console.log("Run job response:", parsedResponse);
+      await runStemJob(objectPath, outputPath);
     } catch (error) {
       console.error(formatErrorMessage(functionName, error), error);
     }

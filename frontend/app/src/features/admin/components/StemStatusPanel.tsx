@@ -1,4 +1,4 @@
-import sha from "../../stems/build/sha.json";
+import sha from "../../stems/metadata/sha.json";
 
 type StemStatusPanelProps = {
   rootResponse: unknown | null;

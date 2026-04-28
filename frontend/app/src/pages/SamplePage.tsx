@@ -1,6 +1,6 @@
-import Player from "../stems/player/Player";
-import { useSampleController } from "./hooks/useSampleController";
-import "./Sample.css";
+import { useSampleController } from "../features/sample/hooks/useSampleController";
+import Player from "../features/stems/player/Player";
+import "./SamplePage.css";
 
 export default function SamplePage() {
   const {
@@ -19,30 +19,32 @@ export default function SamplePage() {
 
   return (
     <main
-      className="root-page"
+      className="sample-page"
       ref={pageRef}
       tabIndex={-1}
       aria-label="Sample page"
     >
       {activeRecord ? (
-        <section className="root-page__player">
+        <section className="sample-page__player">
           <Player record={activeRecord} onClose={clearActiveRecord} />
         </section>
       ) : null}
 
-      <section className="root-page__panel">
-        <div className="root-page__status-row">
-          <div className="root-page__status-area">
+      <section className="sample-page__panel">
+        <div className="sample-page__status-row">
+          <div className="sample-page__status-area">
             {isLoading ? (
-              <p className="muted">Checking GCS for files...</p>
+              <p className="sample-page__muted">Checking GCS for files...</p>
             ) : null}
             {!isLoading && inputOptions.length === 0 ? (
-              <p className="muted">No inputs were found in the bucket.</p>
+              <p className="sample-page__muted">
+                No inputs were found in the bucket.
+              </p>
             ) : null}
             {status ? <p>{status}</p> : null}
-            {error ? <p className="error">{error}</p> : null}
+            {error ? <p className="sample-page__error">{error}</p> : null}
           </div>
-          <div className="root-page__actions">
+          <div className="sample-page__actions">
             <button
               onClick={handleRefresh}
               disabled={isLoading || isFetchingSelection}
@@ -51,7 +53,7 @@ export default function SamplePage() {
             </button>
           </div>
         </div>
-        <div className="root-page__control-group">
+        <div className="sample-page__control-group">
           <label htmlFor="input-selector">Choose an input file</label>
           <select
             id="input-selector"
