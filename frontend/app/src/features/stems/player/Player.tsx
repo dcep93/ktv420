@@ -1,5 +1,4 @@
 import {
-  type CSSProperties,
   type PointerEvent,
   useCallback,
   useEffect,
@@ -12,7 +11,7 @@ import {
   cacheChordTimeline,
   getCachedChordTimeline,
   removeCachedOutputs,
-} from "../indexedDbClient";
+} from "../services/indexedDbClient";
 import {
   applyAudioEffect,
   audioEffectOptions,
@@ -20,13 +19,15 @@ import {
   createEffectNodes,
   type EffectNodes,
   getDefaultEffectValue,
-} from "./player/audioEffects";
+} from "./audioEffects";
 import {
   analyzeChordTimeline,
   CHORD_ANALYZER_VERSION,
   type ChordSnapshot,
-} from "./player/chordAnalyzer";
-import { TrackRow } from "./player/TrackRow";
+} from "./chordAnalyzer";
+import { getVisualizerButtonStyle } from "./playerStyles";
+import { formatPlaybackTime } from "./time";
+import { TrackRow } from "./TrackRow";
 import {
   AMPLITUDE_WINDOW_SECONDS,
   type CachedTrackFile,
@@ -35,55 +36,9 @@ import {
   type PlayerProps,
   type Track,
   type VisualizerType,
-} from "./player/types";
-import { drawVisualizer } from "./player/visualizers";
-
-const visualizerOptions: Array<{
-  value: VisualizerType;
-  label: string;
-  hint: string;
-}> = [
-  { value: "time-ribbon", label: "Time Ribbon", hint: "Amplitude Timeline" },
-  { value: "laser-ladders", label: "Laser Ladders", hint: "Graphic EQ" },
-  { value: "spectrum-safari", label: "Spectrum Safari", hint: "Analyzer" },
-  {
-    value: "waveform-waterline",
-    label: "Waveform Waterline",
-    hint: "Oscilloscope",
-  },
-  { value: "aurora-radar", label: "Aurora Radar", hint: "Radial Sweep" },
-  { value: "mirror-peaks", label: "Mirror Peaks", hint: "Symmetric Bars" },
-  { value: "pulse-grid", label: "Pulse Grid", hint: "Energy Matrix" },
-  { value: "luminous-orbit", label: "Luminous Orbit", hint: "Layered Rings" },
-  { value: "prism-bloom", label: "Prism Bloom", hint: "Radiant Arcs" },
-  {
-    value: "cascade-horizon",
-    label: "Cascade Horizon",
-    hint: "Layered Terrain",
-  },
-  { value: "nebula-trails", label: "Nebula Trails", hint: "Shimmering Path" },
-  { value: "echo-lantern", label: "Echo Lantern", hint: "Glowing Ripples" },
-  { value: "ember-mandala", label: "Ember Mandala", hint: "Radiant Petals" },
-  { value: "hippie-mirage", label: "Hippie Mirage", hint: "Tie-Dye Bloom" },
-  { value: "hollow-echoes", label: "Hollow Echoes", hint: "Stacked Pillars" },
-  { value: "opal-current", label: "Opal Current", hint: "Opalescent Waves" },
-  { value: "solstice-waves", label: "Solstice Waves", hint: "Solar Horizon" },
-  { value: "ripple-weave", label: "Ripple Weave", hint: "Braided Ribbons" },
-  { value: "ectoplasm", label: "Ectoplasm", hint: "Plasma Bloom" },
-  {
-    value: "super-time-ribbon",
-    label: "Super Time Ribbon",
-    hint: "Shaking Ribbon",
-  },
-  {
-    value: "prismatic-turbine",
-    label: "Prismatic Turbine",
-    hint: "Whirling Shards",
-  },
-  { value: "kaleidoscope", label: "Kaleidoscope", hint: "Mirrored Lenses" },
-  { value: "highway", label: "Highway", hint: "Retro Neon Run" },
-  { value: "delay-pedal", label: "Delay Pedal", hint: "Echo Ripples" },
-];
+} from "./types";
+import { visualizerOptions } from "./visualizerOptions";
+import { drawVisualizer } from "./visualizers";
 
 export default function Player({ record, onClose }: PlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -195,26 +150,6 @@ export default function Player({ record, onClose }: PlayerProps) {
       return lookup;
     }, {});
   }, [tracks]);
-
-  const visualizerButtonStyle = useCallback(
-    (isActive: boolean): CSSProperties => ({
-      borderRadius: "14px",
-      border: isActive ? "1px solid #6ddcff" : "1px solid #1f2a3d",
-      background: isActive
-        ? "linear-gradient(135deg, rgba(37,99,235,0.9), rgba(14,165,233,0.8))"
-        : "linear-gradient(135deg, rgba(17,24,39,0.85), rgba(15,23,42,0.9))",
-      color: "#e5e7eb",
-      padding: "0.65rem 0.85rem",
-      minWidth: "200px",
-      textAlign: "left",
-      boxShadow: isActive
-        ? "0 0 0 1px rgba(109,220,255,0.35), 0 16px 40px rgba(0,0,0,0.45)"
-        : "0 10px 28px rgba(0,0,0,0.35)",
-      cursor: "pointer",
-      transition: "all 160ms ease",
-    }),
-    []
-  );
 
   useEffect(() => {
     volumesRef.current = volumes;
@@ -1088,15 +1023,6 @@ export default function Player({ record, onClose }: PlayerProps) {
     applyEffectiveVolume(trackId);
   };
 
-  const formattedTime = (time: number) => {
-    const safeTime = Math.max(0, Math.floor(time));
-    const minutes = Math.floor(safeTime / 60)
-      .toString()
-      .padStart(2, "0");
-    const seconds = (safeTime % 60).toString().padStart(2, "0");
-    return `${minutes}:${seconds}`;
-  };
-
   const areTracksReady =
     tracks.length > 0 && readyTrackIds.length === tracks.length;
 
@@ -1183,7 +1109,7 @@ export default function Player({ record, onClose }: PlayerProps) {
               style={{ width: "100%", verticalAlign: "middle" }}
             />
             <span style={{ whiteSpace: "nowrap", minWidth: "120px" }}>
-              {formattedTime(currentTime)} / {formattedTime(duration)}
+              {formatPlaybackTime(currentTime)} / {formatPlaybackTime(duration)}
             </span>
           </div>
           <div
@@ -1284,7 +1210,7 @@ export default function Player({ record, onClose }: PlayerProps) {
                 key={option.value}
                 type="button"
                 onClick={() => setVisualizerType(option.value)}
-                style={visualizerButtonStyle(isActive)}
+                style={getVisualizerButtonStyle(isActive)}
                 aria-pressed={isActive}
               >
                 <div style={{ fontWeight: 700, letterSpacing: "0.02em" }}>

@@ -24,6 +24,31 @@ export const isInputFolder = (node: ObjectTreeNode) =>
 export const isOutputFolder = (node: ObjectTreeNode) =>
   node.type === "folder" && node.name.toLowerCase() === "output";
 
+export const outputFolderExistsForMd5 = (
+  objectTree: ObjectTreeNode[],
+  md5: string
+): boolean => {
+  const nodesToSearch = [...objectTree];
+
+  while (nodesToSearch.length) {
+    const currentNode = nodesToSearch.pop();
+
+    if (!currentNode) {
+      continue;
+    }
+
+    if (isMd5Folder(currentNode) && currentNode.name === md5) {
+      return (currentNode.children ?? []).some((child) =>
+        isOutputFolder(child)
+      );
+    }
+
+    nodesToSearch.push(...(currentNode.children ?? []));
+  }
+
+  return false;
+};
+
 export const collectFileNodes = (node: ObjectTreeNode): ObjectTreeNode[] => {
   if (node.type === "file") {
     return [node];

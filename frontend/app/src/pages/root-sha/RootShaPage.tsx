@@ -1,4 +1,4 @@
-import sha from "./Admin/sha.json";
+import sha from "../../features/stems/build/sha.json";
 import "./RootShaPage.css";
 
 export default function RootShaPage() {

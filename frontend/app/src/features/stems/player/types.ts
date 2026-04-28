@@ -1,4 +1,4 @@
-import { type CachedOutputRecord } from "../../indexedDbClient";
+import { type CachedOutputRecord } from "../services/indexedDbClient";
 
 export type CachedTrackFile = CachedOutputRecord["files"][number];
 

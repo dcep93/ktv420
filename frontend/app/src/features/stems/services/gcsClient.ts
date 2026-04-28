@@ -1,9 +1,28 @@
 import CryptoJS from "crypto-js";
 
-import { formatErrorMessage } from "./errors";
-import { type GcsObject } from "./types";
+import { formatErrorMessage } from "../lib/errors";
+import { type GcsObject } from "../lib/types";
 
 export const BUCKET_NAME = "stem420-bucket";
+const STORAGE_API_BASE_URL = "https://storage.googleapis.com/storage/v1";
+const STORAGE_UPLOAD_BASE_URL =
+  "https://storage.googleapis.com/upload/storage/v1";
+
+const bucketObjectsUrl = () =>
+  new URL(`${STORAGE_API_BASE_URL}/b/${BUCKET_NAME}/o`);
+
+const objectUrl = (objectPath: string, { media = false } = {}) => {
+  const encodedName = encodeURIComponent(objectPath);
+  const mediaQuery = media ? "?alt=media" : "";
+
+  return `${STORAGE_API_BASE_URL}/b/${BUCKET_NAME}/o/${encodedName}${mediaQuery}`;
+};
+
+const uploadObjectUrl = (objectPath: string) => {
+  const encodedName = encodeURIComponent(objectPath);
+
+  return `${STORAGE_UPLOAD_BASE_URL}/b/${BUCKET_NAME}/o?uploadType=media&name=${encodedName}`;
+};
 
 export async function computeMd5(file: File) {
   const functionName = "computeMd5";
@@ -26,9 +45,7 @@ export async function listBucketObjects(): Promise<GcsObject[]> {
     const folderNames = new Set<string>();
 
     do {
-      const listUrl = new URL(
-        `https://storage.googleapis.com/storage/v1/b/${BUCKET_NAME}/o`
-      );
+      const listUrl = bucketObjectsUrl();
 
       if (pageToken) {
         listUrl.searchParams.set("pageToken", pageToken);
@@ -90,9 +107,7 @@ export async function fetchObjectContents(objectPath: string): Promise<string> {
   const functionName = "fetchObjectContents";
 
   try {
-    const encodedName = encodeURIComponent(objectPath);
-    const downloadUrl = `https://storage.googleapis.com/storage/v1/b/${BUCKET_NAME}/o/${encodedName}?alt=media`;
-    const response = await fetch(downloadUrl);
+    const response = await fetch(objectUrl(objectPath, { media: true }));
 
     if (!response.ok) {
       throw new Error(
@@ -110,9 +125,7 @@ export async function fetchObjectBlob(objectPath: string): Promise<Blob> {
   const functionName = "fetchObjectBlob";
 
   try {
-    const encodedName = encodeURIComponent(objectPath);
-    const downloadUrl = `https://storage.googleapis.com/storage/v1/b/${BUCKET_NAME}/o/${encodedName}?alt=media`;
-    const response = await fetch(downloadUrl);
+    const response = await fetch(objectUrl(objectPath, { media: true }));
 
     if (!response.ok) {
       throw new Error(
@@ -121,6 +134,66 @@ export async function fetchObjectBlob(objectPath: string): Promise<Blob> {
     }
 
     return await response.blob();
+  } catch (error) {
+    throw new Error(formatErrorMessage(functionName, error));
+  }
+}
+
+export async function objectExists(objectPath: string): Promise<boolean> {
+  const functionName = "objectExists";
+
+  try {
+    const metadataResponse = await fetch(objectUrl(objectPath));
+
+    if (metadataResponse.ok) {
+      return true;
+    }
+
+    if (metadataResponse.status === 404) {
+      return false;
+    }
+
+    throw new Error(
+      `Unexpected response when checking object: ${metadataResponse.status}`
+    );
+  } catch (error) {
+    throw new Error(formatErrorMessage(functionName, error));
+  }
+}
+
+export async function uploadObject(objectPath: string, file: File) {
+  const functionName = "uploadObject";
+
+  try {
+    const uploadResponse = await fetch(uploadObjectUrl(objectPath), {
+      method: "POST",
+      headers: {
+        "Content-Type": file.type || "application/octet-stream",
+      },
+      body: file,
+    });
+
+    if (!uploadResponse.ok) {
+      throw new Error(`Upload failed with status ${uploadResponse.status}`);
+    }
+  } catch (error) {
+    throw new Error(formatErrorMessage(functionName, error));
+  }
+}
+
+export async function deleteObject(objectPath: string) {
+  const functionName = "deleteObject";
+
+  try {
+    const deleteResponse = await fetch(objectUrl(objectPath), {
+      method: "DELETE",
+    });
+
+    if (!deleteResponse.ok) {
+      throw new Error(
+        `Failed to delete ${objectPath}: ${deleteResponse.status} ${deleteResponse.statusText}`
+      );
+    }
   } catch (error) {
     throw new Error(formatErrorMessage(functionName, error));
   }
@@ -135,9 +208,7 @@ export async function deleteObjectsWithPrefix(prefix: string): Promise<number> {
     let deletedCount = 0;
 
     do {
-      const listUrl = new URL(
-        `https://storage.googleapis.com/storage/v1/b/${BUCKET_NAME}/o`
-      );
+      const listUrl = bucketObjectsUrl();
 
       listUrl.searchParams.set("prefix", normalizedPrefix);
 
@@ -161,9 +232,9 @@ export async function deleteObjectsWithPrefix(prefix: string): Promise<number> {
       const items = listData.items ?? [];
 
       for (const item of items) {
-        const encodedName = encodeURIComponent(item.name);
-        const deleteUrl = `https://storage.googleapis.com/storage/v1/b/${BUCKET_NAME}/o/${encodedName}`;
-        const deleteResponse = await fetch(deleteUrl, { method: "DELETE" });
+        const deleteResponse = await fetch(objectUrl(item.name), {
+          method: "DELETE",
+        });
 
         if (!deleteResponse.ok) {
           throw new Error(

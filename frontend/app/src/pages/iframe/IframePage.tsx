@@ -1,4 +1,4 @@
-export default function Iframe() {
+export default function IframePage() {
   return (
     <main>
       <h1>Iframe</h1>
