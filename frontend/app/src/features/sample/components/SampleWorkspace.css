@@ -1,24 +1,24 @@
-.sample-page {
+.sample-workspace {
   color: #e4e7f2;
   padding: 2rem 2.5rem 3rem;
   margin: 0 auto;
   width: 100%;
 }
 
-.sample-page__actions {
+.sample-workspace__actions {
   display: flex;
   align-items: center;
   gap: 0.5rem;
 }
 
-.sample-page__status-row {
+.sample-workspace__status-row {
   display: flex;
   justify-content: space-between;
   gap: 1rem;
   align-items: center;
 }
 
-.sample-page__panel {
+.sample-workspace__panel {
   background: rgba(12, 17, 33, 0.9);
   border: 1px solid #1c2740;
   border-radius: 12px;
@@ -27,13 +27,13 @@
   gap: 0.75rem;
 }
 
-.sample-page__control-group {
+.sample-workspace__control-group {
   display: grid;
   gap: 0.4rem;
   max-width: 440px;
 }
 
-.sample-page__control-group select {
+.sample-workspace__control-group select {
   border-radius: 10px;
   border: 1px solid #2b3653;
   background: #0c1222;
@@ -41,36 +41,36 @@
   padding: 0.65rem 0.8rem;
 }
 
-.sample-page__status-area {
+.sample-workspace__status-area {
   min-height: 1.5rem;
 }
 
-.sample-page__status-area p {
+.sample-workspace__status-area p {
   margin: 0;
 }
 
-.sample-page__status-row .sample-page__actions {
+.sample-workspace__status-row .sample-workspace__actions {
   flex-shrink: 0;
 }
 
-.sample-page__muted {
+.sample-workspace__muted {
   color: #9aa4c2;
 }
 
-.sample-page__error {
+.sample-workspace__error {
   color: #f26d7d;
 }
 
-.sample-page__player {
+.sample-workspace__player {
   margin-top: 1.25rem;
 }
 
 @media (max-width: 768px) {
-  .sample-page {
+  .sample-workspace {
     padding: 1.5rem;
   }
 
-  .sample-page__status-row {
+  .sample-workspace__status-row {
     flex-direction: column;
     align-items: flex-start;
   }
