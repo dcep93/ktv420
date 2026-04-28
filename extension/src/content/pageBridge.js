@@ -97,6 +97,7 @@ function injectPageScript() {
     const script = document.createElement("script");
     script.id = marker;
     script.src = chrome.runtime.getURL("src/page/spotifyHooks.js");
+    script.dataset.ktv420WorkletUrl = chrome.runtime.getURL("src/page/pcmWorklet.js");
     script.async = false;
     script.onload = () => {
       script.remove();

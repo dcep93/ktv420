@@ -83,24 +83,17 @@ export class CaptureOrchestrator extends EventTarget {
       debug.events.push({ type: "start-first-row", trackId: queue[0].trackId, at: Date.now() });
       dispatchSyntheticDoubleClick(firstRow);
 
+      let startInfo = null;
       for (let index = 0; index < queue.length; index += 1) {
         this.throwIfStopped();
         const item = queue[index];
-        await this.bridge.command("capture-begin", { timeoutMs: START_TIMEOUT_MS }, START_TIMEOUT_MS + 1000);
+        const nextItem = queue[index + 1] || null;
 
-        let startInfo;
-        try {
-          startInfo = await this.waitForExpectedTrackStart(item, debug);
-          if (!item.cached) {
-            await this.bridge.command("capture-mark-start");
-          } else {
-            await this.bridge.command("capture-abort");
-          }
-        } catch (error) {
-          await this.bridge.command("capture-abort").catch(() => {});
-          throw error;
+        if (!startInfo) {
+          startInfo = await this.beginAndAcceptItem(item, debug);
         }
 
+        let pendingCapture = null;
         if (item.cached) {
           summary.push({
             alreadyInLocalStorage: true,
@@ -109,26 +102,36 @@ export class CaptureOrchestrator extends EventTarget {
           debug.events.push({ type: "skip-cached", trackId: item.trackId, at: Date.now() });
         } else {
           const captureEnd = await this.recordUntilBoundary(item, startInfo, debug);
-          const capture = await this.finishPageCapture();
-          const metadata = buildMetadata(item, capture, captureEnd);
-          const pcmBase64 = bytesToBase64(capture.bytes);
+          pendingCapture = { captureEnd, item };
+        }
 
-          await writeTrackArtifact(item.trackId, pcmBase64, metadata);
+        startInfo = null;
+        if (nextItem) {
+          if (item.cached) {
+            clickSkipForward();
+            debug.events.push({ type: "skip-forward", fromTrackId: item.trackId, at: Date.now() });
+            startInfo = await this.beginAndAcceptItem(nextItem, debug);
+          } else {
+            const { finished } = await this.finishAndBeginNextCapture();
+            pendingCapture.capture = finished;
+            startInfo = await this.beginAndAcceptItem(nextItem, debug, { captureAlreadyBegun: true });
+          }
+        } else if (pendingCapture) {
+          pendingCapture.capture = await this.finishPageCapture();
+        }
+
+        if (pendingCapture) {
+          const metadata = await this.storeCapturedTrack(pendingCapture.item, pendingCapture.capture, pendingCapture.captureEnd);
           summary.push({
             alreadyInLocalStorage: false,
             metadata
           });
           debug.events.push({
             type: "stored-track",
-            trackId: item.trackId,
+            trackId: pendingCapture.item.trackId,
             audioByteLength: metadata.audioByteLength,
             at: Date.now()
           });
-        }
-
-        if (index < queue.length - 1 && item.cached) {
-          clickSkipForward();
-          debug.events.push({ type: "skip-forward", fromTrackId: item.trackId, at: Date.now() });
         }
       }
 
@@ -180,6 +183,25 @@ export class CaptureOrchestrator extends EventTarget {
     });
 
     return queue;
+  }
+
+  async beginAndAcceptItem(item, debug, { captureAlreadyBegun = false } = {}) {
+    if (!captureAlreadyBegun) {
+      await this.bridge.command("capture-begin", { timeoutMs: START_TIMEOUT_MS }, START_TIMEOUT_MS + 1000);
+    }
+
+    try {
+      const startInfo = await this.waitForExpectedTrackStart(item, debug);
+      if (!item.cached) {
+        await this.bridge.command("capture-mark-start");
+      } else {
+        await this.bridge.command("capture-abort");
+      }
+      return startInfo;
+    } catch (error) {
+      await this.bridge.command("capture-abort").catch(() => {});
+      throw error;
+    }
   }
 
   async waitForExpectedTrackStart(item, debug) {
@@ -328,15 +350,41 @@ export class CaptureOrchestrator extends EventTarget {
 
   async finishPageCapture() {
     const capture = await this.bridge.command("capture-finish", {}, 60000);
+    return this.normalizePageCapture(capture);
+  }
+
+  async finishAndBeginNextCapture() {
+    const result = await this.bridge.command(
+      "capture-finish-and-begin",
+      { timeoutMs: START_TIMEOUT_MS },
+      60000
+    );
+    return {
+      ...result,
+      finished: this.normalizePageCapture(result.finished)
+    };
+  }
+
+  normalizePageCapture(capture) {
     const bytes = new Uint8Array(capture.bytesBuffer || new ArrayBuffer(0));
     return {
       bytes,
       byteLength: bytes.byteLength,
-      md5: md5Hex(bytes),
       sampleRate: capture.sampleRate,
       channelCount: capture.channelCount,
       startMediaTime: capture.startMediaTime
     };
+  }
+
+  async storeCapturedTrack(item, capture, captureEnd) {
+    const captureWithHash = {
+      ...capture,
+      md5: md5Hex(capture.bytes)
+    };
+    const metadata = buildMetadata(item, captureWithHash, captureEnd);
+    const pcmBase64 = bytesToBase64(capture.bytes);
+    await writeTrackArtifact(item.trackId, pcmBase64, metadata);
+    return metadata;
   }
 
   throwIfStopped() {

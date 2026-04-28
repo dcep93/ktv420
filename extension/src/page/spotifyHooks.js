@@ -1,6 +1,7 @@
 (() => {
   const INSTALL_MARKER = "__ktv420_page_hooks_installed__";
   const SOURCE = "ktv420_page_hooks";
+  const WORKLET_URL = document.currentScript?.dataset?.ktv420WorkletUrl || "";
 
   if (window[INSTALL_MARKER]) {
     return;
@@ -127,6 +128,8 @@
           result = controller.describeTargets();
         } else if (command === "capture-begin") {
           result = await controller.begin(payload || {});
+        } else if (command === "capture-finish-and-begin") {
+          result = await controller.finishAndBegin(payload || {});
         } else if (command === "capture-mark-start") {
           result = controller.markAcceptedStart();
         } else if (command === "capture-state") {
@@ -208,12 +211,29 @@
       async begin({ timeoutMs = 1000 } = {}) {
         const element = await waitForSingleCaptureTarget(mediaTracker, timeoutMs);
         currentCapture?.abort();
-        currentCapture = new PagePcmCapture(element);
+        currentCapture = await PagePcmCapture.create(element);
         await currentCapture.begin();
         return {
           target: describeMediaElement(element),
           sampleRate: currentCapture.sampleRate,
           channelCount: currentCapture.channelCount
+        };
+      },
+      async finishAndBegin({ timeoutMs = 1000 } = {}) {
+        assertCapture(currentCapture);
+        const finished = currentCapture.finish();
+        currentCapture = null;
+
+        const element = await waitForSingleCaptureTarget(mediaTracker, timeoutMs);
+        currentCapture = await PagePcmCapture.create(element);
+        await currentCapture.begin();
+        return {
+          finished,
+          next: {
+            target: describeMediaElement(element),
+            sampleRate: currentCapture.sampleRate,
+            channelCount: currentCapture.channelCount
+          }
         };
       },
       markAcceptedStart() {
@@ -240,9 +260,14 @@
   }
 
   class PagePcmCapture {
-    constructor(element) {
+    static async create(element) {
+      const graph = await getOrCreateAudioGraph(element);
+      return new PagePcmCapture(element, graph);
+    }
+
+    constructor(element, graph) {
       this.element = element;
-      this.graph = getOrCreateAudioGraph(element);
+      this.graph = graph;
       this.context = this.graph.context;
       this.chunks = [];
       this.byteLength = 0;
@@ -298,33 +323,13 @@
       };
     }
 
-    handleAudioProcess(event) {
+    handleAudioChunk(message) {
       if (!this.capturing) {
         return;
       }
 
-      const input = event.inputBuffer;
-      const channels = Math.min(2, input.numberOfChannels || 1);
-      this.channelCount = channels;
-      const frameCount = input.length;
-      const bytes = new Uint8Array(frameCount * channels * 2);
-      const view = new DataView(bytes.buffer);
-      const channelData = [];
-
-      for (let channel = 0; channel < channels; channel += 1) {
-        channelData.push(input.getChannelData(channel));
-      }
-
-      let byteOffset = 0;
-      for (let frame = 0; frame < frameCount; frame += 1) {
-        for (let channel = 0; channel < channels; channel += 1) {
-          const sample = Math.max(-1, Math.min(1, channelData[channel][frame] || 0));
-          const int16 = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
-          view.setInt16(byteOffset, int16, true);
-          byteOffset += 2;
-        }
-      }
-
+      const bytes = new Uint8Array(message.bytesBuffer || new ArrayBuffer(0));
+      this.channelCount = Math.min(2, Math.max(1, Number(message.channelCount) || this.channelCount || 1));
       this.chunks.push(bytes);
       this.byteLength += bytes.byteLength;
     }
@@ -332,7 +337,7 @@
 
   const audioGraphs = new WeakMap();
 
-  function getOrCreateAudioGraph(element) {
+  async function getOrCreateAudioGraph(element) {
     const existing = audioGraphs.get(element);
     if (existing && existing.context.state !== "closed") {
       return existing;
@@ -340,26 +345,57 @@
 
     const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
     const context = new AudioContextCtor();
+    await ensurePcmWorkletModule(context);
     const source = context.createMediaElementSource(element);
-    const processor = context.createScriptProcessor(4096, 2, 2);
+    const worklet = new AudioWorkletNode(context, "ktv420-pcm-capture", {
+      channelCount: 2,
+      channelCountMode: "explicit",
+      channelInterpretation: "speakers",
+      numberOfInputs: 1,
+      numberOfOutputs: 0
+    });
     const graph = {
       context,
       source,
-      processor,
+      worklet,
       consumers: new Set()
     };
 
-    processor.onaudioprocess = (event) => {
+    worklet.port.onmessage = (event) => {
       for (const consumer of graph.consumers) {
-        consumer.handleAudioProcess(event);
+        consumer.handleAudioChunk(event.data || {});
       }
     };
 
-    source.connect(processor);
+    source.connect(worklet);
     source.connect(context.destination);
-    processor.connect(context.destination);
     audioGraphs.set(element, graph);
     return graph;
+  }
+
+  const pcmWorkletModulesByContext = new WeakMap();
+
+  async function ensurePcmWorkletModule(context) {
+    const existing = pcmWorkletModulesByContext.get(context);
+    if (existing) {
+      return existing;
+    }
+
+    const modulePromise = (async () => {
+      if (!context.audioWorklet?.addModule || typeof AudioWorkletNode !== "function") {
+        throw new Error("AudioWorkletNode is not available in this browser context.");
+      }
+
+      if (WORKLET_URL) {
+        await context.audioWorklet.addModule(WORKLET_URL);
+        return;
+      }
+
+      throw new Error("ktv420 PCM worklet URL was not provided.");
+    })();
+
+    pcmWorkletModulesByContext.set(context, modulePromise);
+    return modulePromise;
   }
 
   async function waitForSingleCaptureTarget(mediaTracker, timeoutMs) {
