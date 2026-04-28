@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import Player from "./KTV420/components/Player";
-import { formatErrorMessage } from "./KTV420/errors";
-import { fetchObjectBlob, listBucketObjects } from "./KTV420/gcsClient";
+import Player from "./Admin/components/Player";
+import { formatErrorMessage } from "./Admin/errors";
+import { fetchObjectBlob, listBucketObjects } from "./Admin/gcsClient";
 import {
   type CachedOutputRecord,
   cacheMd5Files,
   getCachedMd5,
-} from "./KTV420/indexedDbClient";
-import { buildObjectTree } from "./KTV420/objectTree";
-import { type GcsObject, type ObjectTreeNode } from "./KTV420/types";
-import { collectFileNodes, extractMd5FromPath } from "./KTV420/utils";
-import "./RootPage.css";
+} from "./Admin/indexedDbClient";
+import { buildObjectTree } from "./Admin/objectTree";
+import { type GcsObject, type ObjectTreeNode } from "./Admin/types";
+import { collectFileNodes, extractMd5FromPath } from "./Admin/utils";
+import "./Sample.css";
 
 type InputOption = {
   value: string;
@@ -55,7 +55,7 @@ const findMd5Node = (
   return null;
 };
 
-export default function RootPage() {
+export default function Sample() {
   const [objects, setObjects] = useState<GcsObject[]>([]);
   const [objectTree, setObjectTree] = useState<ObjectTreeNode[]>([]);
   const [selectedInput, setSelectedInput] = useState<string>("");
@@ -285,7 +285,7 @@ export default function RootPage() {
       className="root-page"
       ref={rootPageRef}
       tabIndex={-1}
-      aria-label="Stem420 root page"
+      aria-label="Sample page"
     >
       {activeRecord ? (
         <section className="root-page__player">

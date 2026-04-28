@@ -34,7 +34,7 @@ import {
   withAsyncFlag,
 } from "./utils";
 
-export default function Stem420() {
+export default function Admin() {
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
