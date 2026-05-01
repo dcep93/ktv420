@@ -2,13 +2,13 @@
 
 set -euo pipefail
 
-cat > sha.json <<EOF
+cat >sha.json <<EOF
 {
   "time": $(TZ='America/New_York' date | jq -Rs .),
   "git_log": $(git log -1 | jq -Rs .)
 }
 EOF
 
-cp sha.json frontend/app/src/KTV420/
+cp sha.json frontend/app/src/features/stems/metadata/
 cp sha.json backend/ktv420/
 rm sha.json
