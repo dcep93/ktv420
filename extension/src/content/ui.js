@@ -1,17 +1,20 @@
 import { SELECTORS } from "./constants.js";
 import { collectTrackRows, isSupportedRoute } from "./dom.js";
-import { inspectTrackArtifact } from "./storage.js";
+import { inspectTrackArtifact, readTrackArtifact } from "./storage.js";
 
 const BUTTON_ID = "ktv420-spotify-capture-button";
 const IFRAME_ID = "ktv420-prepared-iframe";
 const STYLE_ID = "ktv420-spotify-capture-style";
 const LOCAL_IFRAME_SRC = "http://localhost:5173/iframe";
 const PROD_IFRAME_SRC = "https://ktv420.web.app/iframe";
+const STEM_API_BASE_URL = "https://stem420-854199998954.us-east1.run.app";
 const IFRAME_MESSAGE_SOURCE = "ktv420-iframe";
 const PARENT_MESSAGE_SOURCE = "ktv420-parent";
 const CLOSE_OVERLAY_MESSAGE = "ktv420:close-overlay";
 const TRACKS_MESSAGE = "ktv420:tracks";
 const TOGGLE_RUN_MESSAGE = "ktv420:toggle-run";
+const PREPARE_JOB_MESSAGE = "ktv420:prepare-job";
+const PREPARE_JOB_RESULT_MESSAGE = "ktv420:prepare-job-result";
 
 export function mountButton({ isRunActive, onToggleRun }) {
   injectStyle();
@@ -91,6 +94,11 @@ export function mountButton({ isRunActive, onToggleRun }) {
     if (message.type === TOGGLE_RUN_MESSAGE) {
       await onToggleRun();
       schedulePlace();
+      return;
+    }
+
+    if (message.type === PREPARE_JOB_MESSAGE && typeof message.trackId === "string") {
+      await prepareTrackJob(message.trackId, iframe, iframeOrigin);
     }
   };
 
@@ -242,6 +250,57 @@ async function postTracksToIframe(iframe, origin, tracks) {
     },
     origin
   );
+}
+
+async function prepareTrackJob(trackId, iframe, origin) {
+  try {
+    const artifact = await readTrackArtifact(trackId);
+    const response = await fetch(`${STEM_API_BASE_URL}/prepare_job`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        pcm_s16le_b64: artifact.pcmS16leB64,
+        metadata: artifact.metadata
+      })
+    });
+    const responseText = await response.text();
+    const result = parseJsonSafely(responseText);
+
+    if (!response.ok) {
+      throw new Error(
+        `prepare_job failed with ${response.status} ${response.statusText}: ${responseText}`
+      );
+    }
+
+    postPrepareJobResult(iframe, origin, trackId, { ok: true, result });
+  } catch (error) {
+    postPrepareJobResult(iframe, origin, trackId, {
+      ok: false,
+      error: error?.message || String(error)
+    });
+  }
+}
+
+function postPrepareJobResult(iframe, origin, trackId, result) {
+  iframe.contentWindow?.postMessage(
+    {
+      source: PARENT_MESSAGE_SOURCE,
+      type: PREPARE_JOB_RESULT_MESSAGE,
+      trackId,
+      ...result
+    },
+    origin
+  );
+}
+
+function parseJsonSafely(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
 }
 
 function waitForIframeLoad(iframe) {

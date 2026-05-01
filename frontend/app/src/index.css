@@ -125,11 +125,17 @@ button:disabled {
   background: #0d1320;
   border: 1px solid #22304a;
   border-radius: 8px;
+  cursor: pointer;
   display: grid;
   gap: 10px;
   grid-template-columns: 28px 42px minmax(0, 1fr);
   min-height: 58px;
   padding: 7px 10px;
+}
+
+.iframe-track-row:hover,
+.iframe-track-row:focus-visible {
+  border-color: #ff7bc3;
 }
 
 .iframe-track-state {

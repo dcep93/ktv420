@@ -103,3 +103,15 @@ def post_run_job(payload: run_job.Request) -> JSONResponse:
     except Exception:
         err = traceback.format_exc()
         return JSONResponse({"err": err}, 500)
+
+
+@web_app.post("/prepare_job")
+def post_prepare_job(payload: run_job.PrepareJobRequest) -> JSONResponse:
+    logger.log("server.prepare_job.receive")
+    try:
+        request = run_job.prepare_job(payload)
+        logger.log("server.prepare_job.respond")
+        return JSONResponse(request.model_dump())
+    except Exception:
+        err = traceback.format_exc()
+        return JSONResponse({"err": err}, 500)

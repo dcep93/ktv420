@@ -82,6 +82,34 @@ export async function inspectTrackArtifact(trackId) {
   };
 }
 
+export async function readTrackArtifact(trackId) {
+  const root = await navigator.storage.getDirectory();
+  const trackDirectory = await root.getDirectoryHandle(trackId, { create: false });
+  const metadataResult = await readJsonArtifact(trackDirectory, ARTIFACT_FILES.metadata);
+  const pcmResult = await readTextArtifact(trackDirectory, ARTIFACT_FILES.pcmBase64);
+
+  if (metadataResult.error) {
+    throw new Error(metadataResult.error);
+  }
+  if (pcmResult.error) {
+    throw new Error(pcmResult.error);
+  }
+  if (metadataResult.missing) {
+    throw new Error("Missing metadata artifact.");
+  }
+  if (pcmResult.missing) {
+    throw new Error("Missing PCM artifact.");
+  }
+  if (!isValidMetadata(metadataResult.value, trackId)) {
+    throw new Error("Metadata is invalid for the current storage version.");
+  }
+
+  return {
+    metadata: metadataResult.value,
+    pcmS16leB64: pcmResult.value
+  };
+}
+
 export async function writeTrackArtifact(trackId, pcmBase64, metadata) {
   const root = await navigator.storage.getDirectory();
   const trackDirectory = await root.getDirectoryHandle(trackId, { create: true });

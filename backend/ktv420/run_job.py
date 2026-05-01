@@ -1,5 +1,8 @@
+import base64
+import binascii
 import json
 import os
+import re
 import shutil
 import threading
 import time
@@ -7,7 +10,7 @@ import traceback
 import wave
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 import subprocess  # noqa: S404
 from google.auth.credentials import AnonymousCredentials  # type: ignore
@@ -21,6 +24,11 @@ from . import logger, manager
 class Request(BaseModel):
     mp3_path: str
     output_path: str
+
+
+class PrepareJobRequest(BaseModel):
+    pcm_s16le_b64: str
+    metadata: Dict[str, Any]
 
 
 class Response(BaseModel):
@@ -191,6 +199,61 @@ def _encode_mp3(input_wav: Path, mp3_path: Path) -> None:
     )
 
 
+def _encode_pcm_s16le_to_mp3(
+    input_pcm: Path,
+    mp3_path: Path,
+    sample_rate: int,
+    channel_count: int,
+    crop: str,
+) -> None:
+    command = [
+        "ffmpeg",
+        "-y",
+        "-f",
+        "s16le",
+        "-ar",
+        str(sample_rate),
+        "-ac",
+        str(channel_count),
+        "-i",
+        str(input_pcm),
+    ]
+    audio_filter = _build_crop_filter(crop)
+    if audio_filter:
+        command.extend(["-af", audio_filter])
+    command.extend(
+        [
+            "-codec:a",
+            "libmp3lame",
+            "-qscale:a",
+            "2",
+            str(mp3_path),
+        ]
+    )
+    _run_command(
+        command,
+        "prepare_job.encode_mp3.done",
+        "prepare_job.encode_mp3.failed",
+    )
+
+
+def _build_crop_filter(crop: str) -> str:
+    match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)-([0-9]+(?:\.[0-9]+)?)", crop)
+    if not match:
+        return ""
+
+    start_trim = float(match.group(1))
+    end_trim = float(match.group(2))
+    filters = []
+    if start_trim > 0:
+        filters.append(f"atrim=start={start_trim:.6f}")
+    if end_trim > 0:
+        filters.extend(["areverse", f"atrim=start={end_trim:.6f}", "areverse"])
+    if filters:
+        filters.append("asetpts=PTS-STARTPTS")
+    return ",".join(filters)
+
+
 def _run_demucs(audio_path: Path, output_dir: Path) -> Path:
     _STATE.log(f"run_job.demucs.start input={audio_path} output_dir={output_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -249,6 +312,17 @@ def _upload_directory(client: storage.Client, directory: Path, gcs_path: str) ->
     _STATE.log("run_job.upload.done")
 
 
+def _upload_file(client: storage.Client, file_path: Path, gcs_path: str) -> None:
+    bucket_name, blob_path = _parse_gcs_path(gcs_path)
+    _STATE.log(
+        f"prepare_job.upload.start bucket={bucket_name} blob={blob_path} file={file_path}"
+    )
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(blob_path)
+    blob.upload_from_filename(file_path)  # type: ignore[call-arg]
+    _STATE.log("prepare_job.upload.done")
+
+
 def _write_metadata(
     output_dir: Path,
     processing_duration_s: float,
@@ -266,6 +340,92 @@ def _write_metadata(
     }
     metadata_path.write_text(json.dumps(metadata))
     return metadata_path
+
+
+def _metadata_string(metadata: Dict[str, Any], key: str) -> str:
+    value = metadata.get(key)
+    return value if isinstance(value, str) else ""
+
+
+def _metadata_int(metadata: Dict[str, Any], key: str) -> int:
+    value = metadata.get(key)
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return 0
+
+
+def _prepare_job_request(payload: PrepareJobRequest) -> Request:
+    metadata = payload.metadata
+    track_id = _metadata_string(metadata, "trackId")
+    audio_md5 = _metadata_string(metadata, "md5")
+    job_id = audio_md5 if re.fullmatch(r"[a-fA-F0-9]{32}", audio_md5) else track_id
+    if not job_id:
+        raise ValueError("prepare_job metadata must include md5 or trackId")
+
+    filename_id = track_id or job_id
+    filename = re.sub(r"[^A-Za-z0-9._-]+", "-", filename_id).strip(".-") or "input"
+    bucket = os.getenv("PREPARE_JOB_BUCKET", os.getenv("ONEOFF_BUCKET", "stem420-bucket"))
+    prefix = os.getenv("PREPARE_JOB_PREFIX", os.getenv("ONEOFF_PREFIX", "_stem420/")).strip("/")
+    base_path = f"{prefix}/{job_id}" if prefix else job_id
+    return Request(
+        mp3_path=f"gs://{bucket}/{base_path}/input/{filename}.mp3",
+        output_path=f"gs://{bucket}/{base_path}/output/",
+    )
+
+
+def _process_prepare_job(payload: PrepareJobRequest, request: Request) -> None:
+    _STATE.log(
+        f"prepare_job.process.start mp3_path={request.mp3_path} "
+        f"output_path={request.output_path}"
+    )
+
+    try:
+        sample_rate = _metadata_int(payload.metadata, "audioSampleRate")
+        channel_count = _metadata_int(payload.metadata, "audioChannelCount")
+        if sample_rate <= 0:
+            raise ValueError("prepare_job metadata must include audioSampleRate")
+        if channel_count <= 0:
+            raise ValueError("prepare_job metadata must include audioChannelCount")
+
+        pcm_bytes = base64.b64decode(payload.pcm_s16le_b64, validate=True)
+        client = _make_storage_client()
+        with TemporaryDirectory() as tmp_dir:
+            tmp = Path(tmp_dir)
+            pcm_path = tmp / "input.pcm"
+            mp3_path = tmp / "input.mp3"
+            pcm_path.write_bytes(pcm_bytes)
+            _encode_pcm_s16le_to_mp3(
+                pcm_path,
+                mp3_path,
+                sample_rate,
+                channel_count,
+                _metadata_string(payload.metadata, "crop"),
+            )
+            _upload_file(client, mp3_path, request.mp3_path)
+
+    except (binascii.Error, ValueError):
+        _STATE.log("prepare_job.process.error")
+        _STATE.log(traceback.format_exc())
+    except Exception:
+        _STATE.log("prepare_job.process.error")
+        _STATE.log(traceback.format_exc())
+    else:
+        _STATE.log("prepare_job.process.success")
+
+
+def prepare_job(payload: PrepareJobRequest) -> Request:
+    request = _prepare_job_request(payload)
+    thread = threading.Thread(
+        target=_process_prepare_job,
+        args=(payload, request),
+        daemon=True,
+    )
+    thread.start()
+    return request
 
 
 def _process_request(request: Request) -> None:

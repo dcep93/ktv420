@@ -5,8 +5,13 @@ const PARENT_MESSAGE_SOURCE = "ktv420-parent";
 const CLOSE_OVERLAY_MESSAGE = "ktv420:close-overlay";
 const TRACKS_MESSAGE = "ktv420:tracks";
 const TOGGLE_RUN_MESSAGE = "ktv420:toggle-run";
+const PREPARE_JOB_MESSAGE = "ktv420:prepare-job";
+const PREPARE_JOB_RESULT_MESSAGE = "ktv420:prepare-job-result";
 
-type IframeMessageType = typeof CLOSE_OVERLAY_MESSAGE | typeof TOGGLE_RUN_MESSAGE;
+type IframeMessageType =
+  | typeof CLOSE_OVERLAY_MESSAGE
+  | typeof TOGGLE_RUN_MESSAGE
+  | typeof PREPARE_JOB_MESSAGE;
 type OpfsState = "missing" | "hydrated" | "broken";
 type MetadataRecord = Record<string, unknown>;
 
@@ -33,8 +38,8 @@ function getParentOrigin() {
   }
 }
 
-function postParentMessage(type: IframeMessageType) {
-  window.parent.postMessage({ source: IFRAME_MESSAGE_SOURCE, type }, getParentOrigin());
+function postParentMessage(type: IframeMessageType, payload: MetadataRecord = {}) {
+  window.parent.postMessage({ source: IFRAME_MESSAGE_SOURCE, type, ...payload }, getParentOrigin());
 }
 
 export default function IframePage() {
@@ -53,20 +58,22 @@ export default function IframePage() {
       }
 
       const message = event.data;
-      if (
-        !message ||
-        message.source !== PARENT_MESSAGE_SOURCE ||
-        message.type !== TRACKS_MESSAGE ||
-        !Array.isArray(message.tracks)
-      ) {
+      if (!message || message.source !== PARENT_MESSAGE_SOURCE) {
         return;
       }
 
-      setTracks(
-        message.tracks
-          .map((track: unknown) => toIframeTrack(track))
-          .filter((track: IframeTrack | null): track is IframeTrack => track !== null)
-      );
+      if (message.type === TRACKS_MESSAGE && Array.isArray(message.tracks)) {
+        setTracks(
+          message.tracks
+            .map((track: unknown) => toIframeTrack(track))
+            .filter((track: IframeTrack | null): track is IframeTrack => track !== null)
+        );
+        return;
+      }
+
+      if (message.type === PREPARE_JOB_RESULT_MESSAGE) {
+        window.alert(formatPrepareJobResult(message));
+      }
     };
 
     window.addEventListener("message", handleMessage);
@@ -76,6 +83,10 @@ export default function IframePage() {
   const close = () => {
     setTracks(null);
     postParentMessage(CLOSE_OVERLAY_MESSAGE);
+  };
+
+  const prepareTrack = (track: IframeTrack) => {
+    postParentMessage(PREPARE_JOB_MESSAGE, { trackId: track.trackId });
   };
 
   return (
@@ -106,7 +117,16 @@ export default function IframePage() {
             <li
               key={`${track.trackId}-${track.rowIndex}`}
               className="iframe-track-row"
+              role="button"
+              tabIndex={0}
               title={metadataTooltip(track.metadata)}
+              onClick={() => prepareTrack(track)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  prepareTrack(track);
+                }
+              }}
             >
               <span className="iframe-track-state" aria-label={stateLabel(track.opfsState)}>
                 {stateGlyph(track.opfsState)}
@@ -160,6 +180,14 @@ function metadataTooltip(metadata: MetadataRecord | null) {
   return metadata ? JSON.stringify(metadata, null, 2) : undefined;
 }
 
+function formatPrepareJobResult(message: MetadataRecord) {
+  if (message.ok === true) {
+    return JSON.stringify(message.result ?? null, null, 2);
+  }
+
+  return readString(message.error) || "prepare_job failed";
+}
+
 function isRecord(value: unknown): value is MetadataRecord {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
@@ -174,7 +202,7 @@ function isOpfsState(value: unknown): value is OpfsState {
 
 function stateGlyph(state: OpfsState) {
   if (state === "hydrated") {
-    return "☑";
+    return "◪";
   }
 
   if (state === "broken") {
