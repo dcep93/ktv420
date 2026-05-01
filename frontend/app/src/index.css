@@ -125,16 +125,14 @@ button:disabled {
   background: #0d1320;
   border: 1px solid #22304a;
   border-radius: 8px;
-  cursor: pointer;
   display: grid;
   gap: 10px;
-  grid-template-columns: 28px 42px minmax(0, 1fr);
+  grid-template-columns: 28px 42px minmax(0, 1fr) auto;
   min-height: 58px;
   padding: 7px 10px;
 }
 
-.iframe-track-row:hover,
-.iframe-track-row:focus-visible {
+.iframe-track-row:hover {
   border-color: #ff7bc3;
 }
 
@@ -175,4 +173,24 @@ button:disabled {
 .iframe-track-artist {
   color: #9aa8bd;
   font-size: 12px;
+}
+
+.iframe-track-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.iframe-track-actions button {
+  font-size: 12px;
+  padding: 6px 8px;
+}
+
+@media (max-width: 620px) {
+  .iframe-track-row {
+    grid-template-columns: 28px 42px minmax(0, 1fr);
+  }
+
+  .iframe-track-actions {
+    grid-column: 2 / -1;
+  }
 }

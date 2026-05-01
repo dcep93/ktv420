@@ -1,17 +1,22 @@
 import { useEffect, useState } from "react";
 
+import { downloadArtifactsToOpfs } from "./iframeArtifacts";
+
 const IFRAME_MESSAGE_SOURCE = "ktv420-iframe";
 const PARENT_MESSAGE_SOURCE = "ktv420-parent";
 const CLOSE_OVERLAY_MESSAGE = "ktv420:close-overlay";
 const TRACKS_MESSAGE = "ktv420:tracks";
 const TOGGLE_RUN_MESSAGE = "ktv420:toggle-run";
 const PREPARE_JOB_MESSAGE = "ktv420:prepare-job";
+const RUN_JOB_MESSAGE = "ktv420:run-job";
 const PREPARE_JOB_RESULT_MESSAGE = "ktv420:prepare-job-result";
+const RUN_JOB_RESULT_MESSAGE = "ktv420:run-job-result";
 
 type IframeMessageType =
   | typeof CLOSE_OVERLAY_MESSAGE
   | typeof TOGGLE_RUN_MESSAGE
-  | typeof PREPARE_JOB_MESSAGE;
+  | typeof PREPARE_JOB_MESSAGE
+  | typeof RUN_JOB_MESSAGE;
 type OpfsState = "missing" | "hydrated" | "broken";
 type MetadataRecord = Record<string, unknown>;
 
@@ -71,8 +76,8 @@ export default function IframePage() {
         return;
       }
 
-      if (message.type === PREPARE_JOB_RESULT_MESSAGE) {
-        window.alert(formatPrepareJobResult(message));
+      if (message.type === PREPARE_JOB_RESULT_MESSAGE || message.type === RUN_JOB_RESULT_MESSAGE) {
+        window.alert(formatActionResult(message));
       }
     };
 
@@ -87,6 +92,27 @@ export default function IframePage() {
 
   const prepareTrack = (track: IframeTrack) => {
     postParentMessage(PREPARE_JOB_MESSAGE, { trackId: track.trackId });
+  };
+
+  const runTrack = (track: IframeTrack) => {
+    postParentMessage(RUN_JOB_MESSAGE, { trackId: track.trackId });
+  };
+
+  const downloadTrack = async (track: IframeTrack) => {
+    try {
+      const md5 = metadataMd5(track.metadata);
+
+      if (!md5) {
+        throw new Error("Track metadata does not include an md5.");
+      }
+
+      const result = await downloadArtifactsToOpfs(md5, track.metadata ?? {});
+      window.alert(
+        `Downloaded ${result.fileCount} file(s) to OPFS (${result.inputFileCount} input, ${result.outputFileCount} output). Deleted ${result.deletedCount} GCS object(s).`
+      );
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : String(error));
+    }
   };
 
   return (
@@ -117,16 +143,7 @@ export default function IframePage() {
             <li
               key={`${track.trackId}-${track.rowIndex}`}
               className="iframe-track-row"
-              role="button"
-              tabIndex={0}
               title={metadataTooltip(track.metadata)}
-              onClick={() => prepareTrack(track)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  prepareTrack(track);
-                }
-              }}
             >
               <span className="iframe-track-state" aria-label={stateLabel(track.opfsState)}>
                 {stateGlyph(track.opfsState)}
@@ -137,6 +154,31 @@ export default function IframePage() {
               <span className="iframe-track-copy">
                 <span className="iframe-track-name">{track.trackName}</span>
                 <span className="iframe-track-artist">{track.trackArtist}</span>
+              </span>
+              <span className="iframe-track-actions">
+                <button
+                  type="button"
+                  disabled={track.opfsState !== "hydrated"}
+                  onClick={() => prepareTrack(track)}
+                >
+                  Prepare
+                </button>
+                <button
+                  type="button"
+                  disabled={track.opfsState !== "hydrated"}
+                  onClick={() => runTrack(track)}
+                >
+                  Run
+                </button>
+                <button
+                  type="button"
+                  disabled={!metadataMd5(track.metadata)}
+                  onClick={() => {
+                    void downloadTrack(track);
+                  }}
+                >
+                  Download
+                </button>
               </span>
             </li>
           ))}
@@ -180,12 +222,17 @@ function metadataTooltip(metadata: MetadataRecord | null) {
   return metadata ? JSON.stringify(metadata, null, 2) : undefined;
 }
 
-function formatPrepareJobResult(message: MetadataRecord) {
+function formatActionResult(message: MetadataRecord) {
   if (message.ok === true) {
     return JSON.stringify(message.result ?? null, null, 2);
   }
 
-  return readString(message.error) || "prepare_job failed";
+  return readString(message.error) || "Action failed";
+}
+
+function metadataMd5(metadata: MetadataRecord | null) {
+  const md5 = readString(metadata?.md5);
+  return /^[a-fA-F0-9]{32}$/.test(md5) ? md5 : "";
 }
 
 function isRecord(value: unknown): value is MetadataRecord {

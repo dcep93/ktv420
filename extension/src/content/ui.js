@@ -14,7 +14,9 @@ const CLOSE_OVERLAY_MESSAGE = "ktv420:close-overlay";
 const TRACKS_MESSAGE = "ktv420:tracks";
 const TOGGLE_RUN_MESSAGE = "ktv420:toggle-run";
 const PREPARE_JOB_MESSAGE = "ktv420:prepare-job";
+const RUN_JOB_MESSAGE = "ktv420:run-job";
 const PREPARE_JOB_RESULT_MESSAGE = "ktv420:prepare-job-result";
+const RUN_JOB_RESULT_MESSAGE = "ktv420:run-job-result";
 
 export function mountButton({ isRunActive, onToggleRun }) {
   injectStyle();
@@ -99,6 +101,11 @@ export function mountButton({ isRunActive, onToggleRun }) {
 
     if (message.type === PREPARE_JOB_MESSAGE && typeof message.trackId === "string") {
       await prepareTrackJob(message.trackId, iframe, iframeOrigin);
+      return;
+    }
+
+    if (message.type === RUN_JOB_MESSAGE && typeof message.trackId === "string") {
+      await runTrackJob(message.trackId, iframe, iframeOrigin);
     }
   };
 
@@ -254,40 +261,73 @@ async function postTracksToIframe(iframe, origin, tracks) {
 
 async function prepareTrackJob(trackId, iframe, origin) {
   try {
-    const artifact = await readTrackArtifact(trackId);
-    const response = await fetch(`${STEM_API_BASE_URL}/prepare_job`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        pcm_s16le_b64: artifact.pcmS16leB64,
-        metadata: artifact.metadata
-      })
-    });
-    const responseText = await response.text();
-    const result = parseJsonSafely(responseText);
-
-    if (!response.ok) {
-      throw new Error(
-        `prepare_job failed with ${response.status} ${response.statusText}: ${responseText}`
-      );
-    }
-
-    postPrepareJobResult(iframe, origin, trackId, { ok: true, result });
+    const result = await prepareTrackRequest(trackId);
+    postActionResult(iframe, origin, PREPARE_JOB_RESULT_MESSAGE, trackId, { ok: true, result });
   } catch (error) {
-    postPrepareJobResult(iframe, origin, trackId, {
+    postActionResult(iframe, origin, PREPARE_JOB_RESULT_MESSAGE, trackId, {
       ok: false,
       error: error?.message || String(error)
     });
   }
 }
 
-function postPrepareJobResult(iframe, origin, trackId, result) {
+async function runTrackJob(trackId, iframe, origin) {
+  try {
+    const request = await prepareTrackRequest(trackId);
+
+    if (!request) {
+      postActionResult(iframe, origin, RUN_JOB_RESULT_MESSAGE, trackId, {
+        ok: false,
+        error: "MP3 is still preparing. Try again after prepare finishes."
+      });
+      return;
+    }
+
+    const result = await postJson(`${STEM_API_BASE_URL}/run_job`, request, "run_job");
+    postActionResult(iframe, origin, RUN_JOB_RESULT_MESSAGE, trackId, { ok: true, result });
+  } catch (error) {
+    postActionResult(iframe, origin, RUN_JOB_RESULT_MESSAGE, trackId, {
+      ok: false,
+      error: error?.message || String(error)
+    });
+  }
+}
+
+async function prepareTrackRequest(trackId) {
+  const artifact = await readTrackArtifact(trackId);
+  return await postJson(
+    `${STEM_API_BASE_URL}/prepare_job`,
+    {
+      pcm_s16le_b64: artifact.pcmS16leB64,
+      metadata: artifact.metadata
+    },
+    "prepare_job"
+  );
+}
+
+async function postJson(url, payload, label) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+  const responseText = await response.text();
+  const result = parseJsonSafely(responseText);
+
+  if (!response.ok) {
+    throw new Error(`${label} failed with ${response.status} ${response.statusText}: ${responseText}`);
+  }
+
+  return result;
+}
+
+function postActionResult(iframe, origin, type, trackId, result) {
   iframe.contentWindow?.postMessage(
     {
       source: PARENT_MESSAGE_SOURCE,
-      type: PREPARE_JOB_RESULT_MESSAGE,
+      type,
       trackId,
       ...result
     },
