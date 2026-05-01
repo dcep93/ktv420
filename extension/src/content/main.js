@@ -2,6 +2,10 @@ import { createPageBridge } from "./pageBridge.js";
 import { mountButton } from "./ui.js";
 
 const bridge = createPageBridge();
+bridge.inject().catch((error) => {
+  console.warn("[ktv420] Failed to inject page hooks early", error);
+});
+
 let orchestrator = null;
 let orchestratorPromise = null;
 

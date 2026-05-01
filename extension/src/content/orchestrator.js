@@ -64,8 +64,6 @@ export class CaptureOrchestrator extends EventTarget {
     const summary = [];
 
     try {
-      await this.bridge.inject();
-
       if (!isSupportedRoute()) {
         throw new Error("ktv420 runs only on Spotify album and playlist routes.");
       }
@@ -74,6 +72,23 @@ export class CaptureOrchestrator extends EventTarget {
       if (queue.length === 0) {
         throw new Error("No Spotify track rows were found on this page.");
       }
+
+      if (queue.every((item) => item.cached)) {
+        for (const item of queue) {
+          summary.push({
+            alreadyInLocalStorage: true,
+            metadata: item.cachedMetadata
+          });
+        }
+
+        debug.events.push({ type: "all-cached", trackCount: queue.length, at: Date.now() });
+        await copyJsonToClipboard(summary);
+        alert(`ktv420 capture complete. Copied ${summary.length} track record(s) to clipboard.`);
+        console.log("[ktv420] Capture run complete", summary);
+        return;
+      }
+
+      await this.bridge.inject();
 
       const firstRow = resolveTrackRow(queue[0]);
       if (!firstRow) {
@@ -137,6 +152,7 @@ export class CaptureOrchestrator extends EventTarget {
 
       pausePlaybackCleanly();
       await copyJsonToClipboard(summary);
+      alert(`ktv420 capture complete. Copied ${summary.length} track record(s) to clipboard.`);
       console.log("[ktv420] Capture run complete", summary);
     } catch (error) {
       pausePlaybackCleanly();
@@ -150,9 +166,12 @@ export class CaptureOrchestrator extends EventTarget {
         routePathname: window.location.pathname
       };
 
-      await copyJsonToClipboard(report).catch((clipboardError) => {
+      try {
+        await copyJsonToClipboard(report);
+        alert("ktv420 capture failed. Copied the debug report to clipboard.");
+      } catch (clipboardError) {
         report.clipboardError = serializeError(clipboardError);
-      });
+      }
       console.error("[ktv420] Capture run failed", report);
     } finally {
       await this.bridge.command("capture-abort").catch(() => {});

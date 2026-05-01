@@ -41,7 +41,10 @@ export function createPageBridge() {
 
   return {
     inject() {
-      injectPromise ??= injectPageScript();
+      injectPromise ??= injectPageScript().catch((error) => {
+        injectPromise = null;
+        throw error;
+      });
       return injectPromise;
     },
     async command(command, payload = {}, timeoutMs = 5000) {
