@@ -2,7 +2,10 @@ import { SELECTORS } from "./constants.js";
 import { isSupportedRoute } from "./dom.js";
 
 const BUTTON_ID = "ktv420-spotify-capture-button";
+const IFRAME_ID = "ktv420-prepared-iframe";
 const STYLE_ID = "ktv420-spotify-capture-style";
+const LOCAL_IFRAME_SRC = "http://localhost:5173/iframe";
+const PROD_IFRAME_SRC = "https://ktv420.web.app/iframe";
 
 export function mountButton({ isRunActive, onClick }) {
   injectStyle();
@@ -16,6 +19,10 @@ export function mountButton({ isRunActive, onClick }) {
       const parent = logo?.closest("a")?.parentElement;
       if (parent && button.parentElement !== parent) {
         parent.append(button);
+      }
+
+      if (parent) {
+        ensurePreparedIframe();
       }
 
       updateButton(button, isRunActive());
@@ -60,6 +67,7 @@ export function mountButton({ isRunActive, onClick }) {
       observer.disconnect();
       window.clearInterval(intervalId);
       button.remove();
+      document.getElementById(IFRAME_ID)?.remove();
     }
   };
 }
@@ -93,6 +101,24 @@ function updateButton(button, active) {
       ? "Start ktv420 capture run"
       : "ktv420 only runs on Spotify album and playlist pages";
   button.setAttribute("aria-label", active ? "Stop ktv420 capture run" : "ktv420 capture");
+}
+
+function ensurePreparedIframe() {
+  if (document.getElementById(IFRAME_ID)) {
+    return;
+  }
+
+  const iframe = document.createElement("iframe");
+  iframe.id = IFRAME_ID;
+  iframe.src = isProd() ? PROD_IFRAME_SRC : LOCAL_IFRAME_SRC;
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.setAttribute("tabindex", "-1");
+  iframe.title = "ktv420 prepared iframe";
+  document.body.append(iframe);
+}
+
+function isProd() {
+  return new URLSearchParams(window.location.search).has("prod");
 }
 
 function injectStyle() {
@@ -142,6 +168,18 @@ function injectStyle() {
       display: block;
       height: 28px;
       width: 28px;
+    }
+
+    #${IFRAME_ID} {
+      border: 0;
+      height: 1px;
+      left: 0;
+      opacity: 0;
+      pointer-events: none;
+      position: fixed;
+      top: 0;
+      visibility: hidden;
+      width: 1px;
     }
   `;
   document.documentElement.append(style);
