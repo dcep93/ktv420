@@ -1,5 +1,6 @@
 import { SELECTORS } from "./constants.js";
-import { isSupportedRoute } from "./dom.js";
+import { collectTrackRows, isSupportedRoute } from "./dom.js";
+import { inspectTrackArtifact } from "./storage.js";
 
 const BUTTON_ID = "ktv420-spotify-capture-button";
 const IFRAME_ID = "ktv420-prepared-iframe";
@@ -7,7 +8,9 @@ const STYLE_ID = "ktv420-spotify-capture-style";
 const LOCAL_IFRAME_SRC = "http://localhost:5173/iframe";
 const PROD_IFRAME_SRC = "https://ktv420.web.app/iframe";
 const IFRAME_MESSAGE_SOURCE = "ktv420-iframe";
+const PARENT_MESSAGE_SOURCE = "ktv420-parent";
 const CLOSE_OVERLAY_MESSAGE = "ktv420:close-overlay";
+const TRACKS_MESSAGE = "ktv420:tracks";
 const TOGGLE_RUN_MESSAGE = "ktv420:toggle-run";
 
 export function mountButton({ isRunActive, onToggleRun }) {
@@ -15,7 +18,7 @@ export function mountButton({ isRunActive, onToggleRun }) {
 
   const iframeSrc = getIframeSrc();
   const iframeOrigin = new URL(iframeSrc).origin;
-  const button = createButton(() => showIframeOverlay(iframeSrc));
+  const button = createButton(() => showIframeOverlayWithTracks(iframeSrc, iframeOrigin));
   let scheduled = false;
 
   const place = () => {
@@ -121,9 +124,17 @@ function createButton(onClick) {
   button.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    onClick();
+    onClick().catch((error) => {
+      console.error("[ktv420] Failed to open prepared iframe", error);
+    });
   });
   return button;
+}
+
+async function showIframeOverlayWithTracks(src, origin) {
+  const iframe = showIframeOverlay(src);
+  const tracks = await collectIframeTracks();
+  await postTracksToIframe(iframe, origin, tracks);
 }
 
 function showIframeOverlay(src) {
@@ -132,6 +143,7 @@ function showIframeOverlay(src) {
   iframe.setAttribute("aria-hidden", "false");
   iframe.removeAttribute("tabindex");
   iframe.focus();
+  return iframe;
 }
 
 function hideIframeOverlay() {
@@ -169,8 +181,58 @@ function ensurePreparedIframe(src) {
   iframe.setAttribute("aria-hidden", "true");
   iframe.setAttribute("tabindex", "-1");
   iframe.title = "ktv420 prepared iframe";
+  iframe.addEventListener("load", () => {
+    iframe.dataset.loaded = "true";
+  });
   document.body.append(iframe);
   return iframe;
+}
+
+async function collectIframeTracks() {
+  const rows = collectTrackRows();
+  const tracks = [];
+
+  for (const row of rows) {
+    const artifact = await inspectTrackArtifact(row.trackId).catch((error) => ({
+      opfsState: "broken",
+      metadata: null,
+      error: error?.message || String(error)
+    }));
+    tracks.push({
+      trackId: row.trackId,
+      trackName: row.trackName,
+      trackArtist: row.trackArtist,
+      trackArtworkSrc: row.trackArtworkSrc,
+      rowIndex: row.rowIndex,
+      opfsState: artifact.opfsState,
+      metadata: artifact.metadata,
+      ...(artifact.error ? { error: artifact.error } : {})
+    });
+  }
+
+  return tracks;
+}
+
+async function postTracksToIframe(iframe, origin, tracks) {
+  await waitForIframeLoad(iframe);
+  iframe.contentWindow?.postMessage(
+    {
+      source: PARENT_MESSAGE_SOURCE,
+      type: TRACKS_MESSAGE,
+      tracks
+    },
+    origin
+  );
+}
+
+function waitForIframeLoad(iframe) {
+  if (iframe.dataset.loaded === "true") {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    iframe.addEventListener("load", resolve, { once: true });
+  });
 }
 
 function getIframeSrc() {

@@ -19,6 +19,69 @@ export async function readCachedTrack(trackId) {
   return null;
 }
 
+export async function inspectTrackArtifact(trackId) {
+  const root = await navigator.storage.getDirectory();
+  let trackDirectory;
+
+  try {
+    trackDirectory = await root.getDirectoryHandle(trackId, { create: false });
+  } catch (error) {
+    if (isNotFoundError(error)) {
+      return {
+        opfsState: "missing",
+        metadata: null
+      };
+    }
+
+    return {
+      opfsState: "broken",
+      metadata: null,
+      error: error?.message || String(error)
+    };
+  }
+
+  const metadataResult = await readJsonArtifact(trackDirectory, ARTIFACT_FILES.metadata);
+  const pcmResult = await readTextArtifact(trackDirectory, ARTIFACT_FILES.pcmBase64);
+
+  if (metadataResult.missing && pcmResult.missing) {
+    return {
+      opfsState: "missing",
+      metadata: null
+    };
+  }
+
+  const metadata = metadataResult.value || null;
+  const errors = [];
+  if (metadataResult.error) {
+    errors.push(metadataResult.error);
+  }
+  if (pcmResult.error) {
+    errors.push(pcmResult.error);
+  }
+  if (metadataResult.missing) {
+    errors.push("Missing metadata artifact.");
+  }
+  if (pcmResult.missing) {
+    errors.push("Missing PCM artifact.");
+  }
+  if (metadata && !isValidMetadata(metadata, trackId)) {
+    errors.push("Metadata is invalid for the current storage version.");
+  }
+
+  if (errors.length > 0) {
+    return {
+      opfsState: "broken",
+      metadata,
+      error: errors.join(" ")
+    };
+  }
+
+  return {
+    opfsState: "hydrated",
+    metadata
+  };
+}
+
 export async function writeTrackArtifact(trackId, pcmBase64, metadata) {
   const root = await navigator.storage.getDirectory();
   const trackDirectory = await root.getDirectoryHandle(trackId, { create: true });
@@ -41,9 +104,53 @@ export function isValidMetadata(metadata, trackId) {
   );
 }
 
+async function readJsonArtifact(directory, filename) {
+  const textResult = await readTextArtifact(directory, filename);
+  if (textResult.missing || textResult.error) {
+    return textResult;
+  }
+
+  try {
+    return {
+      value: JSON.parse(textResult.value)
+    };
+  } catch (error) {
+    return {
+      value: null,
+      error: error?.message || String(error)
+    };
+  }
+}
+
+async function readTextArtifact(directory, filename) {
+  try {
+    const handle = await directory.getFileHandle(filename, { create: false });
+    const file = await handle.getFile();
+    return {
+      value: await file.text()
+    };
+  } catch (error) {
+    if (isNotFoundError(error)) {
+      return {
+        missing: true,
+        value: null
+      };
+    }
+
+    return {
+      value: null,
+      error: error?.message || String(error)
+    };
+  }
+}
+
 async function writeTextFile(directory, filename, text) {
   const handle = await directory.getFileHandle(filename, { create: true });
   const writable = await handle.createWritable();
   await writable.write(text);
   await writable.close();
+}
+
+function isNotFoundError(error) {
+  return error?.name === "NotFoundError";
 }

@@ -64,6 +64,8 @@ button:disabled {
   align-items: center;
   background: #05070d;
   display: flex;
+  flex-direction: column;
+  gap: 18px;
   min-height: 100vh;
   justify-content: center;
   padding: 24px;
@@ -87,8 +89,8 @@ button:disabled {
   border: 1px solid #ff7bc3;
   color: #fff;
   height: 44px;
-  min-width: 88px;
-  padding: 0 18px;
+  padding: 0;
+  width: 44px;
 }
 
 .iframe-logo-button {
@@ -104,4 +106,67 @@ button:disabled {
   display: block;
   height: 42px;
   width: 42px;
+}
+
+.iframe-track-list {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  max-height: min(66vh, 640px);
+  max-width: min(720px, calc(100vw - 32px));
+  overflow: auto;
+  padding: 0;
+  width: 100%;
+}
+
+.iframe-track-row {
+  align-items: center;
+  background: #0d1320;
+  border: 1px solid #22304a;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 28px 42px minmax(0, 1fr);
+  min-height: 58px;
+  padding: 7px 10px;
+}
+
+.iframe-track-state {
+  color: #f4d5e8;
+  font-size: 20px;
+  line-height: 1;
+  text-align: center;
+}
+
+.iframe-track-artwork {
+  border-radius: 4px;
+  display: block;
+  height: 42px;
+  object-fit: cover;
+  width: 42px;
+}
+
+.iframe-track-copy {
+  display: grid;
+  grid-column: 3;
+  min-width: 0;
+}
+
+.iframe-track-name,
+.iframe-track-artist {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.iframe-track-name {
+  color: #f8fafc;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.iframe-track-artist {
+  color: #9aa8bd;
+  font-size: 12px;
 }
