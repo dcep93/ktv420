@@ -34,6 +34,7 @@ export function isValidMetadata(metadata, trackId) {
       metadata.trackId === trackId &&
       metadata.audioSampleFormat === "PCM_S16LE" &&
       metadata.audioChannelLayout === "interleaved" &&
+      typeof metadata.trackArtworkSrc === "string" &&
       Number.isFinite(metadata.audioByteLength) &&
       typeof metadata.md5 === "string" &&
       metadata.md5.length === 32
