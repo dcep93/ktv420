@@ -10,7 +10,7 @@ import traceback
 import wave
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import subprocess  # noqa: S404
 from google.auth.credentials import AnonymousCredentials  # type: ignore
@@ -44,6 +44,7 @@ class _RunJobState:
         self.logs: List[str] = []
         self.started_jobs = 0
         self.finished_jobs = 0
+        self.preparing_mp3_paths: Set[str] = set()
 
     def log(self, msg: str) -> None:
         logger.log(msg)
@@ -58,12 +59,24 @@ class _RunJobState:
         with self._lock:
             self.finished_jobs += 1
 
+    def mark_prepare_started(self, mp3_path: str) -> bool:
+        with self._lock:
+            if mp3_path in self.preparing_mp3_paths:
+                return False
+            self.preparing_mp3_paths.add(mp3_path)
+            return True
+
+    def mark_prepare_finished(self, mp3_path: str) -> None:
+        with self._lock:
+            self.preparing_mp3_paths.discard(mp3_path)
+
     def state(self) -> Dict[str, object]:
         with self._lock:
             return {
                 "logs": list(self.logs),
                 "started_jobs": self.started_jobs,
                 "finished_jobs": self.finished_jobs,
+                "preparing_mp3_paths": sorted(self.preparing_mp3_paths),
             }
 
 
@@ -323,6 +336,17 @@ def _upload_file(client: storage.Client, file_path: Path, gcs_path: str) -> None
     _STATE.log("prepare_job.upload.done")
 
 
+def _gcs_object_exists(client: storage.Client, gcs_path: str) -> bool:
+    bucket_name, blob_path = _parse_gcs_path(gcs_path)
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(blob_path)
+    exists = bool(blob.exists())  # type: ignore[no-untyped-call]
+    _STATE.log(
+        f"prepare_job.exists bucket={bucket_name} blob={blob_path} exists={exists}"
+    )
+    return exists
+
+
 def _write_metadata(
     output_dir: Path,
     processing_duration_s: float,
@@ -415,17 +439,28 @@ def _process_prepare_job(payload: PrepareJobRequest, request: Request) -> None:
         _STATE.log(traceback.format_exc())
     else:
         _STATE.log("prepare_job.process.success")
+    finally:
+        _STATE.mark_prepare_finished(request.mp3_path)
 
 
-def prepare_job(payload: PrepareJobRequest) -> Request:
+def prepare_job(payload: PrepareJobRequest) -> Optional[Request]:
     request = _prepare_job_request(payload)
+    client = _make_storage_client()
+
+    if _gcs_object_exists(client, request.mp3_path):
+        return request
+
+    if not _STATE.mark_prepare_started(request.mp3_path):
+        _STATE.log(f"prepare_job.process.already_running mp3_path={request.mp3_path}")
+        return None
+
     thread = threading.Thread(
         target=_process_prepare_job,
         args=(payload, request),
         daemon=True,
     )
     thread.start()
-    return request
+    return None
 
 
 def _process_request(request: Request) -> None:
