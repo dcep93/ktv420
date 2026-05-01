@@ -59,3 +59,49 @@ button:disabled {
   cursor: not-allowed;
   transform: none;
 }
+
+.iframe-page {
+  align-items: center;
+  background: #05070d;
+  display: flex;
+  min-height: 100vh;
+  justify-content: center;
+  padding: 24px;
+}
+
+.iframe-actions {
+  align-items: center;
+  display: flex;
+  gap: 16px;
+}
+
+.iframe-close-button,
+.iframe-logo-button {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+}
+
+.iframe-close-button {
+  background: #111827;
+  border: 1px solid #ff7bc3;
+  color: #fff;
+  height: 44px;
+  min-width: 88px;
+  padding: 0 18px;
+}
+
+.iframe-logo-button {
+  background: #111;
+  border: 1px solid #ff7bc3;
+  border-radius: 999px;
+  height: 56px;
+  padding: 0;
+  width: 56px;
+}
+
+.iframe-logo-button img {
+  display: block;
+  height: 42px;
+  width: 42px;
+}

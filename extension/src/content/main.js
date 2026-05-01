@@ -19,7 +19,7 @@ async function getOrchestrator() {
 
 const ui = mountButton({
   isRunActive: () => Boolean(orchestrator?.isActive()),
-  onClick: async () => {
+  onToggleRun: async () => {
     try {
       const runner = await getOrchestrator();
       await runner.toggleRun();

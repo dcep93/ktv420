@@ -6,11 +6,16 @@ const IFRAME_ID = "ktv420-prepared-iframe";
 const STYLE_ID = "ktv420-spotify-capture-style";
 const LOCAL_IFRAME_SRC = "http://localhost:5173/iframe";
 const PROD_IFRAME_SRC = "https://ktv420.web.app/iframe";
+const IFRAME_MESSAGE_SOURCE = "ktv420-iframe";
+const CLOSE_OVERLAY_MESSAGE = "ktv420:close-overlay";
+const TOGGLE_RUN_MESSAGE = "ktv420:toggle-run";
 
-export function mountButton({ isRunActive, onClick }) {
+export function mountButton({ isRunActive, onToggleRun }) {
   injectStyle();
 
-  const button = createButton(onClick);
+  const iframeSrc = getIframeSrc();
+  const iframeOrigin = new URL(iframeSrc).origin;
+  const button = createButton(() => showIframeOverlay(iframeSrc));
   let scheduled = false;
 
   const place = () => {
@@ -22,7 +27,7 @@ export function mountButton({ isRunActive, onClick }) {
       }
 
       if (parent) {
-        ensurePreparedIframe();
+        ensurePreparedIframe(iframeSrc);
       }
 
       updateButton(button, isRunActive());
@@ -60,12 +65,42 @@ export function mountButton({ isRunActive, onClick }) {
   window.addEventListener("hashchange", schedulePlace, { passive: true });
 
   const intervalId = window.setInterval(schedulePlace, 1000);
+  const handleIframeMessage = async (event) => {
+    const iframe = document.getElementById(IFRAME_ID);
+    if (!(iframe instanceof HTMLIFrameElement)) {
+      return;
+    }
+
+    if (event.source !== iframe.contentWindow || event.origin !== iframeOrigin) {
+      return;
+    }
+
+    const message = event.data;
+    if (!message || message.source !== IFRAME_MESSAGE_SOURCE) {
+      return;
+    }
+
+    if (message.type === CLOSE_OVERLAY_MESSAGE) {
+      hideIframeOverlay();
+      return;
+    }
+
+    if (message.type === TOGGLE_RUN_MESSAGE) {
+      await onToggleRun();
+      schedulePlace();
+    }
+  };
+
+  window.addEventListener("message", handleIframeMessage);
 
   return {
     refresh: schedulePlace,
     disconnect: () => {
       observer.disconnect();
       window.clearInterval(intervalId);
+      window.removeEventListener("popstate", schedulePlace);
+      window.removeEventListener("hashchange", schedulePlace);
+      window.removeEventListener("message", handleIframeMessage);
       button.remove();
       document.getElementById(IFRAME_ID)?.remove();
     }
@@ -91,6 +126,25 @@ function createButton(onClick) {
   return button;
 }
 
+function showIframeOverlay(src) {
+  const iframe = ensurePreparedIframe(src);
+  iframe.dataset.open = "true";
+  iframe.setAttribute("aria-hidden", "false");
+  iframe.removeAttribute("tabindex");
+  iframe.focus();
+}
+
+function hideIframeOverlay() {
+  const iframe = document.getElementById(IFRAME_ID);
+  if (!(iframe instanceof HTMLIFrameElement)) {
+    return;
+  }
+
+  iframe.dataset.open = "false";
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.setAttribute("tabindex", "-1");
+}
+
 function updateButton(button, active) {
   const supported = isSupportedRoute();
   button.disabled = !supported && !active;
@@ -103,18 +157,24 @@ function updateButton(button, active) {
   button.setAttribute("aria-label", active ? "Stop ktv420 capture run" : "ktv420 capture");
 }
 
-function ensurePreparedIframe() {
-  if (document.getElementById(IFRAME_ID)) {
-    return;
+function ensurePreparedIframe(src) {
+  const existing = document.getElementById(IFRAME_ID);
+  if (existing instanceof HTMLIFrameElement) {
+    return existing;
   }
 
   const iframe = document.createElement("iframe");
   iframe.id = IFRAME_ID;
-  iframe.src = isProd() ? PROD_IFRAME_SRC : LOCAL_IFRAME_SRC;
+  iframe.src = src;
   iframe.setAttribute("aria-hidden", "true");
   iframe.setAttribute("tabindex", "-1");
   iframe.title = "ktv420 prepared iframe";
   document.body.append(iframe);
+  return iframe;
+}
+
+function getIframeSrc() {
+  return isProd() ? PROD_IFRAME_SRC : LOCAL_IFRAME_SRC;
 }
 
 function isProd() {
@@ -171,15 +231,24 @@ function injectStyle() {
     }
 
     #${IFRAME_ID} {
+      background: #05070d;
       border: 0;
-      height: 1px;
+      height: 100dvh;
+      inset: 0;
       left: 0;
       opacity: 0;
       pointer-events: none;
       position: fixed;
       top: 0;
       visibility: hidden;
-      width: 1px;
+      width: 100vw;
+      z-index: 2147483647;
+    }
+
+    #${IFRAME_ID}[data-open="true"] {
+      opacity: 1;
+      pointer-events: auto;
+      visibility: visible;
     }
   `;
   document.documentElement.append(style);
