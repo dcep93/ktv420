@@ -240,6 +240,11 @@ export class CaptureOrchestrator extends EventTarget {
           throw new Error(`Spotify started ${item.trackName} too far in (${currentTime.toFixed(3)}s).`);
         }
 
+        const mediaArtworkSrc = mediaSessionMatchesItem(snapshot.mediaSession, item)
+          ? largestArtworkSrc(snapshot.mediaSession?.artwork)
+          : "";
+        item.trackArtworkSrc = mediaArtworkSrc || item.trackArtworkSrc || "";
+
         debug.events.push({
           type: "accepted-start",
           trackId: item.trackId,
@@ -423,6 +428,7 @@ function buildMetadata(item, capture, captureEnd) {
     trackId: item.trackId,
     trackName: item.trackName,
     trackArtist: item.trackArtist,
+    trackArtworkSrc: item.trackArtworkSrc || "",
     audioSampleRate: capture.sampleRate,
     audioChannelCount: capture.channelCount,
     audioChannelLayout: "interleaved",
@@ -457,6 +463,29 @@ function mediaSessionMatchesItem(mediaSession, item) {
     looselyMatches(item.trackArtist, mediaSession.artist);
 
   return nameMatches && artistMatches;
+}
+
+function largestArtworkSrc(artwork) {
+  if (!Array.isArray(artwork)) {
+    return "";
+  }
+
+  return artwork
+    .map((item) => ({
+      src: item?.src || "",
+      size: artworkSize(item?.sizes)
+    }))
+    .filter((item) => item.src)
+    .sort((a, b) => b.size - a.size)[0]?.src || "";
+}
+
+function artworkSize(sizes) {
+  const match = String(sizes || "").match(/(\d+)\s*x\s*(\d+)/i);
+  if (!match) {
+    return 0;
+  }
+
+  return Number(match[1]) * Number(match[2]);
 }
 
 function serializeError(error) {

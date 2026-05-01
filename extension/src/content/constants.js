@@ -1,5 +1,5 @@
 export const EXTENSION_NAME = "ktv420";
-export const STORAGE_VERSION = 1;
+export const STORAGE_VERSION = 2;
 
 export const SUPPORTED_ROUTE_RE = /^\/(album|playlist)\/[A-Za-z0-9]+(?:\/|$)/;
 

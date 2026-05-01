@@ -50,14 +50,55 @@ export function collectTrackRows() {
       const artists = Array.from(row.querySelectorAll(SELECTORS.artistAnchor))
         .map((artistAnchor) => compactWhitespace(artistAnchor.textContent))
         .filter(Boolean);
+      const trackArtworkSrc = getLargestRowArtworkSrc(row);
 
       return {
         row,
         rowIndex,
         trackId,
         trackName,
-        trackArtist: Array.from(new Set(artists)).join(", ")
+        trackArtist: Array.from(new Set(artists)).join(", "),
+        trackArtworkSrc
       };
+    })
+    .filter(Boolean);
+}
+
+function getLargestRowArtworkSrc(row) {
+  const candidates = [];
+
+  for (const image of row.querySelectorAll("img")) {
+    if (image.currentSrc || image.src) {
+      candidates.push({
+        src: image.currentSrc || image.src,
+        size:
+          Math.max(image.naturalWidth || 0, image.width || 0) *
+          Math.max(image.naturalHeight || 0, image.height || 0)
+      });
+    }
+
+    for (const candidate of parseSrcset(image.getAttribute("srcset"))) {
+      candidates.push(candidate);
+    }
+  }
+
+  candidates.sort((a, b) => b.size - a.size);
+  return candidates[0]?.src || "";
+}
+
+function parseSrcset(srcset) {
+  if (!srcset) {
+    return [];
+  }
+
+  return srcset
+    .split(",")
+    .map((entry) => {
+      const [src, descriptor = ""] = entry.trim().split(/\s+/, 2);
+      const widthMatch = descriptor.match(/^(\d+)w$/);
+      const densityMatch = descriptor.match(/^([\d.]+)x$/);
+      const width = widthMatch ? Number(widthMatch[1]) : densityMatch ? Number(densityMatch[1]) : 0;
+      return src ? { src, size: width * width } : null;
     })
     .filter(Boolean);
 }
