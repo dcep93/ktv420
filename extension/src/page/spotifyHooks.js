@@ -8,8 +8,8 @@
   }
   window[INSTALL_MARKER] = true;
 
-  const post = (event, payload) => {
-    window.postMessage({ source: SOURCE, event, payload }, window.location.origin);
+  const post = (event, payload, transfer = []) => {
+    window.postMessage({ source: SOURCE, event, payload }, window.location.origin, transfer);
   };
 
   const isSpotifyStateUrl = (url) => {
@@ -142,7 +142,7 @@
           throw new Error(`Unknown ktv420 page command: ${command}`);
         }
 
-        post("command-result", { commandId, ok: true, result });
+        post("command-result", { commandId, ok: true, result }, collectTransferables(result));
       } catch (error) {
         post("command-result", {
           commandId,
@@ -458,6 +458,38 @@
     if (!capture) {
       throw new Error("No active ktv420 page capture.");
     }
+  }
+
+  function collectTransferables(value) {
+    const transferables = [];
+    const transferred = new Set();
+    const seen = new WeakSet();
+
+    const visit = (item) => {
+      if (!item || typeof item !== "object") {
+        return;
+      }
+
+      if (item instanceof ArrayBuffer) {
+        if (item.byteLength > 0 && !transferred.has(item)) {
+          transferred.add(item);
+          transferables.push(item);
+        }
+        return;
+      }
+
+      if (seen.has(item)) {
+        return;
+      }
+      seen.add(item);
+
+      for (const child of Object.values(item)) {
+        visit(child);
+      }
+    };
+
+    visit(value);
+    return transferables;
   }
 
   function isMediaElement(element) {

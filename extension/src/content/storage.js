@@ -41,7 +41,7 @@ export async function inspectTrackArtifact(trackId) {
   }
 
   const metadataResult = await readJsonArtifact(trackDirectory, ARTIFACT_FILES.metadata);
-  const pcmResult = await readTextArtifact(trackDirectory, ARTIFACT_FILES.pcmBase64);
+  const pcmResult = await inspectFileArtifact(trackDirectory, ARTIFACT_FILES.pcmBase64);
 
   if (metadataResult.missing && pcmResult.missing) {
     return {
@@ -139,6 +139,27 @@ async function readTextArtifact(directory, filename) {
 
     return {
       value: null,
+      error: error?.message || String(error)
+    };
+  }
+}
+
+async function inspectFileArtifact(directory, filename) {
+  try {
+    const handle = await directory.getFileHandle(filename, { create: false });
+    await handle.getFile();
+    return {
+      missing: false
+    };
+  } catch (error) {
+    if (isNotFoundError(error)) {
+      return {
+        missing: true
+      };
+    }
+
+    return {
+      missing: false,
       error: error?.message || String(error)
     };
   }

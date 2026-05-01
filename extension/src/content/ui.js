@@ -198,19 +198,38 @@ async function collectIframeTracks() {
       metadata: null,
       error: error?.message || String(error)
     }));
-    tracks.push({
-      trackId: row.trackId,
-      trackName: row.trackName,
-      trackArtist: row.trackArtist,
-      trackArtworkSrc: row.trackArtworkSrc,
+
+    const track = {
       rowIndex: row.rowIndex,
       opfsState: artifact.opfsState,
       metadata: artifact.metadata,
       ...(artifact.error ? { error: artifact.error } : {})
-    });
+    };
+
+    if (!hasDisplayFields(artifact.metadata)) {
+      Object.assign(track, {
+        trackId: row.trackId,
+        trackName: row.trackName,
+        trackArtist: row.trackArtist,
+        trackArtworkSrc: row.trackArtworkSrc
+      });
+    }
+
+    tracks.push(track);
   }
 
   return tracks;
+}
+
+function hasDisplayFields(metadata) {
+  return Boolean(
+    metadata &&
+      typeof metadata === "object" &&
+      typeof metadata.trackId === "string" &&
+      typeof metadata.trackName === "string" &&
+      typeof metadata.trackArtist === "string" &&
+      typeof metadata.trackArtworkSrc === "string"
+  );
 }
 
 async function postTracksToIframe(iframe, origin, tracks) {

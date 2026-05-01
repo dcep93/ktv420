@@ -8,6 +8,7 @@ const TOGGLE_RUN_MESSAGE = "ktv420:toggle-run";
 
 type IframeMessageType = typeof CLOSE_OVERLAY_MESSAGE | typeof TOGGLE_RUN_MESSAGE;
 type OpfsState = "missing" | "hydrated" | "broken";
+type MetadataRecord = Record<string, unknown>;
 
 type IframeTrack = {
   trackId: string;
@@ -16,7 +17,7 @@ type IframeTrack = {
   trackArtworkSrc: string;
   rowIndex: number;
   opfsState: OpfsState;
-  metadata: unknown;
+  metadata: MetadataRecord | null;
   error?: string;
 };
 
@@ -61,7 +62,11 @@ export default function IframePage() {
         return;
       }
 
-      setTracks(message.tracks.filter(isIframeTrack));
+      setTracks(
+        message.tracks
+          .map((track: unknown) => toIframeTrack(track))
+          .filter((track: IframeTrack | null): track is IframeTrack => track !== null)
+      );
     };
 
     window.addEventListener("message", handleMessage);
@@ -101,7 +106,7 @@ export default function IframePage() {
             <li
               key={`${track.trackId}-${track.rowIndex}`}
               className="iframe-track-row"
-              title={JSON.stringify(track, null, 2)}
+              title={metadataTooltip(track.metadata)}
             >
               <span className="iframe-track-state" aria-label={stateLabel(track.opfsState)}>
                 {stateGlyph(track.opfsState)}
@@ -121,20 +126,50 @@ export default function IframePage() {
   );
 }
 
-function isIframeTrack(value: unknown): value is IframeTrack {
+function toIframeTrack(value: unknown): IframeTrack | null {
   if (!value || typeof value !== "object") {
-    return false;
+    return null;
   }
 
-  const track = value as Partial<IframeTrack>;
-  return Boolean(
-    typeof track.trackId === "string" &&
-      typeof track.trackName === "string" &&
-      typeof track.trackArtist === "string" &&
-      typeof track.trackArtworkSrc === "string" &&
-      typeof track.rowIndex === "number" &&
-      (track.opfsState === "missing" || track.opfsState === "hydrated" || track.opfsState === "broken")
-  );
+  const track = value as Record<string, unknown>;
+  const metadata = isRecord(track.metadata) ? track.metadata : null;
+  const trackId = readString(track.trackId) || readString(metadata?.trackId);
+  const trackName = readString(track.trackName) || readString(metadata?.trackName);
+  const trackArtist = readString(track.trackArtist) || readString(metadata?.trackArtist);
+  const trackArtworkSrc = readString(track.trackArtworkSrc) || readString(metadata?.trackArtworkSrc);
+  const rowIndex = typeof track.rowIndex === "number" ? track.rowIndex : null;
+  const opfsState = isOpfsState(track.opfsState) ? track.opfsState : null;
+
+  if (!trackId || !trackName || rowIndex === null || !opfsState) {
+    return null;
+  }
+
+  return {
+    trackId,
+    trackName,
+    trackArtist,
+    trackArtworkSrc,
+    rowIndex,
+    opfsState,
+    metadata,
+    error: readString(track.error) || undefined
+  };
+}
+
+function metadataTooltip(metadata: MetadataRecord | null) {
+  return metadata ? JSON.stringify(metadata, null, 2) : undefined;
+}
+
+function isRecord(value: unknown): value is MetadataRecord {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
+function isOpfsState(value: unknown): value is OpfsState {
+  return value === "missing" || value === "hydrated" || value === "broken";
 }
 
 function stateGlyph(state: OpfsState) {
