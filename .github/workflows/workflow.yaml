@@ -2,6 +2,11 @@ on:
   push:
     branches:
       - main
+
+concurrency:
+  group: ktv420-deploy-main
+  cancel-in-progress: false
+
 jobs:
   clean_cache:
     runs-on: ubuntu-latest
