@@ -2,26 +2,41 @@
   "manifest_version": 3,
   "name": "ktv420",
   "version": "0.1.0",
-  "description": "Capture decoded Spotify Web Player audio artifacts into local OPFS storage.",
+  "description": "Overlay on spotify webapp to remix playlists",
   "icons": {
     "16": "assets/icon-16.png",
     "32": "assets/icon-32.png",
     "48": "assets/icon-48.png",
     "128": "assets/icon-128.png"
   },
-  "permissions": ["clipboardWrite"],
-  "host_permissions": ["https://open.spotify.com/*"],
+  "permissions": [
+    "clipboardWrite"
+  ],
+  "host_permissions": [
+    "https://open.spotify.com/*"
+  ],
   "content_scripts": [
     {
-      "matches": ["https://open.spotify.com/*"],
-      "js": ["src/content/boot.js"],
+      "matches": [
+        "https://open.spotify.com/*"
+      ],
+      "js": [
+        "src/content/boot.js"
+      ],
       "run_at": "document_start"
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["assets/favicon.svg", "assets/icon-*.png", "src/content/*.js", "src/page/*.js"],
-      "matches": ["https://open.spotify.com/*"]
+      "resources": [
+        "assets/favicon.svg",
+        "assets/icon-*.png",
+        "src/content/*.js",
+        "src/page/*.js"
+      ],
+      "matches": [
+        "https://open.spotify.com/*"
+      ]
     }
   ]
 }
