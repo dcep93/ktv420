@@ -1,4 +1,5 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { useEffect } from "react";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 import AdminPage from "../pages/AdminPage";
 import IframePage from "../pages/IframePage";
@@ -6,8 +7,15 @@ import PlayPage from "../pages/PlayPage";
 import RootPage from "../pages/RootPage";
 import SamplePage from "../pages/SamplePage";
 import SettingsPage from "../pages/SettingsPage";
+import { logPageView } from "./firebaseAnalytics";
 
 export default function AppRoutes() {
+  const { hash, pathname, search } = useLocation();
+
+  useEffect(() => {
+    void logPageView(`${pathname}${search}${hash}`);
+  }, [hash, pathname, search]);
+
   return (
     <Routes>
       <Route path="/" element={<RootPage />} />
