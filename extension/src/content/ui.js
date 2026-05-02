@@ -180,7 +180,7 @@ function createButton(onClick) {
   const button = document.createElement("button");
   button.id = BUTTON_ID;
   button.type = "button";
-  button.setAttribute("aria-label", "ktv420 capture");
+  button.setAttribute("aria-label", "Open ktv420");
   button.innerHTML = `<img alt="" src="${chrome.runtime.getURL("assets/favicon.svg")}" />`;
   button.addEventListener("click", (event) => {
     event.preventDefault();
@@ -223,11 +223,11 @@ function updateButton(button, active) {
   button.disabled = !supported && !active;
   button.dataset.active = active ? "true" : "false";
   button.title = active
-    ? "Stop ktv420 capture run"
+    ? "ktv420 capture active"
     : supported
-      ? "Start ktv420 capture run"
-      : "ktv420 only runs on Spotify album and playlist pages";
-  button.setAttribute("aria-label", active ? "Stop ktv420 capture run" : "ktv420 capture");
+      ? "Open ktv420"
+      : "ktv420 works on Spotify album and playlist pages";
+  button.setAttribute("aria-label", active ? "ktv420 capture active" : "Open ktv420");
 }
 
 function ensurePreparedIframe(src) {

@@ -247,7 +247,7 @@ button:disabled {
   border-radius: 8px;
   display: grid;
   gap: 10px;
-  grid-template-columns: 28px 42px minmax(0, 1fr) auto;
+  grid-template-columns: 28px 42px minmax(0, 1fr);
   min-height: 58px;
   padding: 7px 10px;
 }
@@ -295,25 +295,7 @@ button:disabled {
   font-size: 12px;
 }
 
-.iframe-track-actions {
-  display: flex;
-  gap: 6px;
-}
-
-.iframe-track-actions button {
-  font-size: 12px;
-  padding: 6px 8px;
-}
-
 @media (max-width: 620px) {
-  .iframe-track-row {
-    grid-template-columns: 28px 42px minmax(0, 1fr);
-  }
-
-  .iframe-track-actions {
-    grid-column: 2 / -1;
-  }
-
   .iframe-settings-source-header {
     align-items: flex-start;
     flex-direction: column;

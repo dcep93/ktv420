@@ -286,22 +286,6 @@ export default function IframePage() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [close, isReady, toggleRun]);
 
-  const prepareTrack = (track: IframeTrack) => {
-    postParentMessage(PREPARE_JOB_MESSAGE, { trackId: track.trackId });
-  };
-
-  const runTrack = (track: IframeTrack) => {
-    postParentMessage(RUN_JOB_MESSAGE, { trackId: track.trackId });
-  };
-
-  const downloadTrack = async (track: IframeTrack) => {
-    try {
-      await downloadTrackArtifacts(track.trackId, track.metadata ?? {});
-    } catch (error) {
-      window.alert(error instanceof Error ? error.message : String(error));
-    }
-  };
-
   function resetQueueState() {
     queueRef.current = [];
     knownQueueIdsRef.current.clear();
@@ -497,7 +481,7 @@ export default function IframePage() {
         <button
           type="button"
           className="iframe-logo-button"
-          aria-label="Toggle ktv420 capture run"
+          aria-label="Start or stop ktv420 capture"
           aria-disabled={!isReady}
           disabled={!isReady}
           onClick={toggleRun}
@@ -571,30 +555,6 @@ export default function IframePage() {
               <span className="iframe-track-copy">
                 <span className="iframe-track-name">{track.trackName}</span>
                 <span className="iframe-track-artist">{track.trackArtist}</span>
-              </span>
-              <span className="iframe-track-actions">
-                <button
-                  type="button"
-                  disabled={track.opfsState !== "hydrated"}
-                  onClick={() => prepareTrack(track)}
-                >
-                  Prepare
-                </button>
-                <button
-                  type="button"
-                  disabled={track.opfsState !== "hydrated"}
-                  onClick={() => runTrack(track)}
-                >
-                  Run
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void downloadTrack(track);
-                  }}
-                >
-                  Download
-                </button>
               </span>
             </li>
           ))}
