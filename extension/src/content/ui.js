@@ -437,9 +437,9 @@ async function runTrackJob(trackId, iframe, origin, request = null) {
 function isRunRequest(value) {
   return Boolean(
     value &&
-      typeof value === "object" &&
-      typeof value.mp3_path === "string" &&
-      typeof value.output_path === "string"
+    typeof value === "object" &&
+    typeof value.mp3_path === "string" &&
+    typeof value.output_path === "string"
   );
 }
 
@@ -573,7 +573,7 @@ function getIframeSrc() {
 }
 
 function isProd() {
-  return new URLSearchParams(window.location.search).has("prod");
+  return !(new URLSearchParams(window.location.search)).has("dev")
 }
 
 function injectStyle() {
