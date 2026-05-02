@@ -20,6 +20,12 @@ async function getOrchestrator() {
           console.warn("[ktv420] Failed to notify iframe about captured track", error);
         });
       });
+      orchestrator.addEventListener("capturecomplete", (event) => {
+        const detail = event.detail || {};
+        ui.notifyCaptureComplete(detail.trackIds).catch((error) => {
+          console.warn("[ktv420] Failed to notify iframe about capture completion", error);
+        });
+      });
       return orchestrator;
     });
   }

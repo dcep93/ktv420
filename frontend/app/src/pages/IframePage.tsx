@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 
 import {
+  buildStemRunRequest,
   deleteLocalOpfsEntry,
   downloadArtifactsToOpfs,
+  findPreparedInputMp3,
   hasLocalOutputMetadata,
+  hasRemoteOutputMetadata,
   listLocalOpfsEntries,
   type LocalDatabaseEntry
 } from "./iframeArtifacts";
@@ -20,8 +23,10 @@ const DELETE_LOCAL_DATABASE_ENTRY_MESSAGE = "ktv420:delete-local-database-entry"
 const DELETE_TRACK_ARTIFACT_MESSAGE = "ktv420:delete-track-artifact";
 const LOCAL_DATABASE_MESSAGE = "ktv420:local-database";
 const TRACK_CAPTURED_MESSAGE = "ktv420:track-captured";
+const CAPTURE_COMPLETE_MESSAGE = "ktv420:capture-complete";
 const PREPARE_JOB_RESULT_MESSAGE = "ktv420:prepare-job-result";
 const RUN_JOB_RESULT_MESSAGE = "ktv420:run-job-result";
+const POLL_INTERVAL_MS = 1000;
 
 type IframeMessageType =
   | typeof CLOSE_OVERLAY_MESSAGE
@@ -34,6 +39,7 @@ type IframeMessageType =
 type OpfsState = "missing" | "hydrated" | "broken";
 type MetadataRecord = Record<string, unknown>;
 type ViewMode = "tracks" | "settings";
+type JobResultMessageType = typeof PREPARE_JOB_RESULT_MESSAGE | typeof RUN_JOB_RESULT_MESSAGE;
 
 type IframeTrack = {
   trackId: string;
@@ -52,6 +58,16 @@ type LocalDatabaseSource = {
   entries: LocalDatabaseEntry[];
   error?: string;
   loading?: boolean;
+};
+
+type QueueItem = {
+  trackId: string;
+  metadata: MetadataRecord;
+};
+
+type PendingAction = {
+  resolve: (value: unknown) => void;
+  reject: (error: Error) => void;
 };
 
 function getParentOrigin() {
@@ -75,6 +91,17 @@ export default function IframePage() {
   const [isDev, setIsDev] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("tracks");
   const [databaseSources, setDatabaseSources] = useState<LocalDatabaseSource[]>([]);
+  const pendingActionsRef = useRef(new Map<string, PendingAction>());
+  const handleCapturedTrackMessageRef = useRef<(value: MetadataRecord) => void>(() => {});
+  const enqueueCapturedTrackRef = useRef<(value: MetadataRecord) => void>(() => {});
+  const queueRef = useRef<QueueItem[]>([]);
+  const knownQueueIdsRef = useRef(new Set<string>());
+  const completedQueueIdsRef = useRef(new Set<string>());
+  const expectedCaptureIdsRef = useRef<Set<string> | null>(null);
+  const processingQueueRef = useRef(false);
+  const queueFailedRef = useRef(false);
+  const successAlertedRef = useRef(false);
+  const deleteRefreshWaitersRef = useRef(new Map<string, () => void>());
   const isReady = tracks !== null;
 
   useEffect(() => {
@@ -109,8 +136,17 @@ export default function IframePage() {
       }
 
       if (message.type === TRACK_CAPTURED_MESSAGE && isRecord(message.track)) {
-        setTracks((currentTracks) => updateCapturedTrack(currentTracks, message.track));
-        void refreshLocalOutputMetadataForTrack(readString(message.track.trackId), setTracks);
+        handleCapturedTrackMessageRef.current(message.track);
+        enqueueCapturedTrackRef.current(message.track);
+        return;
+      }
+
+      if (message.type === CAPTURE_COMPLETE_MESSAGE && Array.isArray(message.trackIds)) {
+        const trackIds = message.trackIds
+          .map((trackId: unknown) => readString(trackId))
+          .filter(Boolean);
+        expectedCaptureIdsRef.current = new Set(trackIds);
+        maybeAlertCaptureSuccess();
         return;
       }
 
@@ -123,6 +159,11 @@ export default function IframePage() {
       }
 
       if (message.type === PREPARE_JOB_RESULT_MESSAGE || message.type === RUN_JOB_RESULT_MESSAGE) {
+        const handled = settleActionResult(message.type, message);
+        if (handled) {
+          return;
+        }
+
         if (message.ok !== true) {
           window.alert(formatActionResult(message));
         }
@@ -145,6 +186,7 @@ export default function IframePage() {
       return;
     }
 
+    resetQueueState();
     postParentMessage(TOGGLE_RUN_MESSAGE);
   }, [isReady]);
 
@@ -254,15 +296,192 @@ export default function IframePage() {
 
   const downloadTrack = async (track: IframeTrack) => {
     try {
-      await downloadArtifactsToOpfs(track.trackId, track.metadata ?? {});
-      const hasOutputMetadata = await hasLocalOutputMetadata(track.trackId);
-      if (hasOutputMetadata) {
-        postParentMessage(DELETE_TRACK_ARTIFACT_MESSAGE, { trackId: track.trackId });
-      }
+      await downloadTrackArtifacts(track.trackId, track.metadata ?? {});
     } catch (error) {
       window.alert(error instanceof Error ? error.message : String(error));
     }
   };
+
+  function resetQueueState() {
+    queueRef.current = [];
+    knownQueueIdsRef.current.clear();
+    completedQueueIdsRef.current.clear();
+    expectedCaptureIdsRef.current = null;
+    processingQueueRef.current = false;
+    queueFailedRef.current = false;
+    successAlertedRef.current = false;
+    for (const pending of pendingActionsRef.current.values()) {
+      pending.reject(new Error("Capture queue reset."));
+    }
+    pendingActionsRef.current.clear();
+    for (const resolve of deleteRefreshWaitersRef.current.values()) {
+      resolve();
+    }
+    deleteRefreshWaitersRef.current.clear();
+  }
+
+  async function handleCapturedTrackMessage(value: MetadataRecord) {
+    const trackId = readString(value.trackId) || readString((value.metadata as MetadataRecord | null)?.trackId);
+    setTracks((currentTracks) => updateCapturedTrack(currentTracks, value));
+    await refreshLocalOutputMetadataForTrack(trackId, setTracks);
+    settleDeleteRefresh(trackId);
+  }
+
+  handleCapturedTrackMessageRef.current = (value: MetadataRecord) => {
+    void handleCapturedTrackMessage(value);
+  };
+
+  function enqueueCapturedTrack(value: MetadataRecord) {
+    const trackId = readString(value.trackId) || readString((value.metadata as MetadataRecord | null)?.trackId);
+    const metadata = isRecord(value.metadata) ? value.metadata : null;
+
+    if (!trackId || value.opfsState !== "hydrated" || !metadata) {
+      return;
+    }
+
+    if (knownQueueIdsRef.current.has(trackId) || completedQueueIdsRef.current.has(trackId)) {
+      return;
+    }
+
+    knownQueueIdsRef.current.add(trackId);
+    queueRef.current.push({ trackId, metadata });
+    void processQueue();
+  }
+
+  enqueueCapturedTrackRef.current = enqueueCapturedTrack;
+
+  async function processQueue() {
+    if (processingQueueRef.current || queueFailedRef.current) {
+      return;
+    }
+
+    const item = queueRef.current.shift();
+    if (!item) {
+      maybeAlertCaptureSuccess();
+      return;
+    }
+
+    processingQueueRef.current = true;
+
+    try {
+      await sendAction(PREPARE_JOB_MESSAGE, PREPARE_JOB_RESULT_MESSAGE, item.trackId);
+      const inputMp3 = await pollEvery(() => findPreparedInputMp3(item.trackId), POLL_INTERVAL_MS);
+      const runRequest = buildStemRunRequest(item.trackId, inputMp3);
+      await sendAction(RUN_JOB_MESSAGE, RUN_JOB_RESULT_MESSAGE, item.trackId, {
+        request: runRequest
+      });
+      await pollEvery(
+        async () => ((await hasRemoteOutputMetadata(item.trackId)) ? true : null),
+        POLL_INTERVAL_MS
+      );
+      const hasOutputMetadata = await downloadTrackArtifacts(item.trackId, item.metadata);
+      if (!hasOutputMetadata) {
+        throw new Error(`Downloaded artifacts for ${item.trackId} did not include output/_metadata.json.`);
+      }
+      completedQueueIdsRef.current.add(item.trackId);
+    } catch (error) {
+      queueFailedRef.current = true;
+      window.alert(error instanceof Error ? error.message : String(error));
+    } finally {
+      processingQueueRef.current = false;
+    }
+
+    if (!queueFailedRef.current) {
+      void processQueue();
+    }
+  }
+
+  async function downloadTrackArtifacts(trackId: string, metadata: MetadataRecord) {
+    await downloadArtifactsToOpfs(trackId, metadata);
+    const hasOutputMetadata = await hasLocalOutputMetadata(trackId);
+    if (hasOutputMetadata) {
+      const deleteRefreshPromise = waitForDeleteRefresh(trackId);
+      postParentMessage(DELETE_TRACK_ARTIFACT_MESSAGE, { trackId });
+      await deleteRefreshPromise;
+    }
+    return hasOutputMetadata;
+  }
+
+  function sendAction(
+    type: typeof PREPARE_JOB_MESSAGE | typeof RUN_JOB_MESSAGE,
+    resultType: JobResultMessageType,
+    trackId: string,
+    payload: MetadataRecord = {}
+  ) {
+    const key = actionKey(resultType, trackId);
+    if (pendingActionsRef.current.has(key)) {
+      return Promise.reject(new Error(`Already waiting for ${resultType} on ${trackId}.`));
+    }
+
+    const promise = new Promise<unknown>((resolve, reject) => {
+      pendingActionsRef.current.set(key, { resolve, reject });
+    });
+
+    postParentMessage(type, { trackId, ...payload });
+    return promise;
+  }
+
+  function settleActionResult(type: JobResultMessageType, message: MetadataRecord) {
+    const trackId = readString(message.trackId);
+    if (!trackId) {
+      return false;
+    }
+
+    const key = actionKey(type, trackId);
+    const pending = pendingActionsRef.current.get(key);
+    if (!pending) {
+      return false;
+    }
+
+    pendingActionsRef.current.delete(key);
+    if (message.ok === true) {
+      pending.resolve(message.result ?? null);
+    } else {
+      pending.reject(new Error(readString(message.error) || "Action failed"));
+    }
+    return true;
+  }
+
+  function maybeAlertCaptureSuccess() {
+    const expectedTrackIds = expectedCaptureIdsRef.current;
+    if (!expectedTrackIds || expectedTrackIds.size === 0 || successAlertedRef.current || queueFailedRef.current) {
+      return;
+    }
+
+    for (const trackId of expectedTrackIds) {
+      if (!completedQueueIdsRef.current.has(trackId)) {
+        return;
+      }
+    }
+
+    successAlertedRef.current = true;
+    window.alert(`ktv420 capture complete. Processed ${expectedTrackIds.size} track(s).`);
+  }
+
+  function waitForDeleteRefresh(trackId: string) {
+    if (!trackId) {
+      return Promise.resolve();
+    }
+
+    const existingResolve = deleteRefreshWaitersRef.current.get(trackId);
+    if (existingResolve) {
+      existingResolve();
+    }
+
+    return new Promise<void>((resolve) => {
+      deleteRefreshWaitersRef.current.set(trackId, resolve);
+    });
+  }
+
+  function settleDeleteRefresh(trackId: string) {
+    const resolve = deleteRefreshWaitersRef.current.get(trackId);
+    if (!resolve) {
+      return;
+    }
+
+    deleteRefreshWaitersRef.current.delete(trackId);
+    resolve();
+  }
 
   return (
     <main className="iframe-page" aria-label="ktv420 iframe controls">
@@ -462,6 +681,20 @@ function upsertDatabaseSource(sources: LocalDatabaseSource[], nextSource: LocalD
   return nextSources.sort(compareDatabaseSources);
 }
 
+async function pollEvery<T>(callback: () => Promise<T | null>, intervalMs: number) {
+  while (true) {
+    await delay(intervalMs);
+    const value = await callback();
+    if (value !== null) {
+      return value;
+    }
+  }
+}
+
+function actionKey(type: JobResultMessageType, trackId: string) {
+  return `${type}:${trackId}`;
+}
+
 function updateCapturedTrack(currentTracks: IframeTrack[] | null, value: MetadataRecord) {
   if (!currentTracks) {
     return currentTracks;
@@ -627,6 +860,10 @@ function isRecord(value: unknown): value is MetadataRecord {
 
 function readString(value: unknown) {
   return typeof value === "string" ? value : "";
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function isOpfsState(value: unknown): value is OpfsState {

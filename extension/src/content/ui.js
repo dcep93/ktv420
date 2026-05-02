@@ -20,6 +20,7 @@ const DELETE_LOCAL_DATABASE_ENTRY_MESSAGE = "ktv420:delete-local-database-entry"
 const DELETE_TRACK_ARTIFACT_MESSAGE = "ktv420:delete-track-artifact";
 const LOCAL_DATABASE_MESSAGE = "ktv420:local-database";
 const TRACK_CAPTURED_MESSAGE = "ktv420:track-captured";
+const CAPTURE_COMPLETE_MESSAGE = "ktv420:capture-complete";
 const PREPARE_JOB_RESULT_MESSAGE = "ktv420:prepare-job-result";
 const RUN_JOB_RESULT_MESSAGE = "ktv420:run-job-result";
 
@@ -110,7 +111,12 @@ export function mountButton({ isRunActive, onToggleRun }) {
     }
 
     if (message.type === RUN_JOB_MESSAGE && typeof message.trackId === "string") {
-      await runTrackJob(message.trackId, iframe, iframeOrigin);
+      await runTrackJob(
+        message.trackId,
+        iframe,
+        iframeOrigin,
+        isRunRequest(message.request) ? message.request : null
+      );
       return;
     }
 
@@ -144,6 +150,14 @@ export function mountButton({ isRunActive, onToggleRun }) {
       }
 
       await postTrackCapturedToIframe(iframe, iframeOrigin, trackId, metadata);
+    },
+    notifyCaptureComplete: async (trackIds) => {
+      const iframe = document.getElementById(IFRAME_ID);
+      if (!(iframe instanceof HTMLIFrameElement)) {
+        return;
+      }
+
+      await postCaptureCompleteToIframe(iframe, iframeOrigin, trackIds);
     },
     disconnect: () => {
       observer.disconnect();
@@ -369,6 +383,20 @@ async function postTrackCapturedToIframe(iframe, origin, trackId, metadata) {
   );
 }
 
+async function postCaptureCompleteToIframe(iframe, origin, trackIds) {
+  await waitForIframeLoad(iframe);
+  iframe.contentWindow?.postMessage(
+    {
+      source: PARENT_MESSAGE_SOURCE,
+      type: CAPTURE_COMPLETE_MESSAGE,
+      trackIds: Array.isArray(trackIds)
+        ? trackIds.filter((trackId) => typeof trackId === "string" && trackId)
+        : []
+    },
+    origin
+  );
+}
+
 async function prepareTrackJob(trackId, iframe, origin) {
   try {
     const result = await prepareTrackRequest(trackId);
@@ -381,11 +409,11 @@ async function prepareTrackJob(trackId, iframe, origin) {
   }
 }
 
-async function runTrackJob(trackId, iframe, origin) {
+async function runTrackJob(trackId, iframe, origin, request = null) {
   try {
-    const request = await prepareTrackRequest(trackId);
+    const runRequest = request || (await prepareTrackRequest(trackId));
 
-    if (!request) {
+    if (!runRequest) {
       postActionResult(iframe, origin, RUN_JOB_RESULT_MESSAGE, trackId, {
         ok: false,
         error: "MP3 is still preparing. Try again after prepare finishes."
@@ -393,7 +421,7 @@ async function runTrackJob(trackId, iframe, origin) {
       return;
     }
 
-    const result = await postJson(`${STEM_API_BASE_URL}/run_job`, request, "run_job");
+    const result = await postJson(`${STEM_API_BASE_URL}/run_job`, runRequest, "run_job");
     postActionResult(iframe, origin, RUN_JOB_RESULT_MESSAGE, trackId, { ok: true, result });
   } catch (error) {
     postActionResult(iframe, origin, RUN_JOB_RESULT_MESSAGE, trackId, {
@@ -401,6 +429,15 @@ async function runTrackJob(trackId, iframe, origin) {
       error: error?.message || String(error)
     });
   }
+}
+
+function isRunRequest(value) {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof value.mp3_path === "string" &&
+      typeof value.output_path === "string"
+  );
 }
 
 async function prepareTrackRequest(trackId) {

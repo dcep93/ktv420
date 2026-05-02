@@ -1,8 +1,13 @@
 const BUCKET_NAME = "stem420-bucket";
 const STORAGE_API_BASE_URL = "https://storage.googleapis.com/storage/v1";
 
-type GcsObject = {
+export type GcsObject = {
   name: string;
+};
+
+export type StemRunRequest = {
+  mp3_path: string;
+  output_path: string;
 };
 
 type StoredArtifact = {
@@ -101,6 +106,24 @@ export async function hasLocalOutputMetadata(trackId: string) {
 
     throw error;
   }
+}
+
+export async function findPreparedInputMp3(trackId: string) {
+  const inputObjects = await listObjectsWithPrefix(`stems/${trackId}/input/`);
+  return inputObjects.find((object) => object.name.toLowerCase().endsWith(".mp3")) ?? null;
+}
+
+export async function hasRemoteOutputMetadata(trackId: string) {
+  const metadataPath = `stems/${trackId}/output/_metadata.json`;
+  const outputObjects = await listObjectsWithPrefix(metadataPath);
+  return outputObjects.some((object) => object.name === metadataPath);
+}
+
+export function buildStemRunRequest(trackId: string, inputMp3: GcsObject): StemRunRequest {
+  return {
+    mp3_path: `gs://${BUCKET_NAME}/${inputMp3.name}`,
+    output_path: `gs://${BUCKET_NAME}/stems/${trackId}/output/`
+  };
 }
 
 export async function listLocalOpfsEntries() {

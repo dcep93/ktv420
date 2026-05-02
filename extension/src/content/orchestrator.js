@@ -62,6 +62,7 @@ export class CaptureOrchestrator extends EventTarget {
     };
 
     const summary = [];
+    const capturedTrackIds = [];
 
     try {
       if (!isSupportedRoute()) {
@@ -135,6 +136,7 @@ export class CaptureOrchestrator extends EventTarget {
 
         if (pendingCapture) {
           const metadata = await this.storeCapturedTrack(pendingCapture.item, pendingCapture.capture, pendingCapture.captureEnd);
+          capturedTrackIds.push(pendingCapture.item.trackId);
           summary.push({
             alreadyInLocalStorage: false,
             metadata
@@ -157,6 +159,13 @@ export class CaptureOrchestrator extends EventTarget {
       }
 
       pausePlaybackCleanly();
+      this.dispatchEvent(
+        new CustomEvent("capturecomplete", {
+          detail: {
+            trackIds: capturedTrackIds
+          }
+        })
+      );
       console.log("[ktv420] Capture run complete", summary);
     } catch (error) {
       pausePlaybackCleanly();
