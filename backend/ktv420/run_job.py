@@ -10,7 +10,7 @@ import traceback
 import wave
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 
 import subprocess  # noqa: S404
 from google.auth.credentials import AnonymousCredentials  # type: ignore
@@ -31,11 +31,16 @@ class PrepareJobRequest(BaseModel):
     metadata: Dict[str, Any]
 
 
-class Response(BaseModel):
-    pass
+class PrepareJobResponse(BaseModel):
+    status: Literal["started", "already_running", "already_exists"]
+    request: Optional[Request] = None
 
 
-Manager = manager.Manager[Request, Response]
+class RunJobResponse(BaseModel):
+    status: Literal["started", "already_running", "already_exists"]
+
+
+Manager = manager.Manager[Request, RunJobResponse]
 
 
 class _RunJobState:
@@ -45,6 +50,7 @@ class _RunJobState:
         self.started_jobs = 0
         self.finished_jobs = 0
         self.preparing_mp3_paths: Set[str] = set()
+        self.running_output_paths: Set[str] = set()
 
     def log(self, msg: str) -> None:
         logger.log(msg)
@@ -70,6 +76,17 @@ class _RunJobState:
         with self._lock:
             self.preparing_mp3_paths.discard(mp3_path)
 
+    def mark_run_started(self, output_path: str) -> bool:
+        with self._lock:
+            if output_path in self.running_output_paths:
+                return False
+            self.running_output_paths.add(output_path)
+            return True
+
+    def mark_run_finished(self, output_path: str) -> None:
+        with self._lock:
+            self.running_output_paths.discard(output_path)
+
     def state(self) -> Dict[str, object]:
         with self._lock:
             return {
@@ -77,6 +94,7 @@ class _RunJobState:
                 "started_jobs": self.started_jobs,
                 "finished_jobs": self.finished_jobs,
                 "preparing_mp3_paths": sorted(self.preparing_mp3_paths),
+                "running_output_paths": sorted(self.running_output_paths),
             }
 
 
@@ -341,9 +359,7 @@ def _gcs_object_exists(client: storage.Client, gcs_path: str) -> bool:
     bucket = client.bucket(bucket_name)
     blob = bucket.blob(blob_path)
     exists = bool(blob.exists())  # type: ignore[no-untyped-call]
-    _STATE.log(
-        f"prepare_job.exists bucket={bucket_name} blob={blob_path} exists={exists}"
-    )
+    _STATE.log(f"gcs.exists bucket={bucket_name} blob={blob_path} exists={exists}")
     return exists
 
 
@@ -403,6 +419,10 @@ def _make_safe_path_part(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip(".-")
 
 
+def _output_metadata_path(output_path: str) -> str:
+    return f"{output_path.rstrip('/')}/_metadata.json"
+
+
 def _process_prepare_job(payload: PrepareJobRequest, request: Request) -> None:
     _STATE.log(
         f"prepare_job.process.start mp3_path={request.mp3_path} "
@@ -445,16 +465,16 @@ def _process_prepare_job(payload: PrepareJobRequest, request: Request) -> None:
         _STATE.mark_prepare_finished(request.mp3_path)
 
 
-def prepare_job(payload: PrepareJobRequest) -> Optional[Request]:
+def prepare_job(payload: PrepareJobRequest) -> PrepareJobResponse:
     request = _prepare_job_request(payload)
     client = _make_storage_client()
 
     if _gcs_object_exists(client, request.mp3_path):
-        return request
+        return PrepareJobResponse(status="already_exists", request=request)
 
     if not _STATE.mark_prepare_started(request.mp3_path):
         _STATE.log(f"prepare_job.process.already_running mp3_path={request.mp3_path}")
-        return None
+        return PrepareJobResponse(status="already_running")
 
     thread = threading.Thread(
         target=_process_prepare_job,
@@ -462,7 +482,7 @@ def prepare_job(payload: PrepareJobRequest) -> Optional[Request]:
         daemon=True,
     )
     thread.start()
-    return None
+    return PrepareJobResponse(status="started")
 
 
 def _process_request(request: Request) -> None:
@@ -499,13 +519,24 @@ def _process_request(request: Request) -> None:
         _STATE.log("run_job.process.success")
     finally:
         _STATE.mark_finished()
+        _STATE.mark_run_finished(request.output_path)
 
 
-def run_job(request: Request) -> Response:
+def run_job(request: Request) -> RunJobResponse:
+    client = _make_storage_client()
+    metadata_path = _output_metadata_path(request.output_path)
+
+    if _gcs_object_exists(client, metadata_path):
+        return RunJobResponse(status="already_exists")
+
+    if not _STATE.mark_run_started(request.output_path):
+        _STATE.log(f"run_job.process.already_running output_path={request.output_path}")
+        return RunJobResponse(status="already_running")
+
     _STATE.mark_started()
     thread = threading.Thread(target=_process_request, args=(request,), daemon=True)
     thread.start()
-    return Response()
+    return RunJobResponse(status="started")
 
 
 def get_state() -> Dict[str, object]:

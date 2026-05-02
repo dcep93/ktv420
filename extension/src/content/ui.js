@@ -411,7 +411,8 @@ async function prepareTrackJob(trackId, iframe, origin) {
 
 async function runTrackJob(trackId, iframe, origin, request = null) {
   try {
-    const runRequest = request || (await prepareTrackRequest(trackId));
+    const prepareResult = request ? null : await prepareTrackRequest(trackId);
+    const runRequest = request || getPrepareJobRunRequest(prepareResult);
 
     if (!runRequest) {
       postActionResult(iframe, origin, RUN_JOB_RESULT_MESSAGE, trackId, {
@@ -438,6 +439,18 @@ function isRunRequest(value) {
       typeof value.mp3_path === "string" &&
       typeof value.output_path === "string"
   );
+}
+
+function getPrepareJobRunRequest(value) {
+  if (isRunRequest(value)) {
+    return value;
+  }
+
+  if (value && typeof value === "object" && isRunRequest(value.request)) {
+    return value.request;
+  }
+
+  return null;
 }
 
 async function prepareTrackRequest(trackId) {
