@@ -201,13 +201,7 @@ export default function IframePage() {
 
   const downloadTrack = async (track: IframeTrack) => {
     try {
-      const md5 = metadataMd5(track.metadata);
-
-      if (!md5) {
-        throw new Error("Track metadata does not include an md5.");
-      }
-
-      const result = await downloadArtifactsToOpfs(md5, track.metadata ?? {});
+      const result = await downloadArtifactsToOpfs(track.trackId, track.metadata ?? {});
       window.alert(
         `Downloaded ${result.fileCount} file(s) to OPFS (${result.inputFileCount} input, ${result.outputFileCount} output). Deleted ${result.deletedCount} GCS object(s).`
       );
@@ -316,7 +310,6 @@ export default function IframePage() {
                 </button>
                 <button
                   type="button"
-                  disabled={!metadataMd5(track.metadata)}
                   onClick={() => {
                     void downloadTrack(track);
                   }}
@@ -416,11 +409,6 @@ function formatActionResult(message: MetadataRecord) {
   }
 
   return readString(message.error) || "Action failed";
-}
-
-function metadataMd5(metadata: MetadataRecord | null) {
-  const md5 = readString(metadata?.md5);
-  return /^[a-fA-F0-9]{32}$/.test(md5) ? md5 : "";
 }
 
 function databaseSummary(source: LocalDatabaseSource) {

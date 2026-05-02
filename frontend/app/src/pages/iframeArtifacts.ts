@@ -26,9 +26,9 @@ export type DownloadArtifactsResult = {
   manifestPath: string;
 };
 
-export async function downloadArtifactsToOpfs(md5: string, metadata: Record<string, unknown>) {
-  const inputPrefix = `_stem420/${md5}/input/`;
-  const outputPrefix = `_stem420/${md5}/output/`;
+export async function downloadArtifactsToOpfs(trackId: string, metadata: Record<string, unknown>) {
+  const inputPrefix = `stems/${trackId}/input/`;
+  const outputPrefix = `stems/${trackId}/output/`;
   const [inputObjects, outputObjects] = await Promise.all([
     listObjectsWithPrefix(inputPrefix),
     listObjectsWithPrefix(outputPrefix)
@@ -42,14 +42,14 @@ export async function downloadArtifactsToOpfs(md5: string, metadata: Record<stri
     throw new Error(`No input MP3 found under ${inputPrefix}.`);
   }
 
-  await removeOpfsEntry(`stems/${md5}`);
+  await removeOpfsEntry(`stems/${trackId}`);
 
   const objects = [...inputObjects, ...outputObjects];
   const storedFiles: StoredArtifact[] = [];
 
   for (const object of objects) {
     const blob = await fetchObjectBlob(object.name);
-    const localPath = `stems/${md5}/${relativeArtifactPath(md5, object.name)}`;
+    const localPath = `stems/${trackId}/${relativeArtifactPath(trackId, object.name)}`;
     await writeOpfsBlob(localPath, blob);
     storedFiles.push({
       gcsPath: object.name,
@@ -58,13 +58,13 @@ export async function downloadArtifactsToOpfs(md5: string, metadata: Record<stri
     });
   }
 
-  const manifestPath = `stems/${md5}/manifest.json`;
+  const manifestPath = `stems/${trackId}/manifest.json`;
   await writeOpfsText(
     manifestPath,
     JSON.stringify(
       {
         downloadedAt: new Date().toISOString(),
-        md5,
+        trackId,
         metadata,
         files: storedFiles
       },
@@ -210,10 +210,6 @@ async function collectOpfsDirectoryEntries(
 }
 
 function compareDatabaseEntries(a: LocalDatabaseEntry, b: LocalDatabaseEntry) {
-  if (a.kind !== b.kind) {
-    return a.kind === "directory" ? -1 : 1;
-  }
-
   return a.path.localeCompare(b.path);
 }
 
@@ -252,8 +248,8 @@ function isNotFoundError(error: unknown) {
   return error instanceof DOMException && error.name === "NotFoundError";
 }
 
-function relativeArtifactPath(md5: string, objectPath: string) {
-  const prefix = `_stem420/${md5}/`;
+function relativeArtifactPath(trackId: string, objectPath: string) {
+  const prefix = `stems/${trackId}/`;
   return objectPath.startsWith(prefix) ? objectPath.slice(prefix.length) : objectPath;
 }
 

@@ -400,10 +400,6 @@ async function collectOpfsDirectoryEntries(directory, prefix, entries) {
 }
 
 function compareDatabaseEntries(a, b) {
-  if (a.kind !== b.kind) {
-    return a.kind === "directory" ? -1 : 1;
-  }
-
   return a.path.localeCompare(b.path);
 }
 

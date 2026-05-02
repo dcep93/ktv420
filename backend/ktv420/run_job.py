@@ -385,20 +385,22 @@ def _metadata_int(metadata: Dict[str, Any], key: str) -> int:
 def _prepare_job_request(payload: PrepareJobRequest) -> Request:
     metadata = payload.metadata
     track_id = _metadata_string(metadata, "trackId")
-    audio_md5 = _metadata_string(metadata, "md5")
-    job_id = audio_md5 if re.fullmatch(r"[a-fA-F0-9]{32}", audio_md5) else track_id
-    if not job_id:
-        raise ValueError("prepare_job metadata must include md5 or trackId")
+    track_name = _metadata_string(metadata, "trackName")
+    if not track_id:
+        raise ValueError("prepare_job metadata must include trackId")
 
-    filename_id = track_id or job_id
-    filename = re.sub(r"[^A-Za-z0-9._-]+", "-", filename_id).strip(".-") or "input"
+    filename = _make_safe_path_part(track_name) or "input"
     bucket = os.getenv("PREPARE_JOB_BUCKET", os.getenv("ONEOFF_BUCKET", "stem420-bucket"))
-    prefix = os.getenv("PREPARE_JOB_PREFIX", os.getenv("ONEOFF_PREFIX", "_stem420/")).strip("/")
-    base_path = f"{prefix}/{job_id}" if prefix else job_id
+    prefix = os.getenv("PREPARE_JOB_PREFIX", os.getenv("ONEOFF_PREFIX", "stems/")).strip("/")
+    base_path = f"{prefix}/{track_id}" if prefix else track_id
     return Request(
         mp3_path=f"gs://{bucket}/{base_path}/input/{filename}.mp3",
         output_path=f"gs://{bucket}/{base_path}/output/",
     )
+
+
+def _make_safe_path_part(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip(".-")
 
 
 def _process_prepare_job(payload: PrepareJobRequest, request: Request) -> None:
