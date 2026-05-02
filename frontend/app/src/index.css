@@ -183,12 +183,25 @@ button:disabled {
 
 .iframe-database-row {
   align-items: center;
+  background: transparent;
+  border: 0;
   border-top: 1px solid #1d2940;
+  border-radius: 0;
+  color: inherit;
   display: grid;
   gap: 10px;
   grid-template-columns: 44px minmax(0, 1fr) 84px;
   min-height: 30px;
   padding: 5px 0 0;
+  text-align: left;
+  width: 100%;
+}
+
+.iframe-database-row:hover,
+.iframe-database-row:focus-visible {
+  background: #121b2d;
+  border-color: #78dce8;
+  transform: none;
 }
 
 .iframe-database-kind {

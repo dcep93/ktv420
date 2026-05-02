@@ -16,6 +16,7 @@ export type LocalDatabaseEntry = {
   kind: "directory" | "file";
   size?: number;
   modifiedAt?: string;
+  text?: string;
 };
 
 export type DownloadArtifactsResult = {
@@ -91,6 +92,10 @@ export async function listLocalOpfsEntries() {
 
   await collectOpfsDirectoryEntries(root, "", entries);
   return entries.sort(compareDatabaseEntries);
+}
+
+export async function deleteLocalOpfsEntry(path: string) {
+  await removeOpfsEntry(path);
 }
 
 async function listObjectsWithPrefix(prefix: string): Promise<GcsObject[]> {
@@ -204,13 +209,18 @@ async function collectOpfsDirectoryEntries(
       path,
       kind: "file",
       size: file.size,
-      modifiedAt: new Date(file.lastModified).toISOString()
+      modifiedAt: new Date(file.lastModified).toISOString(),
+      ...(isJsonPath(path) ? { text: await file.text() } : {})
     });
   }
 }
 
 function compareDatabaseEntries(a: LocalDatabaseEntry, b: LocalDatabaseEntry) {
   return a.path.localeCompare(b.path);
+}
+
+function isJsonPath(path: string) {
+  return path.toLowerCase().endsWith(".json");
 }
 
 async function removeOpfsEntry(path: string) {

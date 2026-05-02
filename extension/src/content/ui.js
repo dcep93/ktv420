@@ -16,6 +16,7 @@ const TOGGLE_RUN_MESSAGE = "ktv420:toggle-run";
 const PREPARE_JOB_MESSAGE = "ktv420:prepare-job";
 const RUN_JOB_MESSAGE = "ktv420:run-job";
 const REQUEST_LOCAL_DATABASE_MESSAGE = "ktv420:request-local-database";
+const DELETE_LOCAL_DATABASE_ENTRY_MESSAGE = "ktv420:delete-local-database-entry";
 const LOCAL_DATABASE_MESSAGE = "ktv420:local-database";
 const PREPARE_JOB_RESULT_MESSAGE = "ktv420:prepare-job-result";
 const RUN_JOB_RESULT_MESSAGE = "ktv420:run-job-result";
@@ -114,6 +115,13 @@ export function mountButton({ isRunActive, onToggleRun }) {
     if (message.type === REQUEST_LOCAL_DATABASE_MESSAGE) {
       if (!isProd()) {
         await postLocalDatabaseToIframe(iframe, iframeOrigin);
+      }
+      return;
+    }
+
+    if (message.type === DELETE_LOCAL_DATABASE_ENTRY_MESSAGE && typeof message.path === "string") {
+      if (!isProd()) {
+        await deleteLocalDatabaseEntryAndRefresh(message.path, iframe, iframeOrigin);
       }
     }
   };
@@ -284,6 +292,19 @@ async function postLocalDatabaseToIframe(iframe, origin) {
   }
 }
 
+async function deleteLocalDatabaseEntryAndRefresh(path, iframe, origin) {
+  try {
+    await deleteLocalDatabaseEntry(path);
+    await postLocalDatabaseToIframe(iframe, origin);
+  } catch (error) {
+    postLocalDatabaseResult(iframe, origin, {
+      sourceName: "Spotify content script",
+      entries: [],
+      error: error?.message || String(error)
+    });
+  }
+}
+
 async function prepareTrackJob(trackId, iframe, origin) {
   try {
     const result = await prepareTrackRequest(trackId);
@@ -379,6 +400,23 @@ async function collectLocalDatabaseEntries() {
   return entries.sort(compareDatabaseEntries);
 }
 
+async function deleteLocalDatabaseEntry(path) {
+  const root = await navigator.storage.getDirectory();
+  const parts = path.split("/").filter(Boolean);
+  const entryName = parts.pop();
+
+  if (!entryName) {
+    throw new Error("OPFS path must include an entry name.");
+  }
+
+  let directory = root;
+  for (const part of parts) {
+    directory = await directory.getDirectoryHandle(part, { create: false });
+  }
+
+  await directory.removeEntry(entryName, { recursive: true });
+}
+
 async function collectOpfsDirectoryEntries(directory, prefix, entries) {
   for await (const [name, handle] of directory.entries()) {
     const path = prefix ? `${prefix}/${name}` : name;
@@ -394,13 +432,18 @@ async function collectOpfsDirectoryEntries(directory, prefix, entries) {
       path,
       kind: "file",
       size: file.size,
-      modifiedAt: new Date(file.lastModified).toISOString()
+      modifiedAt: new Date(file.lastModified).toISOString(),
+      ...(isJsonPath(path) ? { text: await file.text() } : {})
     });
   }
 }
 
 function compareDatabaseEntries(a, b) {
   return a.path.localeCompare(b.path);
+}
+
+function isJsonPath(path) {
+  return path.toLowerCase().endsWith(".json");
 }
 
 function parseJsonSafely(text) {

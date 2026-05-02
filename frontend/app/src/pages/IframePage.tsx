@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import {
+  deleteLocalOpfsEntry,
   downloadArtifactsToOpfs,
   listLocalOpfsEntries,
   type LocalDatabaseEntry
@@ -14,6 +15,7 @@ const TOGGLE_RUN_MESSAGE = "ktv420:toggle-run";
 const PREPARE_JOB_MESSAGE = "ktv420:prepare-job";
 const RUN_JOB_MESSAGE = "ktv420:run-job";
 const REQUEST_LOCAL_DATABASE_MESSAGE = "ktv420:request-local-database";
+const DELETE_LOCAL_DATABASE_ENTRY_MESSAGE = "ktv420:delete-local-database-entry";
 const LOCAL_DATABASE_MESSAGE = "ktv420:local-database";
 const PREPARE_JOB_RESULT_MESSAGE = "ktv420:prepare-job-result";
 const RUN_JOB_RESULT_MESSAGE = "ktv420:run-job-result";
@@ -23,7 +25,8 @@ type IframeMessageType =
   | typeof TOGGLE_RUN_MESSAGE
   | typeof PREPARE_JOB_MESSAGE
   | typeof RUN_JOB_MESSAGE
-  | typeof REQUEST_LOCAL_DATABASE_MESSAGE;
+  | typeof REQUEST_LOCAL_DATABASE_MESSAGE
+  | typeof DELETE_LOCAL_DATABASE_ENTRY_MESSAGE;
 type OpfsState = "missing" | "hydrated" | "broken";
 type MetadataRecord = Record<string, unknown>;
 type ViewMode = "tracks" | "database";
@@ -169,6 +172,43 @@ export default function IframePage() {
     void loadLocalDatabase();
   }, [loadLocalDatabase, viewMode]);
 
+  const deleteDatabaseEntry = useCallback(
+    async (source: LocalDatabaseSource, entry: LocalDatabaseEntry) => {
+      if (source.sourceName === "Spotify content script") {
+        setDatabaseSources((sources) =>
+          upsertDatabaseSource(sources, { ...source, loading: true, error: undefined })
+        );
+        postParentMessage(DELETE_LOCAL_DATABASE_ENTRY_MESSAGE, { path: entry.path });
+        return;
+      }
+
+      if (source.sourceName !== "Iframe") {
+        return;
+      }
+
+      setDatabaseSources((sources) =>
+        upsertDatabaseSource(sources, { ...source, loading: true, error: undefined })
+      );
+
+      try {
+        await deleteLocalOpfsEntry(entry.path);
+        const entries = await listLocalOpfsEntries();
+        setDatabaseSources((sources) =>
+          upsertDatabaseSource(sources, { sourceName: "Iframe", entries })
+        );
+      } catch (error) {
+        setDatabaseSources((sources) =>
+          upsertDatabaseSource(sources, {
+            sourceName: "Iframe",
+            entries: source.entries,
+            error: error instanceof Error ? error.message : String(error)
+          })
+        );
+      }
+    },
+    []
+  );
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.repeat) {
@@ -258,14 +298,20 @@ export default function IframePage() {
               ) : source.entries.length > 0 ? (
                 <ol className="iframe-database-list">
                   {source.entries.map((entry) => (
-                    <li
-                      className="iframe-database-row"
-                      key={`${source.sourceName}-${entry.path}`}
-                      title={databaseEntryTitle(entry)}
-                    >
-                      <span className="iframe-database-kind">{entry.kind === "directory" ? "dir" : "file"}</span>
-                      <span className="iframe-database-path">{entry.path}</span>
-                      <span className="iframe-database-size">{formatBytes(entry.size)}</span>
+                    <li key={`${source.sourceName}-${entry.path}`}>
+                      <button
+                        type="button"
+                        className="iframe-database-row"
+                        aria-label={`Delete ${entry.kind} ${entry.path} from ${source.sourceName}`}
+                        title={databaseEntryTitle(entry)}
+                        onClick={() => {
+                          void deleteDatabaseEntry(source, entry);
+                        }}
+                      >
+                        <span className="iframe-database-kind">{entry.kind === "directory" ? "dir" : "file"}</span>
+                        <span className="iframe-database-path">{entry.path}</span>
+                        <span className="iframe-database-size">{formatBytes(entry.size)}</span>
+                      </button>
                     </li>
                   ))}
                 </ol>
@@ -389,7 +435,8 @@ function toLocalDatabaseEntry(value: unknown): LocalDatabaseEntry | null {
     path,
     kind,
     size: typeof value.size === "number" && Number.isFinite(value.size) ? value.size : undefined,
-    modifiedAt: readString(value.modifiedAt) || undefined
+    modifiedAt: readString(value.modifiedAt) || undefined,
+    text: readString(value.text) || undefined
   };
 }
 
@@ -428,17 +475,7 @@ function databaseSummary(source: LocalDatabaseSource) {
 }
 
 function databaseEntryTitle(entry: LocalDatabaseEntry) {
-  const details = [entry.path];
-  if (entry.modifiedAt) {
-    details.push(`Modified ${formatTimestamp(entry.modifiedAt)}`);
-  }
-
-  return details.join("\n");
-}
-
-function formatTimestamp(value: string) {
-  const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp) ? new Date(timestamp).toLocaleString() : value;
+  return entry.text;
 }
 
 function formatBytes(value: number | undefined) {
