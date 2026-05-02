@@ -15,6 +15,8 @@ const TRACKS_MESSAGE = "ktv420:tracks";
 const TOGGLE_RUN_MESSAGE = "ktv420:toggle-run";
 const PREPARE_JOB_MESSAGE = "ktv420:prepare-job";
 const RUN_JOB_MESSAGE = "ktv420:run-job";
+const REQUEST_LOCAL_DATABASE_MESSAGE = "ktv420:request-local-database";
+const LOCAL_DATABASE_MESSAGE = "ktv420:local-database";
 const PREPARE_JOB_RESULT_MESSAGE = "ktv420:prepare-job-result";
 const RUN_JOB_RESULT_MESSAGE = "ktv420:run-job-result";
 
@@ -106,6 +108,13 @@ export function mountButton({ isRunActive, onToggleRun }) {
 
     if (message.type === RUN_JOB_MESSAGE && typeof message.trackId === "string") {
       await runTrackJob(message.trackId, iframe, iframeOrigin);
+      return;
+    }
+
+    if (message.type === REQUEST_LOCAL_DATABASE_MESSAGE) {
+      if (!isProd()) {
+        await postLocalDatabaseToIframe(iframe, iframeOrigin);
+      }
     }
   };
 
@@ -252,10 +261,27 @@ async function postTracksToIframe(iframe, origin, tracks) {
     {
       source: PARENT_MESSAGE_SOURCE,
       type: TRACKS_MESSAGE,
+      isDev: !isProd(),
       tracks
     },
     origin
   );
+}
+
+async function postLocalDatabaseToIframe(iframe, origin) {
+  try {
+    const entries = await collectLocalDatabaseEntries();
+    postLocalDatabaseResult(iframe, origin, {
+      sourceName: "Spotify content script",
+      entries
+    });
+  } catch (error) {
+    postLocalDatabaseResult(iframe, origin, {
+      sourceName: "Spotify content script",
+      entries: [],
+      error: error?.message || String(error)
+    });
+  }
 }
 
 async function prepareTrackJob(trackId, iframe, origin) {
@@ -332,6 +358,53 @@ function postActionResult(iframe, origin, type, trackId, result) {
     },
     origin
   );
+}
+
+function postLocalDatabaseResult(iframe, origin, result) {
+  iframe.contentWindow?.postMessage(
+    {
+      source: PARENT_MESSAGE_SOURCE,
+      type: LOCAL_DATABASE_MESSAGE,
+      ...result
+    },
+    origin
+  );
+}
+
+async function collectLocalDatabaseEntries() {
+  const root = await navigator.storage.getDirectory();
+  const entries = [];
+
+  await collectOpfsDirectoryEntries(root, "", entries);
+  return entries.sort(compareDatabaseEntries);
+}
+
+async function collectOpfsDirectoryEntries(directory, prefix, entries) {
+  for await (const [name, handle] of directory.entries()) {
+    const path = prefix ? `${prefix}/${name}` : name;
+
+    if (handle.kind === "directory") {
+      entries.push({ path, kind: "directory" });
+      await collectOpfsDirectoryEntries(handle, path, entries);
+      continue;
+    }
+
+    const file = await handle.getFile();
+    entries.push({
+      path,
+      kind: "file",
+      size: file.size,
+      modifiedAt: new Date(file.lastModified).toISOString()
+    });
+  }
+}
+
+function compareDatabaseEntries(a, b) {
+  if (a.kind !== b.kind) {
+    return a.kind === "directory" ? -1 : 1;
+  }
+
+  return a.path.localeCompare(b.path);
 }
 
 function parseJsonSafely(text) {

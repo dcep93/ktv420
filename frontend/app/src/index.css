@@ -78,7 +78,8 @@ button:disabled {
 }
 
 .iframe-close-button,
-.iframe-logo-button {
+.iframe-logo-button,
+.iframe-database-button {
   align-items: center;
   display: inline-flex;
   justify-content: center;
@@ -108,6 +109,21 @@ button:disabled {
   width: 42px;
 }
 
+.iframe-database-button {
+  background: #111827;
+  border: 1px solid #78dce8;
+  font-size: 24px;
+  height: 44px;
+  line-height: 1;
+  padding: 0;
+  width: 44px;
+}
+
+.iframe-database-button[aria-pressed="true"] {
+  background: #0f2530;
+  box-shadow: 0 0 0 3px rgba(120, 220, 232, 0.2);
+}
+
 .iframe-track-list {
   display: grid;
   gap: 8px;
@@ -118,6 +134,97 @@ button:disabled {
   overflow: auto;
   padding: 0;
   width: 100%;
+}
+
+.iframe-database-view {
+  display: grid;
+  gap: 12px;
+  max-height: min(72vh, 720px);
+  max-width: min(920px, calc(100vw - 32px));
+  overflow: auto;
+  width: 100%;
+}
+
+.iframe-database-source {
+  background: #0d1320;
+  border: 1px solid #22304a;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.iframe-database-source-header {
+  align-items: baseline;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.iframe-database-source-header h2 {
+  color: #f8fafc;
+  font-size: 14px;
+  margin: 0;
+}
+
+.iframe-database-source-header span {
+  color: #9aa8bd;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.iframe-database-list {
+  display: grid;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.iframe-database-row {
+  align-items: center;
+  border-top: 1px solid #1d2940;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 44px minmax(0, 1fr) 84px;
+  min-height: 30px;
+  padding: 5px 0 0;
+}
+
+.iframe-database-kind {
+  color: #78dce8;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.iframe-database-path {
+  color: #e4e7f2;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.iframe-database-size {
+  color: #9aa8bd;
+  font-size: 12px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.iframe-database-empty,
+.iframe-database-error {
+  font-size: 12px;
+  margin: 0;
+}
+
+.iframe-database-empty {
+  color: #9aa8bd;
+}
+
+.iframe-database-error {
+  color: #ff9bcf;
 }
 
 .iframe-track-row {
@@ -192,5 +299,20 @@ button:disabled {
 
   .iframe-track-actions {
     grid-column: 2 / -1;
+  }
+
+  .iframe-database-source-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .iframe-database-row {
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+
+  .iframe-database-size {
+    grid-column: 2;
+    text-align: left;
   }
 }

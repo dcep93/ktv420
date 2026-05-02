@@ -11,6 +11,13 @@ type StoredArtifact = {
   size: number;
 };
 
+export type LocalDatabaseEntry = {
+  path: string;
+  kind: "directory" | "file";
+  size?: number;
+  modifiedAt?: string;
+};
+
 export type DownloadArtifactsResult = {
   deletedCount: number;
   fileCount: number;
@@ -76,6 +83,14 @@ export async function downloadArtifactsToOpfs(md5: string, metadata: Record<stri
     outputFileCount: outputObjects.length,
     manifestPath
   } satisfies DownloadArtifactsResult;
+}
+
+export async function listLocalOpfsEntries() {
+  const root = await navigator.storage.getDirectory();
+  const entries: LocalDatabaseEntry[] = [];
+
+  await collectOpfsDirectoryEntries(root, "", entries);
+  return entries.sort(compareDatabaseEntries);
 }
 
 async function listObjectsWithPrefix(prefix: string): Promise<GcsObject[]> {
@@ -164,6 +179,42 @@ async function getOpfsFileHandle(path: string) {
   }
 
   return await directory.getFileHandle(fileName, { create: true });
+}
+
+async function collectOpfsDirectoryEntries(
+  directory: FileSystemDirectoryHandle,
+  prefix: string,
+  entries: LocalDatabaseEntry[]
+) {
+  const iterableDirectory = directory as FileSystemDirectoryHandle & {
+    entries: () => AsyncIterable<[string, FileSystemHandle]>;
+  };
+
+  for await (const [name, handle] of iterableDirectory.entries()) {
+    const path = prefix ? `${prefix}/${name}` : name;
+
+    if (handle.kind === "directory") {
+      entries.push({ path, kind: "directory" });
+      await collectOpfsDirectoryEntries(handle as FileSystemDirectoryHandle, path, entries);
+      continue;
+    }
+
+    const file = await (handle as FileSystemFileHandle).getFile();
+    entries.push({
+      path,
+      kind: "file",
+      size: file.size,
+      modifiedAt: new Date(file.lastModified).toISOString()
+    });
+  }
+}
+
+function compareDatabaseEntries(a: LocalDatabaseEntry, b: LocalDatabaseEntry) {
+  if (a.kind !== b.kind) {
+    return a.kind === "directory" ? -1 : 1;
+  }
+
+  return a.path.localeCompare(b.path);
 }
 
 async function removeOpfsEntry(path: string) {
