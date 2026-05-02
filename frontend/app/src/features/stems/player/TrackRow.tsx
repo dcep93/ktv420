@@ -55,13 +55,13 @@ export function TrackRow({
       ? "linear-gradient(135deg, rgba(232,206,171,0.16), rgba(201,156,107,0.18))"
       : "var(--ktv-control-bg)",
     color: "var(--ww-text)",
-    padding: "0.45rem 0.9rem",
+    padding: "0.38rem 0.77rem",
     letterSpacing: "0.02em",
     fontWeight: 600,
-    minWidth: "92px",
+    minWidth: "78px",
     boxShadow: isActive
-      ? "0 6px 18px rgba(0,0,0,0.3)"
-      : "0 4px 12px rgba(0,0,0,0.22)",
+      ? "0 5px 15px rgba(0,0,0,0.3)"
+      : "0 3px 10px rgba(0,0,0,0.22)",
     transition: "all 160ms ease",
     cursor: "pointer",
   });
@@ -70,23 +70,26 @@ export function TrackRow({
     <div
       key={track.id}
       style={{
-        borderTop: "1px solid var(--ww-border-soft)",
-        marginBottom: "0.75rem",
-        paddingTop: "0.75rem",
+        background: "rgba(8, 6, 5, 0.72)",
+        border: "1px solid rgba(228, 193, 150, 0.34)",
+        borderRadius: "7px",
+        boxShadow: "0 9px 20px rgba(0, 0, 0, 0.24)",
+        marginBottom: "0.72rem",
+        padding: "0.64rem",
       }}
     >
       <div
         style={{
           display: "flex",
           alignItems: "center",
-          gap: "0.5rem",
+          gap: "0.43rem",
           flexWrap: "wrap",
           justifyContent: "space-between",
-          marginBottom: "0.4rem",
+          marginBottom: "0.34rem",
         }}
       >
         <div
-          style={{ minWidth: "220px", fontWeight: 600, color: "var(--ww-text)" }}
+          style={{ minWidth: "187px", fontWeight: 600, color: "var(--ww-text)" }}
         >
           {label}
         </div>
@@ -94,9 +97,9 @@ export function TrackRow({
           style={{
             alignItems: "center",
             display: "flex",
-            flex: "0 1 420px",
-            gap: "0.4rem",
-            minWidth: "280px",
+            flex: "0 1 357px",
+            gap: "0.34rem",
+            minWidth: "238px",
           }}
         >
           <input
@@ -109,7 +112,7 @@ export function TrackRow({
               onVolumeChange(track.id, Number(event.target.value))
             }
             onDoubleClick={() => onVolumeReset(track.id)}
-            style={{ flex: "0 1 220px", minWidth: "140px" }}
+            style={{ flex: "0 1 187px", minWidth: "119px" }}
           />
           <button
             type="button"
@@ -132,9 +135,9 @@ export function TrackRow({
             {isDeafened ? "🎧" : "🎧"}
           </button>
         </div>
-        <div style={{ display: "flex", gap: "0.4rem" }}>
+        <div style={{ display: "flex", gap: "0.34rem" }}>
           <label
-            style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}
+            style={{ display: "flex", alignItems: "center", gap: "0.34rem" }}
           >
             <span
               title={effectDescription}
@@ -151,8 +154,8 @@ export function TrackRow({
                 background: "var(--ww-panel-strong)",
                 border: "1px solid var(--ww-border)",
                 color: "var(--ww-text)",
-                padding: "0.25rem 0.4rem",
-                borderRadius: "8px",
+                padding: "0.21rem 0.34rem",
+                borderRadius: "7px",
               }}
             >
               {effectOptions.map((option) => (
@@ -171,16 +174,16 @@ export function TrackRow({
                 onEffectValueChange(track.id, Number(event.target.value))
               }
               onDoubleClick={() => onResetEffect(track.id)}
-              style={{ width: "120px" }}
+              style={{ width: "102px" }}
             />
           </label>
         </div>
       </div>
-      <div style={{ marginTop: "0.4rem" }}>
+      <div style={{ marginTop: "0.34rem" }}>
         <canvas
           ref={registerCanvas}
           width={520}
-          height={120}
+          height={102}
           onPointerDown={onCanvasSeek}
           style={{
             border: "1px solid var(--ww-border)",

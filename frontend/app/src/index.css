@@ -111,6 +111,12 @@ button:disabled {
   justify-content: flex-start;
 }
 
+.play-source-row {
+  align-items: baseline;
+  display: flex;
+  gap: 16px;
+}
+
 .standalone-header h1 {
   color: var(--ww-title-pink);
   font-family: "Comic Sans MS", "Comic Sans", cursive;
@@ -141,6 +147,12 @@ button:disabled {
 .play-spotify-link:hover,
 .play-spotify-link:focus-visible {
   text-decoration: underline;
+}
+
+.play-source-row span {
+  color: var(--ww-text-muted);
+  font-size: 13px;
+  white-space: nowrap;
 }
 
 .standalone-header span {

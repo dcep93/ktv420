@@ -149,16 +149,6 @@ export default function PlayPage() {
 
   return (
     <main className="standalone-page play-page" aria-label="ktv420 play">
-      <header className="standalone-header play-header">
-        {spotifyPath ? (
-          <a className="play-spotify-link" href={spotifyUrl} rel="noreferrer" target="_blank">
-            {spotifyLabel}
-          </a>
-        ) : (
-          <h1>Play</h1>
-        )}
-        {record ? <span>{record.tracks.length} track(s)</span> : null}
-      </header>
       {error ? (
         <p className="settings-error">{error}</p>
       ) : loading ? (
@@ -181,6 +171,14 @@ export default function PlayPage() {
                 }
               />
             </section>
+          ) : null}
+          {spotifyPath ? (
+            <div className="play-source-row">
+              <a className="play-spotify-link" href={spotifyUrl} rel="noreferrer" target="_blank">
+                {spotifyLabel}
+              </a>
+              <span>{record.tracks.length} track(s)</span>
+            </div>
           ) : null}
           <ol className="play-track-list">
             {tracks.map((track, index) => {
