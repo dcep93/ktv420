@@ -15,6 +15,7 @@ type PlayTrack = {
   trackName: string;
   trackArtist: string;
   trackArtworkSrc: string;
+  metadata: Record<string, unknown> | null;
   outputMetadata: Record<string, unknown> | null;
 };
 
@@ -164,6 +165,7 @@ export default function PlayPage() {
                 title={activeTrackTitle}
                 spotifyTrackId={activeTrack?.trackId}
                 trackArtworkSrc={activeTrack?.trackArtworkSrc}
+                trackMetadata={activeTrack?.metadata}
                 unavailableMessage={activeUnavailableMessage}
                 hasPreviousTrack={activeTrackIndex > 0}
                 hasNextTrack={activeTrackIndex < tracks.length - 1}
@@ -232,6 +234,7 @@ async function loadPlayTrack(trackId: string): Promise<PlayTrack> {
     trackName: readString(trackMetadata?.trackName),
     trackArtist: readString(trackMetadata?.trackArtist),
     trackArtworkSrc: readString(trackMetadata?.trackArtworkSrc),
+    metadata: trackMetadata,
     outputMetadata: isRecord(outputMetadata) ? outputMetadata : null
   };
 }

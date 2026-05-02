@@ -42,6 +42,7 @@ export type PlayerProps = {
   title?: string;
   spotifyTrackId?: string;
   trackArtworkSrc?: string;
+  trackMetadata?: Record<string, unknown> | null;
   unavailableMessage?: string;
   hasPreviousTrack?: boolean;
   hasNextTrack?: boolean;

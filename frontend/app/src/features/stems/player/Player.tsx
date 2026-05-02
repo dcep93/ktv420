@@ -45,6 +45,7 @@ export default function Player({
   title,
   spotifyTrackId,
   trackArtworkSrc,
+  trackMetadata,
   unavailableMessage,
   hasPreviousTrack = false,
   hasNextTrack = false,
@@ -168,6 +169,13 @@ export default function Player({
       return lookup;
     }, {});
   }, [tracks]);
+
+  useEffect(() => {
+    console.log("Loaded track metadata", {
+      trackId: record.md5,
+      metadata: trackMetadata ?? null,
+    });
+  }, [record.md5, trackMetadata]);
 
   useEffect(() => {
     volumesRef.current = volumes;
