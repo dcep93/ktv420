@@ -617,7 +617,12 @@ button:disabled {
 
 .iframe-track-state[data-state="hydrated"]::before {
   background: currentColor;
-  inset: 6px 16px 6px 6px;
+  clip-path: polygon(0 100%, 100% 0, 100% 100%);
+  inset: 0;
+}
+
+.iframe-track-state[data-state="hydrated"]::after {
+  display: none;
 }
 
 .iframe-track-state[data-state="broken"]::before,
