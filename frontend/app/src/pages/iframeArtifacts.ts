@@ -10,12 +10,6 @@ export type StemRunRequest = {
   output_path: string;
 };
 
-type StoredArtifact = {
-  gcsPath: string;
-  localPath: string;
-  size: number;
-};
-
 type StorageAccessDocument = Document & {
   hasStorageAccess?: () => Promise<boolean>;
   requestStorageAccess?: (types?: { getDirectory?: boolean }) => Promise<StorageAccessHandleLike>;
@@ -38,7 +32,7 @@ export type DownloadArtifactsResult = {
   fileCount: number;
   inputFileCount: number;
   outputFileCount: number;
-  manifestPath: string;
+  metadataPath: string;
 };
 
 export type SavedSpotifyContext = {
@@ -77,43 +71,27 @@ export async function downloadArtifactsToOpfs(trackId: string, metadata: Record<
   await removeOpfsEntry(`stems/${trackId}`);
 
   const objects = [...inputObjects, ...outputObjects];
-  const storedFiles: StoredArtifact[] = [];
+  let fileCount = 0;
 
   for (const object of objects) {
     const blob = await fetchObjectBlob(object.name);
     const localPath = `stems/${trackId}/${relativeArtifactPath(trackId, object.name)}`;
     await writeOpfsBlob(localPath, blob);
-    storedFiles.push({
-      gcsPath: object.name,
-      localPath,
-      size: blob.size
-    });
+    fileCount += 1;
   }
 
-  const manifestPath = `stems/${trackId}/manifest.json`;
-  await writeOpfsText(
-    manifestPath,
-    JSON.stringify(
-      {
-        downloadedAt: new Date().toISOString(),
-        trackId,
-        metadata,
-        files: storedFiles
-      },
-      null,
-      2
-    )
-  );
+  const metadataPath = `stems/${trackId}/metadata.json`;
+  await writeOpfsText(metadataPath, JSON.stringify(metadata, null, 2));
 
   const deletedCount =
     (await deleteObjectsWithPrefix(inputPrefix)) + (await deleteObjectsWithPrefix(outputPrefix));
 
   return {
     deletedCount,
-    fileCount: storedFiles.length,
+    fileCount,
     inputFileCount: inputObjects.length,
     outputFileCount: outputObjects.length,
-    manifestPath
+    metadataPath
   } satisfies DownloadArtifactsResult;
 }
 
@@ -177,8 +155,8 @@ export async function readSpotifyContext(spotifyPath: string) {
   return value;
 }
 
-export async function readTrackManifest(trackId: string) {
-  return await readOpfsJson(`stems/${trackId}/manifest.json`);
+export async function readTrackMetadata(trackId: string) {
+  return await readOpfsJson(`stems/${trackId}/metadata.json`);
 }
 
 export async function readTrackOutputMetadata(trackId: string) {

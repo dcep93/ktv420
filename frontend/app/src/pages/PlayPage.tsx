@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 import {
   readSpotifyContext,
-  readTrackManifest,
+  readTrackMetadata,
   readTrackOutputMetadata,
   type SavedSpotifyContext
 } from "./iframeArtifacts";
@@ -18,6 +18,8 @@ type PlayTrack = {
 export default function PlayPage() {
   const [hashSpotifyPath, setHashSpotifyPath] = useState(readSpotifyPathHash);
   const spotifyPath = hashSpotifyPath;
+  const spotifyUrl = spotifyPath ? `https://open.spotify.com/${spotifyPath}` : "";
+  const spotifyLabel = spotifyPath ? `open.spotify.com/${spotifyPath}` : "";
   const [record, setRecord] = useState<SavedSpotifyContext | null>(null);
   const [tracks, setTracks] = useState<PlayTrack[]>([]);
   const [loading, setLoading] = useState(true);
@@ -77,7 +79,15 @@ export default function PlayPage() {
   return (
     <main className="standalone-page" aria-label="ktv420 play">
       <header className="standalone-header">
-        <h1>{spotifyPath || "Play"}</h1>
+        <h1>
+          {spotifyPath ? (
+            <a href={spotifyUrl} rel="noreferrer" target="_blank">
+              {spotifyLabel}
+            </a>
+          ) : (
+            "Play"
+          )}
+        </h1>
         {record ? <span>{record.tracks.length} track(s)</span> : null}
       </header>
       {error ? (
@@ -112,17 +122,17 @@ export default function PlayPage() {
 }
 
 async function loadPlayTrack(trackId: string): Promise<PlayTrack> {
-  const [manifest, outputMetadata] = await Promise.all([
-    readTrackManifest(trackId),
+  const [metadata, outputMetadata] = await Promise.all([
+    readTrackMetadata(trackId),
     readTrackOutputMetadata(trackId)
   ]);
-  const metadata = isRecord(manifest) && isRecord(manifest.metadata) ? manifest.metadata : null;
+  const trackMetadata = isRecord(metadata) ? metadata : null;
 
   return {
     trackId,
-    trackName: readString(metadata?.trackName),
-    trackArtist: readString(metadata?.trackArtist),
-    trackArtworkSrc: readString(metadata?.trackArtworkSrc),
+    trackName: readString(trackMetadata?.trackName),
+    trackArtist: readString(trackMetadata?.trackArtist),
+    trackArtworkSrc: readString(trackMetadata?.trackArtworkSrc),
     outputMetadata: isRecord(outputMetadata) ? outputMetadata : null
   };
 }
