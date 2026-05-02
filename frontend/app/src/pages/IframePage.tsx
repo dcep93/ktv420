@@ -2,10 +2,13 @@ import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateA
 
 import {
   buildStemRunRequest,
+  deleteLocalOpfsEntry,
   downloadArtifactsToOpfs,
   findPreparedInputMp3,
   hasLocalOutputMetadata,
   hasRemoteOutputMetadata,
+  listLocalOpfsEntries,
+  requestUnpartitionedOpfsAccess,
   saveSpotifyContext,
   type LocalDatabaseEntry
 } from "./iframeArtifacts";
@@ -26,6 +29,8 @@ const CAPTURE_COMPLETE_MESSAGE = "ktv420:capture-complete";
 const PREPARE_JOB_RESULT_MESSAGE = "ktv420:prepare-job-result";
 const RUN_JOB_RESULT_MESSAGE = "ktv420:run-job-result";
 const POLL_INTERVAL_MS = 1000;
+const IFRAME_DATABASE_SOURCE_NAME = "Iframe";
+const SPOTIFY_DATABASE_SOURCE_NAME = "Spotify content script";
 
 type IframeMessageType =
   | typeof CLOSE_OVERLAY_MESSAGE
@@ -187,14 +192,41 @@ export default function IframePage() {
     postParentMessage(CLOSE_OVERLAY_MESSAGE);
   }, []);
 
-  const toggleRun = useCallback(() => {
+  const toggleRun = useCallback(async () => {
     if (!isReady) {
+      return;
+    }
+
+    try {
+      await requestUnpartitionedOpfsAccess();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : String(error));
       return;
     }
 
     resetQueueState();
     postParentMessage(TOGGLE_RUN_MESSAGE);
   }, [isReady]);
+
+  const loadIframeDatabaseSource = useCallback(async () => {
+    try {
+      const entries = await listLocalOpfsEntries();
+      setDatabaseSources((sources) =>
+        upsertDatabaseSource(sources, {
+          sourceName: IFRAME_DATABASE_SOURCE_NAME,
+          entries
+        })
+      );
+    } catch (error) {
+      setDatabaseSources((sources) =>
+        upsertDatabaseSource(sources, {
+          sourceName: IFRAME_DATABASE_SOURCE_NAME,
+          entries: [],
+          error: error instanceof Error ? error.message : String(error)
+        })
+      );
+    }
+  }, []);
 
   const loadSettingsView = useCallback(async () => {
     if (!isDev) {
@@ -203,10 +235,24 @@ export default function IframePage() {
 
     setViewMode("settings");
     setDatabaseSources([
-      { sourceName: "Spotify content script", entries: [], loading: true }
+      { sourceName: SPOTIFY_DATABASE_SOURCE_NAME, entries: [], loading: true },
+      { sourceName: IFRAME_DATABASE_SOURCE_NAME, entries: [], loading: true }
     ]);
     postParentMessage(REQUEST_LOCAL_DATABASE_MESSAGE);
-  }, [isDev]);
+    try {
+      await requestUnpartitionedOpfsAccess();
+      await loadIframeDatabaseSource();
+      void refreshLocalOutputMetadata(tracksRef.current ?? [], setTracks);
+    } catch (error) {
+      setDatabaseSources((sources) =>
+        upsertDatabaseSource(sources, {
+          sourceName: IFRAME_DATABASE_SOURCE_NAME,
+          entries: [],
+          error: error instanceof Error ? error.message : String(error)
+        })
+      );
+    }
+  }, [isDev, loadIframeDatabaseSource]);
 
   const toggleSettingsView = useCallback(() => {
     if (viewMode === "settings") {
@@ -219,7 +265,7 @@ export default function IframePage() {
 
   const deleteDatabaseEntry = useCallback(
     async (source: LocalDatabaseSource, entry: LocalDatabaseEntry) => {
-      if (source.sourceName === "Spotify content script") {
+      if (source.sourceName === SPOTIFY_DATABASE_SOURCE_NAME) {
         setDatabaseSources((sources) =>
           upsertDatabaseSource(sources, { ...source, loading: true, error: undefined })
         );
@@ -227,11 +273,28 @@ export default function IframePage() {
         return;
       }
 
-      if (source.sourceName !== "Iframe") {
+      if (source.sourceName !== IFRAME_DATABASE_SOURCE_NAME) {
         return;
       }
+
+      setDatabaseSources((sources) =>
+        upsertDatabaseSource(sources, { ...source, loading: true, error: undefined })
+      );
+
+      try {
+        await deleteLocalOpfsEntry(entry.path);
+        await loadIframeDatabaseSource();
+      } catch (error) {
+        setDatabaseSources((sources) =>
+          upsertDatabaseSource(sources, {
+            sourceName: IFRAME_DATABASE_SOURCE_NAME,
+            entries: [],
+            error: error instanceof Error ? error.message : String(error)
+          })
+        );
+      }
     },
-    []
+    [loadIframeDatabaseSource]
   );
 
   useEffect(() => {
@@ -829,11 +892,11 @@ function compareDatabaseSources(a: LocalDatabaseSource, b: LocalDatabaseSource) 
 }
 
 function databaseSourceOrder(sourceName: string) {
-  if (sourceName === "Spotify content script") {
+  if (sourceName === SPOTIFY_DATABASE_SOURCE_NAME) {
     return 0;
   }
 
-  if (sourceName === "Iframe") {
+  if (sourceName === IFRAME_DATABASE_SOURCE_NAME) {
     return 1;
   }
 

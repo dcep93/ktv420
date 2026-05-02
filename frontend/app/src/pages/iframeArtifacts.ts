@@ -16,6 +16,15 @@ type StoredArtifact = {
   size: number;
 };
 
+type StorageAccessDocument = Document & {
+  hasStorageAccess?: () => Promise<boolean>;
+  requestStorageAccess?: (types?: { getDirectory?: boolean }) => Promise<StorageAccessHandleLike>;
+};
+
+type StorageAccessHandleLike = {
+  getDirectory?: () => Promise<FileSystemDirectoryHandle>;
+};
+
 export type LocalDatabaseEntry = {
   path: string;
   kind: "directory" | "file";
@@ -36,6 +45,18 @@ export type SavedSpotifyContext = {
   id: string;
   tracks: string[];
 };
+
+let unpartitionedOpfsRoot: FileSystemDirectoryHandle | null = null;
+let unpartitionedOpfsRootPromise: Promise<FileSystemDirectoryHandle> | null = null;
+
+export async function requestUnpartitionedOpfsAccess() {
+  if (!isEmbeddedInCrossOriginFrame()) {
+    return true;
+  }
+
+  await getOpfsRoot({ requestUnpartitionedAccess: true });
+  return true;
+}
 
 export async function downloadArtifactsToOpfs(trackId: string, metadata: Record<string, unknown>) {
   const inputPrefix = `stems/${trackId}/input/`;
@@ -98,14 +119,14 @@ export async function downloadArtifactsToOpfs(trackId: string, metadata: Record<
 
 export async function hasLocalOutputMetadata(trackId: string) {
   try {
-    const root = await navigator.storage.getDirectory();
+    const root = await getOpfsRoot();
     const stemsDirectory = await root.getDirectoryHandle("stems", { create: false });
     const trackDirectory = await stemsDirectory.getDirectoryHandle(trackId, { create: false });
     const outputDirectory = await trackDirectory.getDirectoryHandle("output", { create: false });
     await outputDirectory.getFileHandle("_metadata.json", { create: false });
     return true;
   } catch (error) {
-    if (isNotFoundError(error)) {
+    if (isNotFoundError(error) || isStorageAccessRequiredError(error)) {
       return false;
     }
 
@@ -132,7 +153,7 @@ export function buildStemRunRequest(trackId: string, inputMp3: GcsObject): StemR
 }
 
 export async function listLocalOpfsEntries() {
-  const root = await navigator.storage.getDirectory();
+  const root = await getOpfsRoot();
   const entries: LocalDatabaseEntry[] = [];
 
   await collectOpfsDirectoryEntries(root, "", entries);
@@ -236,7 +257,7 @@ async function writeOpfsText(path: string, text: string) {
 }
 
 async function readOpfsText(path: string) {
-  const root = await navigator.storage.getDirectory();
+  const root = await getOpfsRoot();
   const parts = path.split("/").filter(Boolean);
   const fileName = parts.pop();
 
@@ -280,7 +301,7 @@ async function readOpfsJson(path: string) {
 }
 
 async function getOpfsFileHandle(path: string) {
-  const root = await navigator.storage.getDirectory();
+  const root = await getOpfsRoot();
   const parts = path.split("/").filter(Boolean);
   const fileName = parts.pop();
 
@@ -334,7 +355,7 @@ function isJsonPath(path: string) {
 }
 
 async function removeOpfsEntry(path: string) {
-  const root = await navigator.storage.getDirectory();
+  const root = await getOpfsRoot();
   const parts = path.split("/").filter(Boolean);
   const entryName = parts.pop();
 
@@ -366,6 +387,90 @@ async function removeOpfsEntry(path: string) {
 
 function isNotFoundError(error: unknown) {
   return error instanceof DOMException && error.name === "NotFoundError";
+}
+
+function isStorageAccessRequiredError(error: unknown) {
+  return error instanceof Error && error.name === "StorageAccessRequiredError";
+}
+
+async function getOpfsRoot(options: { requestUnpartitionedAccess?: boolean } = {}) {
+  if (!isEmbeddedInCrossOriginFrame()) {
+    return await navigator.storage.getDirectory();
+  }
+
+  if (unpartitionedOpfsRoot) {
+    return unpartitionedOpfsRoot;
+  }
+
+  if (unpartitionedOpfsRootPromise) {
+    return await unpartitionedOpfsRootPromise;
+  }
+
+  const storageDocument = document as StorageAccessDocument;
+  if (typeof storageDocument.requestStorageAccess !== "function") {
+    throw storageAccessRequiredError("This browser cannot expose unpartitioned OPFS inside the iframe.");
+  }
+
+  if (!options.requestUnpartitionedAccess && typeof storageDocument.hasStorageAccess === "function") {
+    const hasStorageAccess = await storageDocument.hasStorageAccess();
+    if (!hasStorageAccess) {
+      throw storageAccessRequiredError("Allow storage access to read the same OPFS used by /settings.");
+    }
+  }
+
+  unpartitionedOpfsRootPromise = storageDocument
+    .requestStorageAccess({ getDirectory: true })
+    .then(async (storageAccessHandle) => {
+      if (typeof storageAccessHandle?.getDirectory !== "function") {
+        throw storageAccessRequiredError("Storage access was granted without OPFS directory access.");
+      }
+
+      unpartitionedOpfsRoot = await storageAccessHandle.getDirectory();
+      return unpartitionedOpfsRoot;
+    })
+    .catch((error) => {
+      unpartitionedOpfsRootPromise = null;
+      throw storageAccessRequiredError(
+        `Storage access was not granted, so the iframe cannot use the same OPFS as /settings. ${formatErrorMessage(error)}`
+      );
+    });
+
+  return await unpartitionedOpfsRootPromise;
+}
+
+function storageAccessRequiredError(message: string) {
+  const error = new Error(message);
+  error.name = "StorageAccessRequiredError";
+  return error;
+}
+
+function formatErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return String(error);
+}
+
+function isEmbeddedInCrossOriginFrame() {
+  if (window.top === window) {
+    return false;
+  }
+
+  const parentOrigin = getParentOrigin();
+  return parentOrigin !== window.location.origin;
+}
+
+function getParentOrigin() {
+  if (!document.referrer) {
+    return "";
+  }
+
+  try {
+    return new URL(document.referrer).origin;
+  } catch {
+    return "";
+  }
 }
 
 function relativeArtifactPath(trackId: string, objectPath: string) {
