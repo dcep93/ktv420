@@ -1060,7 +1060,7 @@ export default function Player({
         style={{
           display: "flex",
           alignItems: "center",
-          gap: "0.75rem",
+          gap: "0.6rem",
           flexWrap: "wrap",
           justifyContent: "space-between",
         }}
@@ -1069,17 +1069,24 @@ export default function Player({
           style={{
             display: "flex",
             alignItems: "center",
-            gap: "0.75rem",
+            gap: "0.6rem",
             flexWrap: "wrap",
             flex: 1,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
             <button
               type="button"
               onClick={onPreviousTrack}
               disabled={!hasPreviousTrack}
               aria-label="Previous track"
+              style={{
+                fontSize: "20px",
+                height: "40px",
+                lineHeight: 1,
+                minWidth: "40px",
+                padding: "0 0.45rem",
+              }}
             >
               ⏮️
             </button>
@@ -1088,7 +1095,13 @@ export default function Player({
               onClick={() => void handlePlayPause()}
               disabled={!areTracksReady}
               aria-label={isPlaying ? "Pause" : "Play"}
-              style={{ minWidth: "4rem" }}
+              style={{
+                fontSize: "20px",
+                height: "40px",
+                lineHeight: 1,
+                minWidth: "44px",
+                padding: "0 0.5rem",
+              }}
             >
               {isPlaying ? "⏸️" : "▶️"}
             </button>
@@ -1097,6 +1110,13 @@ export default function Player({
               onClick={onNextTrack}
               disabled={!hasNextTrack}
               aria-label="Next track"
+              style={{
+                fontSize: "20px",
+                height: "40px",
+                lineHeight: 1,
+                minWidth: "40px",
+                padding: "0 0.45rem",
+              }}
             >
               ⏭️
             </button>
@@ -1107,9 +1127,9 @@ export default function Player({
                 style={{
                   display: "flex",
                   alignItems: "center",
-                  gap: "0.5rem",
+                  gap: "0.4rem",
                   flex: 1,
-                  minWidth: "260px",
+                  minWidth: "200px",
                 }}
               >
                 <input
@@ -1124,29 +1144,30 @@ export default function Player({
                   onPointerCancel={handleSeekEnd}
                   style={{ width: "100%", verticalAlign: "middle" }}
                 />
-                <span style={{ whiteSpace: "nowrap", minWidth: "120px" }}>
+                <span style={{ whiteSpace: "nowrap", minWidth: "100px", fontSize: "0.85em" }}>
                   {formatPlaybackTime(currentTime)} / {formatPlaybackTime(duration)}
                 </span>
               </div>
-              <h3 style={{ margin: 0 }}>{playerTitle}</h3>
+              <h3 style={{ fontSize: "1em", margin: 0 }}>{playerTitle}</h3>
               <div
                 style={{
                   alignItems: "center",
-                  background: "rgba(255, 123, 195, 0.1)",
-                  border: "1px solid rgba(255, 123, 195, 0.24)",
+                  background: "var(--ktv-control-bg)",
+                  border: "1px solid var(--ww-border)",
                   borderRadius: "999px",
                   color: "var(--ww-text-soft)",
                   display: "flex",
-                  gap: "0.6rem",
-                  minWidth: "200px",
-                  padding: "0.35rem 0.45rem 0.35rem 0.85rem",
+                  gap: "0.5rem",
+                  minHeight: "40px",
+                  minWidth: "160px",
+                  padding: "0 0.35rem 0 0.7rem",
                 }}
               >
                 <div
                   style={{
                     alignItems: "center",
                     display: "flex",
-                    gap: "0.35rem",
+                    gap: "0.3rem",
                   }}
                   aria-label="Detected chord"
                 >
@@ -1161,6 +1182,11 @@ export default function Player({
                   type="button"
                   onClick={() => void handleHarmonicAnalyze()}
                   disabled={!isInputTrackReady || isHarmonicAnalysisRunning}
+                  style={{
+                    fontSize: "0.9em",
+                    height: "32px",
+                    padding: "0 0.6rem",
+                  }}
                 >
                   {isHarmonicAnalysisRunning
                     ? "Analyzing..."

@@ -50,17 +50,19 @@ export function TrackRow({
 
   const controlButtonStyle = (isActive: boolean): CSSProperties => ({
     borderRadius: "999px",
-    border: "1px solid var(--ww-border)",
+    border: isActive
+      ? "1px solid var(--ww-title-pink)"
+      : "1px solid var(--ww-border)",
     background: isActive
-      ? "linear-gradient(135deg, rgba(232,206,171,0.16), rgba(201,156,107,0.18))"
+      ? "linear-gradient(135deg, rgba(255,123,195,0.34), rgba(201,156,107,0.26))"
       : "var(--ktv-control-bg)",
-    color: "var(--ww-text)",
+    color: isActive ? "var(--ww-text-strong)" : "var(--ww-text)",
     padding: "0.38rem 0.77rem",
     letterSpacing: "0.02em",
-    fontWeight: 600,
+    fontWeight: isActive ? 800 : 600,
     minWidth: "78px",
     boxShadow: isActive
-      ? "0 5px 15px rgba(0,0,0,0.3)"
+      ? "0 0 0 2px rgba(255,123,195,0.16), 0 8px 20px rgba(0,0,0,0.34)"
       : "0 3px 10px rgba(0,0,0,0.22)",
     transition: "all 160ms ease",
     cursor: "pointer",
