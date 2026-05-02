@@ -579,7 +579,7 @@ button:disabled {
   border-radius: 8px;
   display: grid;
   gap: 10px;
-  grid-template-columns: 28px 42px minmax(0, 1fr);
+  grid-template-columns: 48px 42px minmax(0, 1fr);
   min-height: 58px;
   padding: 7px 10px;
 }
@@ -589,10 +589,50 @@ button:disabled {
 }
 
 .iframe-track-state {
+  align-items: center;
+  border: 3px solid var(--ww-title-pink);
+  border-radius: 6px;
   color: var(--ww-title-pink);
-  font-size: 20px;
-  line-height: 1;
-  text-align: center;
+  display: inline-flex;
+  height: 32px;
+  justify-content: center;
+  justify-self: center;
+  position: relative;
+  width: 32px;
+}
+
+.iframe-track-state::before,
+.iframe-track-state::after {
+  content: "";
+  position: absolute;
+}
+
+.iframe-track-state[data-state="complete"]::before {
+  border-bottom: 4px solid currentColor;
+  border-left: 4px solid currentColor;
+  height: 8px;
+  transform: rotate(-45deg) translate(1px, -2px);
+  width: 18px;
+}
+
+.iframe-track-state[data-state="hydrated"]::before {
+  background: currentColor;
+  inset: 6px 16px 6px 6px;
+}
+
+.iframe-track-state[data-state="broken"]::before,
+.iframe-track-state[data-state="broken"]::after {
+  background: currentColor;
+  height: 4px;
+  width: 22px;
+}
+
+.iframe-track-state[data-state="broken"]::before {
+  transform: rotate(45deg);
+}
+
+.iframe-track-state[data-state="broken"]::after {
+  transform: rotate(-45deg);
 }
 
 .iframe-track-artwork {

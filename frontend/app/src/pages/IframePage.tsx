@@ -681,9 +681,11 @@ export default function IframePage() {
               className="iframe-track-row"
               title={metadataTooltip(track.metadata)}
             >
-              <span className="iframe-track-state" aria-label={stateLabel(track)}>
-                {stateGlyph(track)}
-              </span>
+              <span
+                className="iframe-track-state"
+                data-state={stateKind(track)}
+                aria-label={stateLabel(track)}
+              />
               {track.trackArtworkSrc && (
                 <img className="iframe-track-artwork" alt="" src={track.trackArtworkSrc} />
               )}
@@ -965,20 +967,20 @@ function isOpfsState(value: unknown): value is OpfsState {
   return value === "missing" || value === "hydrated" || value === "broken";
 }
 
-function stateGlyph(track: IframeTrack) {
+function stateKind(track: IframeTrack) {
   if (track.hasLocalOutputMetadata) {
-    return "☑";
+    return "complete";
   }
 
   if (track.opfsState === "hydrated") {
-    return "◪";
+    return "hydrated";
   }
 
   if (track.opfsState === "broken") {
-    return "☒";
+    return "broken";
   }
 
-  return "□";
+  return "missing";
 }
 
 function stateLabel(track: IframeTrack) {
