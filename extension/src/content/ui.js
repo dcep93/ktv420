@@ -195,7 +195,6 @@ function ensurePreparedIframe(src) {
   iframe.src = src;
   iframe.setAttribute("aria-hidden", "true");
   iframe.setAttribute("tabindex", "-1");
-  iframe.title = "ktv420 prepared iframe";
   iframe.addEventListener("load", () => {
     iframe.dataset.loaded = "true";
   });
@@ -239,11 +238,11 @@ async function collectIframeTracks() {
 function hasDisplayFields(metadata) {
   return Boolean(
     metadata &&
-      typeof metadata === "object" &&
-      typeof metadata.trackId === "string" &&
-      typeof metadata.trackName === "string" &&
-      typeof metadata.trackArtist === "string" &&
-      typeof metadata.trackArtworkSrc === "string"
+    typeof metadata === "object" &&
+    typeof metadata.trackId === "string" &&
+    typeof metadata.trackName === "string" &&
+    typeof metadata.trackArtist === "string" &&
+    typeof metadata.trackArtworkSrc === "string"
   );
 }
 

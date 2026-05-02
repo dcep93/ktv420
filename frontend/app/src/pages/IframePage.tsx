@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { downloadArtifactsToOpfs } from "./iframeArtifacts";
 
@@ -85,10 +85,40 @@ export default function IframePage() {
     return () => window.removeEventListener("message", handleMessage);
   }, []);
 
-  const close = () => {
+  const close = useCallback(() => {
     setTracks(null);
     postParentMessage(CLOSE_OVERLAY_MESSAGE);
-  };
+  }, []);
+
+  const toggleRun = useCallback(() => {
+    if (!isReady) {
+      return;
+    }
+
+    postParentMessage(TOGGLE_RUN_MESSAGE);
+  }, [isReady]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.repeat) {
+        return;
+      }
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        close();
+        return;
+      }
+
+      if (event.key === "Enter" && isReady) {
+        event.preventDefault();
+        toggleRun();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [close, isReady, toggleRun]);
 
   const prepareTrack = (track: IframeTrack) => {
     postParentMessage(PREPARE_JOB_MESSAGE, { trackId: track.trackId });
@@ -132,7 +162,7 @@ export default function IframePage() {
           aria-label="Toggle ktv420 capture run"
           aria-disabled={!isReady}
           disabled={!isReady}
-          onClick={() => postParentMessage(TOGGLE_RUN_MESSAGE)}
+          onClick={toggleRun}
         >
           <img alt="" src="/favicon.svg" />
         </button>
