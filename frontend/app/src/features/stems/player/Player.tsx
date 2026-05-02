@@ -954,7 +954,7 @@ export default function Player({
 
           return visualizerOptions[
             (currentIndex - 1 + visualizerOptions.length) %
-              visualizerOptions.length
+            visualizerOptions.length
           ]?.value;
         });
       }
@@ -1052,7 +1052,6 @@ export default function Player({
   return (
     <div
       style={{
-        marginTop: "1.5rem",
         padding: 0,
         background: "transparent",
       }}
