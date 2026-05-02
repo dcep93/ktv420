@@ -1,5 +1,4 @@
 import {
-  Fragment,
   type PointerEvent,
   useCallback,
   useEffect,
@@ -43,14 +42,15 @@ import { drawVisualizer } from "./visualizers";
 export default function Player({
   record,
   title,
-  spotifyTrackId,
-  trackArtworkSrc,
   trackMetadata,
   unavailableMessage,
   hasPreviousTrack = false,
   hasNextTrack = false,
+  autoPlayOnReady = false,
   onPreviousTrack,
   onNextTrack,
+  onTrackEnd,
+  onAutoPlayOnReadyHandled,
 }: PlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -76,8 +76,6 @@ export default function Player({
     Record<string, AudioEffectType>
   >({});
   const [readyTrackIds, setReadyTrackIds] = useState<string[]>([]);
-  const [lyricsJson, setLyricsJson] = useState("");
-  const [lyricsError, setLyricsError] = useState("");
   const [chordTimeline, setChordTimeline] = useState<ChordSnapshot[]>([]);
   const [chordStatus, setChordStatus] = useState<string>(
     "Harmonic analyzer standing by"
@@ -109,6 +107,8 @@ export default function Player({
   const pendingSeekRef = useRef<number | null>(null);
   const startAtCtxTimeRef = useRef(0);
   const startOffsetRef = useRef(0);
+  const hasHandledPlaybackEndRef = useRef(false);
+  const hasAttemptedAutoPlayOnReadyRef = useRef(false);
 
   const tracks = useMemo<Track[]>(() => {
     return record.files
@@ -142,13 +142,6 @@ export default function Player({
     [tracks]
   );
   const inputTrackId = inputTrack?.id ?? null;
-  const spotifyLyricsUrl = useMemo(() => {
-    if (!spotifyTrackId || !trackArtworkSrc) {
-      return "";
-    }
-
-    return buildSpotifyLyricsUrl(spotifyTrackId, trackArtworkSrc);
-  }, [spotifyTrackId, trackArtworkSrc]);
 
   const primaryTrack = tracks.find((track) => track.isInput) ?? tracks[0];
   const playerTitle = title ?? primaryTrack?.name ?? "Playback";
@@ -196,43 +189,6 @@ export default function Player({
   useEffect(() => {
     effectTypesRef.current = effectTypes;
   }, [effectTypes]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-
-    setLyricsJson("");
-    setLyricsError("");
-
-    if (!spotifyLyricsUrl) {
-      return () => controller.abort();
-    }
-
-    const loadLyrics = async () => {
-      try {
-        const response = await fetch(spotifyLyricsUrl, {
-          credentials: "include",
-          signal: controller.signal,
-        });
-        const text = await response.text();
-
-        if (!response.ok) {
-          throw new Error(text || `Lyrics request failed with ${response.status}`);
-        }
-
-        setLyricsJson(text);
-      } catch (error) {
-        if (controller.signal.aborted) {
-          return;
-        }
-
-        setLyricsError(error instanceof Error ? error.message : String(error));
-      }
-    };
-
-    void loadLyrics();
-
-    return () => controller.abort();
-  }, [spotifyLyricsUrl]);
 
   const getEffectiveVolumeFromRefs = useCallback(
     (trackId: string, baseVolume?: number) => {
@@ -723,9 +679,19 @@ export default function Player({
       }
 
       if (isPlaying && duration && playbackTime >= duration) {
+        if (hasHandledPlaybackEndRef.current) {
+          timeAnimationFrameRef.current = requestAnimationFrame(updateTime);
+          return;
+        }
+
+        hasHandledPlaybackEndRef.current = true;
         stopAllSources();
-        startOffsetRef.current = duration;
+        startOffsetRef.current = hasNextTrack && onTrackEnd ? 0 : duration;
+        setCurrentTime(hasNextTrack && onTrackEnd ? 0 : duration);
         setIsPlaying(false);
+        if (hasNextTrack && onTrackEnd) {
+          onTrackEnd();
+        }
       }
 
       timeAnimationFrameRef.current = requestAnimationFrame(updateTime);
@@ -738,7 +704,14 @@ export default function Player({
         cancelAnimationFrame(timeAnimationFrameRef.current);
       }
     };
-  }, [currentPlaybackTime, duration, isPlaying, stopAllSources]);
+  }, [
+    currentPlaybackTime,
+    duration,
+    hasNextTrack,
+    isPlaying,
+    onTrackEnd,
+    stopAllSources,
+  ]);
 
   useEffect(() => {
     // Keep the displayed chord in sync with the transport position.
@@ -874,6 +847,7 @@ export default function Player({
 
       sourcesRef.current = newSources;
       startAtCtxTimeRef.current = startAt;
+      hasHandledPlaybackEndRef.current = false;
       setIsPlaying(true);
     },
     [ensureAudioContext, tracks]
@@ -1095,6 +1069,43 @@ export default function Player({
     tracks.length > 0 && readyTrackIds.length === tracks.length;
 
   useEffect(() => {
+    if (!autoPlayOnReady) {
+      hasAttemptedAutoPlayOnReadyRef.current = false;
+      return;
+    }
+
+    if (
+      hasAttemptedAutoPlayOnReadyRef.current ||
+      isPlaying ||
+      !areTracksReady
+    ) {
+      return;
+    }
+
+    hasAttemptedAutoPlayOnReadyRef.current = true;
+    startOffsetRef.current = 0;
+    setCurrentTime(0);
+
+    const playWhenReady = async () => {
+      try {
+        await schedulePlayback(0);
+      } catch (error) {
+        console.error("Failed to auto-play next track", error);
+      } finally {
+        onAutoPlayOnReadyHandled?.();
+      }
+    };
+
+    void playWhenReady();
+  }, [
+    areTracksReady,
+    autoPlayOnReady,
+    isPlaying,
+    onAutoPlayOnReadyHandled,
+    schedulePlayback,
+  ]);
+
+  useEffect(() => {
     // Reset chord-related UI when the primary track changes.
     setChordTimeline([]);
     setChordStatus(
@@ -1269,38 +1280,30 @@ export default function Player({
         <>
           <div style={{ marginTop: "1rem" }}>
             {tracks.map((track) => (
-              <Fragment key={track.id}>
-                {track.id === inputTrackId ? (
-                  <LyricsJsonBubble
-                    lyricsJson={lyricsJson}
-                    lyricsError={lyricsError}
-                    lyricsUrl={spotifyLyricsUrl}
-                  />
-                ) : null}
-                <TrackRow
-                  track={track}
-                  volume={volumes[track.id] ?? 1}
-                  isMuted={!!trackMuteStates[track.id]}
-                  isDeafened={!!trackDeafenStates[track.id]}
-                  effectType={effectTypes[track.id] ?? "wah"}
-                  effectValue={
-                    effectValues[track.id] ??
-                    getDefaultEffectValue(effectTypes[track.id] ?? "wah")
-                  }
-                  effectOptions={audioEffectOptions}
-                  onVolumeChange={handleVolumeChange}
-                  onVolumeReset={handleVolumeReset}
-                  onEffectValueChange={handleEffectValueChange}
-                  onEffectTypeChange={handleEffectTypeChange}
-                  onResetEffect={handleEffectReset}
-                  onToggleMute={toggleTrackMute}
-                  onToggleDeafen={toggleTrackDeafen}
-                  registerCanvas={(ref) => {
-                    canvasRefs.current[track.id] = ref;
-                  }}
-                  onCanvasSeek={handleCanvasSeek}
-                />
-              </Fragment>
+              <TrackRow
+                key={track.id}
+                track={track}
+                volume={volumes[track.id] ?? 1}
+                isMuted={!!trackMuteStates[track.id]}
+                isDeafened={!!trackDeafenStates[track.id]}
+                effectType={effectTypes[track.id] ?? "wah"}
+                effectValue={
+                  effectValues[track.id] ??
+                  getDefaultEffectValue(effectTypes[track.id] ?? "wah")
+                }
+                effectOptions={audioEffectOptions}
+                onVolumeChange={handleVolumeChange}
+                onVolumeReset={handleVolumeReset}
+                onEffectValueChange={handleEffectValueChange}
+                onEffectTypeChange={handleEffectTypeChange}
+                onResetEffect={handleEffectReset}
+                onToggleMute={toggleTrackMute}
+                onToggleDeafen={toggleTrackDeafen}
+                registerCanvas={(ref) => {
+                  canvasRefs.current[track.id] = ref;
+                }}
+                onCanvasSeek={handleCanvasSeek}
+              />
             ))}
           </div>
           <div style={{ marginTop: "0.75rem" }}>
@@ -1356,62 +1359,4 @@ export default function Player({
       ) : null}
     </div>
   );
-}
-
-function LyricsJsonBubble({
-  lyricsJson,
-  lyricsError,
-  lyricsUrl,
-}: {
-  lyricsJson: string;
-  lyricsError: string;
-  lyricsUrl: string;
-}) {
-  const content = lyricsJson || lyricsError || (lyricsUrl ? "Loading lyrics JSON..." : "Missing Spotify lyrics URL.");
-
-  return (
-    <div
-      style={{
-        background: "rgba(8, 6, 5, 0.72)",
-        border: "1px solid rgba(228, 193, 150, 0.34)",
-        borderRadius: "7px",
-        boxShadow: "0 9px 20px rgba(0, 0, 0, 0.24)",
-        marginBottom: "0.72rem",
-        padding: "0.64rem",
-      }}
-    >
-      <div
-        style={{
-          color: "var(--ww-text)",
-          fontWeight: 600,
-          marginBottom: "0.34rem",
-        }}
-      >
-        Lyrics
-      </div>
-      <pre
-        style={{
-          background: "linear-gradient(90deg, #120d0b, #1a1411)",
-          border: "1px solid var(--ww-border)",
-          color: lyricsError ? "var(--ww-danger)" : "var(--ww-text-soft)",
-          margin: 0,
-          maxHeight: "220px",
-          overflow: "auto",
-          padding: "0.64rem",
-          whiteSpace: "pre-wrap",
-          wordBreak: "break-word",
-        }}
-      >
-        {content}
-      </pre>
-    </div>
-  );
-}
-
-function buildSpotifyLyricsUrl(trackId: string, trackArtworkSrc: string) {
-  return `https://spclient.wg.spotify.com/color-lyrics/v2/track/${encodeURIComponent(
-    trackId
-  )}/image/${encodeURIComponent(
-    trackArtworkSrc
-  )}?format=json&vocalRemoval=false&market=from_token`;
 }

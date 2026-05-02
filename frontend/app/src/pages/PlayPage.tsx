@@ -35,6 +35,7 @@ export default function PlayPage() {
   const [activePlaybackRecord, setActivePlaybackRecord] = useState<LocalPlaybackRecord | null>(null);
   const [activePlaybackLoading, setActivePlaybackLoading] = useState(false);
   const [activePlaybackError, setActivePlaybackError] = useState("");
+  const [autoPlayActiveTrack, setAutoPlayActiveTrack] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -56,6 +57,7 @@ export default function PlayPage() {
           setRecord(null);
           setTracks([]);
           setActiveTrackIndex(0);
+          setAutoPlayActiveTrack(false);
           return;
         }
 
@@ -64,6 +66,7 @@ export default function PlayPage() {
           setRecord(null);
           setTracks([]);
           setActiveTrackIndex(0);
+          setAutoPlayActiveTrack(false);
           return;
         }
 
@@ -72,12 +75,14 @@ export default function PlayPage() {
           setRecord(nextRecord);
           setTracks(nextTracks);
           setActiveTrackIndex(0);
+          setAutoPlayActiveTrack(false);
         }
       } catch (loadError) {
         if (!cancelled) {
           setError(loadError instanceof Error ? loadError.message : String(loadError));
           setRecord(null);
           setTracks([]);
+          setAutoPlayActiveTrack(false);
         }
       } finally {
         if (!cancelled) {
@@ -134,9 +139,14 @@ export default function PlayPage() {
     };
   }, [activeTrack]);
 
+  const activeTrackPlaybackRecord =
+    activeTrack && activePlaybackRecord?.md5 === activeTrack.trackId
+      ? activePlaybackRecord
+      : null;
   const playbackRecord = activeTrack
-    ? activePlaybackRecord ?? emptyPlaybackRecord(activeTrack.trackId)
+    ? activeTrackPlaybackRecord ?? emptyPlaybackRecord(activeTrack.trackId)
     : null;
+  const playbackFileCount = playbackRecord?.files.length ?? 0;
   const activeTrackTitle = activeTrack
     ? activeTrack.trackName || activeTrack.trackId
     : "Playback";
@@ -147,6 +157,26 @@ export default function PlayPage() {
       : activeTrack?.outputMetadata
         ? "No playable local files found for this track."
         : "Missing local output for this track.";
+
+  useEffect(() => {
+    if (
+      autoPlayActiveTrack &&
+      activeTrack &&
+      !activePlaybackLoading &&
+      (!activeTrack.outputMetadata ||
+        Boolean(activePlaybackError) ||
+        (Boolean(activeTrackPlaybackRecord) && playbackFileCount === 0))
+    ) {
+      setAutoPlayActiveTrack(false);
+    }
+  }, [
+    activePlaybackError,
+    activePlaybackLoading,
+    activeTrack,
+    activeTrackPlaybackRecord,
+    autoPlayActiveTrack,
+    playbackFileCount,
+  ]);
 
   return (
     <main className="standalone-page play-page" aria-label="ktv420 play">
@@ -163,16 +193,24 @@ export default function PlayPage() {
               <Player
                 record={playbackRecord}
                 title={activeTrackTitle}
-                spotifyTrackId={activeTrack?.trackId}
-                trackArtworkSrc={activeTrack?.trackArtworkSrc}
                 trackMetadata={activeTrack?.metadata}
                 unavailableMessage={activeUnavailableMessage}
                 hasPreviousTrack={activeTrackIndex > 0}
                 hasNextTrack={activeTrackIndex < tracks.length - 1}
-                onPreviousTrack={() => setActiveTrackIndex((index) => Math.max(0, index - 1))}
-                onNextTrack={() =>
-                  setActiveTrackIndex((index) => Math.min(tracks.length - 1, index + 1))
-                }
+                autoPlayOnReady={autoPlayActiveTrack && Boolean(activeTrackPlaybackRecord)}
+                onPreviousTrack={() => {
+                  setAutoPlayActiveTrack(false);
+                  setActiveTrackIndex((index) => Math.max(0, index - 1));
+                }}
+                onNextTrack={() => {
+                  setAutoPlayActiveTrack(false);
+                  setActiveTrackIndex((index) => Math.min(tracks.length - 1, index + 1));
+                }}
+                onTrackEnd={() => {
+                  setAutoPlayActiveTrack(true);
+                  setActiveTrackIndex((index) => Math.min(tracks.length - 1, index + 1));
+                }}
+                onAutoPlayOnReadyHandled={() => setAutoPlayActiveTrack(false)}
               />
             </section>
           ) : null}
@@ -196,7 +234,10 @@ export default function PlayPage() {
                     className="play-track-row"
                     data-state={trackState}
                     aria-current={isActive ? "true" : undefined}
-                    onClick={() => setActiveTrackIndex(index)}
+                    onClick={() => {
+                      setAutoPlayActiveTrack(false);
+                      setActiveTrackIndex(index);
+                    }}
                   >
                     <span className="play-track-index">{index + 1}</span>
                     {track.trackArtworkSrc ? (
