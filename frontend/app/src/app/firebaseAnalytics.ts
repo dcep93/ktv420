@@ -40,7 +40,7 @@ async function getFirebaseAnalytics() {
   return analyticsPromise;
 }
 
-export async function logPageView(path: string, title: string) {
+export async function logPageView(path: string) {
   const analytics = await getFirebaseAnalytics();
 
   if (!analytics) {
@@ -50,6 +50,6 @@ export async function logPageView(path: string, title: string) {
   logEvent(analytics, "page_view", {
     page_location: window.location.href,
     page_path: path,
-    page_title: title,
+    page_title: window.location.href.replace(window.location.hash, ""),
   });
 }

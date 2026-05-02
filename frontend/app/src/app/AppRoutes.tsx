@@ -48,7 +48,7 @@ export default function AppRoutes() {
     const pageTitle = getPageTitle(pathname, hash);
 
     document.title = pageTitle;
-    void logPageView(`${pathname}${search}${hash}`, pageTitle);
+    void logPageView(`${pathname}${search}${hash}`);
   }, [hash, pathname, search]);
 
   return (
