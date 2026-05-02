@@ -10,7 +10,6 @@ import {
 import {
   cacheChordTimeline,
   getCachedChordTimeline,
-  removeCachedOutputs,
 } from "../services/indexedDbClient";
 import {
   applyAudioEffect,
@@ -40,7 +39,15 @@ import {
 import { visualizerOptions } from "./visualizerOptions";
 import { drawVisualizer } from "./visualizers";
 
-export default function Player({ record, onClose }: PlayerProps) {
+export default function Player({
+  record,
+  title,
+  unavailableMessage,
+  hasPreviousTrack = false,
+  hasNextTrack = false,
+  onPreviousTrack,
+  onNextTrack,
+}: PlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -65,7 +72,6 @@ export default function Player({ record, onClose }: PlayerProps) {
     Record<string, AudioEffectType>
   >({});
   const [readyTrackIds, setReadyTrackIds] = useState<string[]>([]);
-  const [isClearingCache, setIsClearingCache] = useState(false);
   const [chordTimeline, setChordTimeline] = useState<ChordSnapshot[]>([]);
   const [chordStatus, setChordStatus] = useState<string>(
     "Harmonic analyzer standing by"
@@ -132,7 +138,7 @@ export default function Player({ record, onClose }: PlayerProps) {
   const inputTrackId = inputTrack?.id ?? null;
 
   const primaryTrack = tracks.find((track) => track.isInput) ?? tracks[0];
-  const playerTitle = primaryTrack?.name ?? "Playback";
+  const playerTitle = title ?? primaryTrack?.name ?? "Playback";
   const chordDisplay = chordTimeline.length
     ? currentChord
     : chordStatus ?? "Analyzing harmony...";
@@ -966,6 +972,11 @@ export default function Player({ record, onClose }: PlayerProps) {
     applyEffectiveVolume(trackId, value);
   };
 
+  const handleVolumeReset = (trackId: string) => {
+    setVolumes((previous) => ({ ...previous, [trackId]: 1 }));
+    applyEffectiveVolume(trackId, 1);
+  };
+
   const handleEffectValueChange = (trackId: string, value: number) => {
     const clamped = Math.min(1, Math.max(0, value));
 
@@ -1026,19 +1037,6 @@ export default function Player({ record, onClose }: PlayerProps) {
   const areTracksReady =
     tracks.length > 0 && readyTrackIds.length === tracks.length;
 
-  const handleClearCache = useCallback(async () => {
-    setIsClearingCache(true);
-
-    try {
-      await removeCachedOutputs(record.md5);
-      onClose();
-    } catch (clearError) {
-      console.error("Failed to clear cache for record", clearError);
-    } finally {
-      setIsClearingCache(false);
-    }
-  }, [onClose, record.md5]);
-
   useEffect(() => {
     // Reset chord-related UI when the primary track changes.
     setChordTimeline([]);
@@ -1051,18 +1049,12 @@ export default function Player({ record, onClose }: PlayerProps) {
     setIsHarmonicAnalysisRunning(false);
   }, [inputTrackId]);
 
-  if (!tracks.length) {
-    return null;
-  }
-
   return (
     <div
       style={{
         marginTop: "1.5rem",
-        padding: "1rem",
-        border: "1px solid var(--ww-border)",
-        borderRadius: "12px",
-        background: "var(--ww-panel)",
+        padding: 0,
+        background: "transparent",
       }}
     >
       <div
@@ -1084,160 +1076,194 @@ export default function Player({ record, onClose }: PlayerProps) {
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <h3 style={{ margin: 0 }}>{playerTitle}</h3>
             <button
               type="button"
-              onClick={() => void handleClearCache()}
-              disabled={isClearingCache}
+              onClick={onPreviousTrack}
+              disabled={!hasPreviousTrack}
+              aria-label="Previous track"
             >
-              {isClearingCache ? "Clearing..." : "Clear cache"}
+              ⏮️
+            </button>
+            <button
+              type="button"
+              onClick={() => void handlePlayPause()}
+              disabled={!areTracksReady}
+              aria-label={isPlaying ? "Pause" : "Play"}
+              style={{ minWidth: "4rem" }}
+            >
+              {isPlaying ? "⏸️" : "▶️"}
+            </button>
+            <button
+              type="button"
+              onClick={onNextTrack}
+              disabled={!hasNextTrack}
+              aria-label="Next track"
+            >
+              ⏭️
             </button>
           </div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.5rem",
-              flex: 1,
-              minWidth: "260px",
-            }}
-          >
-            <input
-              type="range"
-              min={0}
-              max={duration || 0}
-              step={0.1}
-              value={Math.min(currentTime, duration || 0)}
-              onChange={handleSeekChange}
-              onPointerDown={handleSeekStart}
-              onPointerUp={handleSeekEnd}
-              onPointerCancel={handleSeekEnd}
-              style={{ width: "100%", verticalAlign: "middle" }}
-            />
-            <span style={{ whiteSpace: "nowrap", minWidth: "120px" }}>
-              {formatPlaybackTime(currentTime)} / {formatPlaybackTime(duration)}
-            </span>
-          </div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.35rem",
-              minWidth: "200px",
-              color: "var(--ww-text-soft)",
-            }}
-            aria-label="Detected chord"
-          >
-            <span style={{ fontWeight: 700, color: "var(--ww-text)" }}>Chord:</span>
-            <span
-              style={{ fontStyle: chordTimeline.length ? "normal" : "italic" }}
-            >
-              {chordDisplay}
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={() => void handleHarmonicAnalyze()}
-            disabled={!isInputTrackReady || isHarmonicAnalysisRunning}
-          >
-            {isHarmonicAnalysisRunning
-              ? "Analyzing..."
-              : chordTimeline.length
-                ? "Re-run harmony scan"
-                : "Analyze harmony"}
-          </button>
-          <button
-            type="button"
-            onClick={() => void handlePlayPause()}
-            disabled={!areTracksReady}
-            aria-label={isPlaying ? "Pause" : "Play"}
-            style={{ minWidth: "3rem" }}
-          >
-            <span
-              style={{
-                display: "inline-block",
-                width: "1.5em",
-                textAlign: "center",
-              }}
-              aria-hidden
-            >
-              {isPlaying ? "⏸" : areTracksReady ? "▶" : "⏳"}
-            </span>
-          </button>
-        </div>
-        <button type="button" onClick={onClose}>
-          Close
-        </button>
-      </div>
-      <div style={{ marginTop: "1rem" }}>
-        {tracks.map((track) => (
-          <TrackRow
-            key={track.id}
-            track={track}
-            volume={volumes[track.id] ?? 1}
-            isMuted={!!trackMuteStates[track.id]}
-            isDeafened={!!trackDeafenStates[track.id]}
-            effectType={effectTypes[track.id] ?? "wah"}
-            effectValue={
-              effectValues[track.id] ??
-              getDefaultEffectValue(effectTypes[track.id] ?? "wah")
-            }
-            effectOptions={audioEffectOptions}
-            onVolumeChange={handleVolumeChange}
-            onEffectValueChange={handleEffectValueChange}
-            onEffectTypeChange={handleEffectTypeChange}
-            onResetEffect={handleEffectReset}
-            onToggleMute={toggleTrackMute}
-            onToggleDeafen={toggleTrackDeafen}
-            registerCanvas={(ref) => {
-              canvasRefs.current[track.id] = ref;
-            }}
-            onCanvasSeek={handleCanvasSeek}
-          />
-        ))}
-      </div>
-      <div style={{ marginTop: "0.75rem" }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "baseline",
-            gap: "0.5rem",
-            marginBottom: "0.5rem",
-          }}
-        >
-          <span style={{ fontWeight: 700, color: "var(--ww-text)" }}>
-            Visualizer
-          </span>
-        </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.6rem" }}>
-          {visualizerOptions.map((option) => {
-            const isActive = visualizerType === option.value;
-
-            return (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => setVisualizerType(option.value)}
-                style={getVisualizerButtonStyle(isActive)}
-                aria-pressed={isActive}
+          {tracks.length ? (
+            <>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.5rem",
+                  flex: 1,
+                  minWidth: "260px",
+                }}
               >
-                <div style={{ fontWeight: 700, letterSpacing: "0.02em" }}>
-                  {option.label}
-                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={duration || 0}
+                  step={0.1}
+                  value={Math.min(currentTime, duration || 0)}
+                  onChange={handleSeekChange}
+                  onPointerDown={handleSeekStart}
+                  onPointerUp={handleSeekEnd}
+                  onPointerCancel={handleSeekEnd}
+                  style={{ width: "100%", verticalAlign: "middle" }}
+                />
+                <span style={{ whiteSpace: "nowrap", minWidth: "120px" }}>
+                  {formatPlaybackTime(currentTime)} / {formatPlaybackTime(duration)}
+                </span>
+              </div>
+              <h3 style={{ margin: 0 }}>{playerTitle}</h3>
+              <div
+                style={{
+                  alignItems: "center",
+                  background: "rgba(255, 123, 195, 0.1)",
+                  border: "1px solid rgba(255, 123, 195, 0.24)",
+                  borderRadius: "999px",
+                  color: "var(--ww-text-soft)",
+                  display: "flex",
+                  gap: "0.6rem",
+                  minWidth: "200px",
+                  padding: "0.35rem 0.45rem 0.35rem 0.85rem",
+                }}
+              >
                 <div
                   style={{
-                    color: isActive ? "var(--ww-text)" : "var(--ww-text-muted)",
-                    fontSize: "0.9rem",
-                    marginTop: "0.1rem",
+                    alignItems: "center",
+                    display: "flex",
+                    gap: "0.35rem",
                   }}
+                  aria-label="Detected chord"
                 >
-                  {option.hint}
+                  <span style={{ fontWeight: 700, color: "var(--ww-text)" }}>Chord:</span>
+                  <span
+                    style={{ fontStyle: chordTimeline.length ? "normal" : "italic" }}
+                  >
+                    {chordDisplay}
+                  </span>
                 </div>
-              </button>
-            );
-          })}
+                <button
+                  type="button"
+                  onClick={() => void handleHarmonicAnalyze()}
+                  disabled={!isInputTrackReady || isHarmonicAnalysisRunning}
+                >
+                  {isHarmonicAnalysisRunning
+                    ? "Analyzing..."
+                    : chordTimeline.length
+                      ? "Re-run harmony scan"
+                      : "Analyze harmony"}
+                </button>
+              </div>
+            </>
+          ) : (
+            <p
+              style={{
+                color: "var(--ww-text-muted)",
+                margin: 0,
+              }}
+            >
+              {unavailableMessage ?? "No playable local files found."}
+            </p>
+          )}
         </div>
       </div>
+      {tracks.length ? (
+        <>
+          <div style={{ marginTop: "1rem" }}>
+            {tracks.map((track) => (
+              <TrackRow
+                key={track.id}
+                track={track}
+                volume={volumes[track.id] ?? 1}
+                isMuted={!!trackMuteStates[track.id]}
+                isDeafened={!!trackDeafenStates[track.id]}
+                effectType={effectTypes[track.id] ?? "wah"}
+                effectValue={
+                  effectValues[track.id] ??
+                  getDefaultEffectValue(effectTypes[track.id] ?? "wah")
+                }
+                effectOptions={audioEffectOptions}
+                onVolumeChange={handleVolumeChange}
+                onVolumeReset={handleVolumeReset}
+                onEffectValueChange={handleEffectValueChange}
+                onEffectTypeChange={handleEffectTypeChange}
+                onResetEffect={handleEffectReset}
+                onToggleMute={toggleTrackMute}
+                onToggleDeafen={toggleTrackDeafen}
+                registerCanvas={(ref) => {
+                  canvasRefs.current[track.id] = ref;
+                }}
+                onCanvasSeek={handleCanvasSeek}
+              />
+            ))}
+          </div>
+          <div style={{ marginTop: "0.75rem" }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "baseline",
+                gap: "0.5rem",
+                marginBottom: "0.5rem",
+              }}
+            >
+              <span style={{ fontWeight: 700, color: "var(--ww-text)" }}>
+                Visualizer
+              </span>
+            </div>
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "0.6rem",
+                justifyContent: "space-around",
+              }}
+            >
+              {visualizerOptions.map((option) => {
+                const isActive = visualizerType === option.value;
+
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setVisualizerType(option.value)}
+                    style={getVisualizerButtonStyle(isActive)}
+                    aria-pressed={isActive}
+                  >
+                    <div style={{ fontWeight: 700, letterSpacing: "0.02em" }}>
+                      {option.label}
+                    </div>
+                    <div
+                      style={{
+                        color: isActive ? "var(--ww-text)" : "var(--ww-text-muted)",
+                        fontSize: "0.9rem",
+                        marginTop: "0.1rem",
+                      }}
+                    >
+                      {option.hint}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }

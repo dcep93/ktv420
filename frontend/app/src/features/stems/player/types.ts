@@ -1,6 +1,15 @@
-import { type CachedOutputRecord } from "../services/indexedDbClient";
+export type PlaybackFile = {
+  name: string;
+  path: string;
+  blob: Blob;
+};
 
-export type CachedTrackFile = CachedOutputRecord["files"][number];
+export type PlaybackRecord = {
+  md5: string;
+  files: PlaybackFile[];
+};
+
+export type CachedTrackFile = PlaybackFile;
 
 export type VisualizerType =
   | "laser-ladders"
@@ -29,8 +38,13 @@ export type VisualizerType =
   | "delay-pedal";
 
 export type PlayerProps = {
-  record: CachedOutputRecord;
-  onClose: () => void;
+  record: PlaybackRecord;
+  title?: string;
+  unavailableMessage?: string;
+  hasPreviousTrack?: boolean;
+  hasNextTrack?: boolean;
+  onPreviousTrack?: () => void;
+  onNextTrack?: () => void;
 };
 
 export type Track = {

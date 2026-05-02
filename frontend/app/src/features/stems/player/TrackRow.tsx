@@ -12,6 +12,7 @@ type TrackRowProps = {
   effectValue: number;
   effectOptions: AudioEffectOption[];
   onVolumeChange: (trackId: string, value: number) => void;
+  onVolumeReset: (trackId: string) => void;
   onEffectValueChange: (trackId: string, value: number) => void;
   onEffectTypeChange: (trackId: string, value: AudioEffectType) => void;
   onResetEffect: (trackId: string) => void;
@@ -30,6 +31,7 @@ export function TrackRow({
   effectValue,
   effectOptions,
   onVolumeChange,
+  onVolumeReset,
   onEffectValueChange,
   onEffectTypeChange,
   onResetEffect,
@@ -65,13 +67,21 @@ export function TrackRow({
   });
 
   return (
-    <div key={track.id} style={{ marginBottom: "0.75rem" }}>
+    <div
+      key={track.id}
+      style={{
+        borderTop: "1px solid var(--ww-border-soft)",
+        marginBottom: "0.75rem",
+        paddingTop: "0.75rem",
+      }}
+    >
       <div
         style={{
           display: "flex",
           alignItems: "center",
           gap: "0.5rem",
           flexWrap: "wrap",
+          justifyContent: "space-between",
           marginBottom: "0.4rem",
         }}
       >
@@ -80,34 +90,49 @@ export function TrackRow({
         >
           {label}
         </div>
-        <input
-          type="range"
-          min={0}
-          max={2}
-          step={0.01}
-          value={volume}
-          onChange={(event) =>
-            onVolumeChange(track.id, Number(event.target.value))
-          }
-          style={{ flex: 1, minWidth: "160px", maxWidth: "360px" }}
-        />
-        <div style={{ display: "flex", gap: "0.4rem" }}>
+        <div
+          style={{
+            alignItems: "center",
+            display: "flex",
+            flex: "0 1 420px",
+            gap: "0.4rem",
+            minWidth: "280px",
+          }}
+        >
+          <input
+            type="range"
+            min={0}
+            max={2}
+            step={0.01}
+            value={volume}
+            onChange={(event) =>
+              onVolumeChange(track.id, Number(event.target.value))
+            }
+            onDoubleClick={() => onVolumeReset(track.id)}
+            style={{ flex: "0 1 220px", minWidth: "140px" }}
+          />
           <button
             type="button"
             onClick={() => onToggleMute(track.id)}
             style={controlButtonStyle(isMuted)}
             aria-pressed={isMuted}
+            aria-label={isMuted ? "Unmute" : "Mute"}
+            title={isMuted ? "Unmute" : "Mute"}
           >
-            {isMuted ? "Unmute" : "Mute"}
+            🔇
           </button>
           <button
             type="button"
             onClick={() => onToggleDeafen(track.id)}
             style={controlButtonStyle(isDeafened)}
             aria-pressed={isDeafened}
+            aria-label={isDeafened ? "Undeafen" : "Deafen"}
+            title={isDeafened ? "Undeafen" : "Deafen"}
           >
-            {isDeafened ? "Undeafen" : "Deafen"}
+            {isDeafened ? "🎧" : "🎧"}
           </button>
+        </div>
+        <div style={{ display: "flex", gap: "0.4rem" }}>
           <label
             style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}
           >
@@ -145,22 +170,9 @@ export function TrackRow({
               onChange={(event) =>
                 onEffectValueChange(track.id, Number(event.target.value))
               }
+              onDoubleClick={() => onResetEffect(track.id)}
               style={{ width: "120px" }}
             />
-            <button
-              type="button"
-              onClick={() => onResetEffect(track.id)}
-              style={{
-                color: "var(--ww-text-muted)",
-                fontWeight: 600,
-                background: "none",
-                border: "none",
-                padding: 0,
-                cursor: "pointer",
-              }}
-            >
-              Reset
-            </button>
           </label>
         </div>
       </div>

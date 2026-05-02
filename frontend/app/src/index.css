@@ -93,11 +93,22 @@ button:disabled {
   width: 100%;
 }
 
+.play-page {
+  align-content: start;
+  margin: 0;
+  max-width: none;
+  padding: 18px 20px 32px;
+}
+
 .standalone-header {
   align-items: center;
   display: flex;
   gap: 16px;
   justify-content: space-between;
+}
+
+.play-header {
+  justify-content: flex-start;
 }
 
 .standalone-header h1 {
@@ -115,6 +126,20 @@ button:disabled {
 }
 
 .standalone-header h1 a:hover {
+  text-decoration: underline;
+}
+
+.play-spotify-link {
+  color: var(--ww-title-pink);
+  font-family: "Comic Sans MS", "Comic Sans", cursive;
+  font-size: 24px;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.play-spotify-link:hover,
+.play-spotify-link:focus-visible {
   text-decoration: underline;
 }
 
@@ -315,6 +340,10 @@ button:disabled {
   padding: 0;
 }
 
+.play-player {
+  background: transparent;
+}
+
 .settings-section[aria-label="All OPFS entries"] .settings-list {
   gap: 4px;
 }
@@ -470,11 +499,35 @@ button:disabled {
   background: var(--ww-panel-soft);
   border: 1px solid var(--ww-border);
   border-radius: 8px;
+  color: inherit;
   display: grid;
   gap: 10px;
   grid-template-columns: 32px 42px minmax(0, 1fr) auto;
   min-height: 58px;
   padding: 7px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.play-track-row:hover,
+.play-track-row:focus-visible {
+  border-color: var(--ww-border-strong);
+  transform: none;
+}
+
+.play-track-row[data-state="available"] {
+  background: rgba(36, 28, 24, 0.78);
+}
+
+.play-track-row[data-state="missing"] {
+  background: rgba(74, 48, 38, 0.58);
+  border-color: rgba(255, 159, 176, 0.24);
+}
+
+.play-track-row[data-state="active"] {
+  background: linear-gradient(135deg, rgba(255, 123, 195, 0.2), rgba(201, 156, 107, 0.2));
+  border-color: var(--ww-title-pink);
+  box-shadow: 0 0 0 2px rgba(255, 123, 195, 0.12);
 }
 
 .play-track-index {
@@ -492,7 +545,7 @@ button:disabled {
 }
 
 .play-track-status {
-  color: var(--ww-accent-cyan);
+  color: var(--ww-danger);
   font-size: 12px;
   white-space: nowrap;
 }
@@ -574,13 +627,21 @@ button:disabled {
     grid-template-columns: 40px minmax(0, 1fr);
   }
 
+  .play-track-row {
+    grid-template-columns: 32px 42px minmax(0, 1fr);
+  }
+
   .settings-playlist-row {
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .settings-size,
-  .play-track-status {
+  .settings-size {
     grid-column: 2;
+    text-align: left;
+  }
+
+  .play-track-status {
+    grid-column: 3;
     text-align: left;
   }
 

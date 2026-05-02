@@ -40,6 +40,17 @@ export type SavedSpotifyContext = {
   tracks: string[];
 };
 
+export type LocalPlaybackFile = {
+  name: string;
+  path: string;
+  blob: Blob;
+};
+
+export type LocalPlaybackRecord = {
+  md5: string;
+  files: LocalPlaybackFile[];
+};
+
 let unpartitionedOpfsRoot: FileSystemDirectoryHandle | null = null;
 let unpartitionedOpfsRootPromise: Promise<FileSystemDirectoryHandle> | null = null;
 
@@ -161,6 +172,18 @@ export async function readTrackMetadata(trackId: string) {
 
 export async function readTrackOutputMetadata(trackId: string) {
   return await readOpfsJson(`stems/${trackId}/output/_metadata.json`);
+}
+
+export async function readTrackPlaybackRecord(trackId: string): Promise<LocalPlaybackRecord> {
+  const [inputFiles, outputFiles] = await Promise.all([
+    readOpfsFiles(`stems/${trackId}/input`),
+    readOpfsFiles(`stems/${trackId}/output`)
+  ]);
+
+  return {
+    md5: trackId,
+    files: [...outputFiles, ...inputFiles]
+  };
 }
 
 async function listObjectsWithPrefix(prefix: string): Promise<GcsObject[]> {
@@ -320,6 +343,54 @@ async function collectOpfsDirectoryEntries(
       size: file.size,
       modifiedAt: new Date(file.lastModified).toISOString(),
       ...(isJsonPath(path) ? { text: await file.text() } : {})
+    });
+  }
+}
+
+async function readOpfsFiles(path: string) {
+  const root = await getOpfsRoot();
+  const parts = path.split("/").filter(Boolean);
+  let directory = root;
+
+  for (const part of parts) {
+    try {
+      directory = await directory.getDirectoryHandle(part, { create: false });
+    } catch (error) {
+      if (isNotFoundError(error)) {
+        return [];
+      }
+
+      throw error;
+    }
+  }
+
+  const files: LocalPlaybackFile[] = [];
+  await collectOpfsFiles(directory, parts.join("/"), files);
+  return files.sort((a, b) => a.path.localeCompare(b.path));
+}
+
+async function collectOpfsFiles(
+  directory: FileSystemDirectoryHandle,
+  prefix: string,
+  files: LocalPlaybackFile[]
+) {
+  const iterableDirectory = directory as FileSystemDirectoryHandle & {
+    entries: () => AsyncIterable<[string, FileSystemHandle]>;
+  };
+
+  for await (const [name, handle] of iterableDirectory.entries()) {
+    const path = prefix ? `${prefix}/${name}` : name;
+
+    if (handle.kind === "directory") {
+      await collectOpfsFiles(handle as FileSystemDirectoryHandle, path, files);
+      continue;
+    }
+
+    const file = await (handle as FileSystemFileHandle).getFile();
+    files.push({
+      name,
+      path,
+      blob: file
     });
   }
 }
