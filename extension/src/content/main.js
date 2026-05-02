@@ -14,6 +14,12 @@ async function getOrchestrator() {
     orchestratorPromise = import("./orchestrator.js").then(({ CaptureOrchestrator }) => {
       orchestrator = new CaptureOrchestrator({ bridge });
       orchestrator.addEventListener("activechange", () => ui.refresh());
+      orchestrator.addEventListener("trackstored", (event) => {
+        const detail = event.detail || {};
+        ui.notifyTrackCaptured(detail.trackId, detail.metadata).catch((error) => {
+          console.warn("[ktv420] Failed to notify iframe about captured track", error);
+        });
+      });
       return orchestrator;
     });
   }

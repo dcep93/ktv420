@@ -82,8 +82,6 @@ export class CaptureOrchestrator extends EventTarget {
         }
 
         debug.events.push({ type: "all-cached", trackCount: queue.length, at: Date.now() });
-        await copyJsonToClipboard(summary);
-        alert(`ktv420 capture complete. Copied ${summary.length} track record(s) to clipboard.`);
         console.log("[ktv420] Capture run complete", summary);
         return;
       }
@@ -147,12 +145,18 @@ export class CaptureOrchestrator extends EventTarget {
             audioByteLength: metadata.audioByteLength,
             at: Date.now()
           });
+          this.dispatchEvent(
+            new CustomEvent("trackstored", {
+              detail: {
+                trackId: pendingCapture.item.trackId,
+                metadata
+              }
+            })
+          );
         }
       }
 
       pausePlaybackCleanly();
-      await copyJsonToClipboard(summary);
-      alert(`ktv420 capture complete. Copied ${summary.length} track record(s) to clipboard.`);
       console.log("[ktv420] Capture run complete", summary);
     } catch (error) {
       pausePlaybackCleanly();

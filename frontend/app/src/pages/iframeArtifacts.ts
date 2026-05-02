@@ -86,6 +86,23 @@ export async function downloadArtifactsToOpfs(trackId: string, metadata: Record<
   } satisfies DownloadArtifactsResult;
 }
 
+export async function hasLocalOutputMetadata(trackId: string) {
+  try {
+    const root = await navigator.storage.getDirectory();
+    const stemsDirectory = await root.getDirectoryHandle("stems", { create: false });
+    const trackDirectory = await stemsDirectory.getDirectoryHandle(trackId, { create: false });
+    const outputDirectory = await trackDirectory.getDirectoryHandle("output", { create: false });
+    await outputDirectory.getFileHandle("_metadata.json", { create: false });
+    return true;
+  } catch (error) {
+    if (isNotFoundError(error)) {
+      return false;
+    }
+
+    throw error;
+  }
+}
+
 export async function listLocalOpfsEntries() {
   const root = await navigator.storage.getDirectory();
   const entries: LocalDatabaseEntry[] = [];

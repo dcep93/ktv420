@@ -17,7 +17,9 @@ const PREPARE_JOB_MESSAGE = "ktv420:prepare-job";
 const RUN_JOB_MESSAGE = "ktv420:run-job";
 const REQUEST_LOCAL_DATABASE_MESSAGE = "ktv420:request-local-database";
 const DELETE_LOCAL_DATABASE_ENTRY_MESSAGE = "ktv420:delete-local-database-entry";
+const DELETE_TRACK_ARTIFACT_MESSAGE = "ktv420:delete-track-artifact";
 const LOCAL_DATABASE_MESSAGE = "ktv420:local-database";
+const TRACK_CAPTURED_MESSAGE = "ktv420:track-captured";
 const PREPARE_JOB_RESULT_MESSAGE = "ktv420:prepare-job-result";
 const RUN_JOB_RESULT_MESSAGE = "ktv420:run-job-result";
 
@@ -123,6 +125,11 @@ export function mountButton({ isRunActive, onToggleRun }) {
       if (!isProd()) {
         await deleteLocalDatabaseEntryAndRefresh(message.path, iframe, iframeOrigin);
       }
+      return;
+    }
+
+    if (message.type === DELETE_TRACK_ARTIFACT_MESSAGE && typeof message.trackId === "string") {
+      await deleteTrackArtifactAndNotify(message.trackId, iframe, iframeOrigin);
     }
   };
 
@@ -130,6 +137,14 @@ export function mountButton({ isRunActive, onToggleRun }) {
 
   return {
     refresh: schedulePlace,
+    notifyTrackCaptured: async (trackId, metadata) => {
+      const iframe = document.getElementById(IFRAME_ID);
+      if (!(iframe instanceof HTMLIFrameElement)) {
+        return;
+      }
+
+      await postTrackCapturedToIframe(iframe, iframeOrigin, trackId, metadata);
+    },
     disconnect: () => {
       observer.disconnect();
       window.clearInterval(intervalId);
@@ -224,32 +239,36 @@ async function collectIframeTracks() {
   const tracks = [];
 
   for (const row of rows) {
-    const artifact = await inspectTrackArtifact(row.trackId).catch((error) => ({
-      opfsState: "broken",
-      metadata: null,
-      error: error?.message || String(error)
-    }));
-
-    const track = {
-      rowIndex: row.rowIndex,
-      opfsState: artifact.opfsState,
-      metadata: artifact.metadata,
-      ...(artifact.error ? { error: artifact.error } : {})
-    };
-
-    if (!hasDisplayFields(artifact.metadata)) {
-      Object.assign(track, {
-        trackId: row.trackId,
-        trackName: row.trackName,
-        trackArtist: row.trackArtist,
-        trackArtworkSrc: row.trackArtworkSrc
-      });
-    }
-
-    tracks.push(track);
+    tracks.push(await collectIframeTrack(row));
   }
 
   return tracks;
+}
+
+async function collectIframeTrack(row) {
+  const artifact = await inspectTrackArtifact(row.trackId).catch((error) => ({
+    opfsState: "broken",
+    metadata: null,
+    error: error?.message || String(error)
+  }));
+
+  const track = {
+    rowIndex: row.rowIndex,
+    opfsState: artifact.opfsState,
+    metadata: artifact.metadata,
+    ...(artifact.error ? { error: artifact.error } : {})
+  };
+
+  if (!hasDisplayFields(artifact.metadata)) {
+    Object.assign(track, {
+      trackId: row.trackId,
+      trackName: row.trackName,
+      trackArtist: row.trackArtist,
+      trackArtworkSrc: row.trackArtworkSrc
+    });
+  }
+
+  return track;
 }
 
 function hasDisplayFields(metadata) {
@@ -303,6 +322,51 @@ async function deleteLocalDatabaseEntryAndRefresh(path, iframe, origin) {
       error: error?.message || String(error)
     });
   }
+}
+
+async function deleteTrackArtifactAndNotify(trackId, iframe, origin) {
+  try {
+    await deleteLocalDatabaseEntry(trackId);
+  } catch (error) {
+    console.warn(`[ktv420] Failed to delete local capture artifact for ${trackId}`, error);
+  }
+
+  await postTrackCapturedToIframe(iframe, origin, trackId, null);
+}
+
+async function postTrackCapturedToIframe(iframe, origin, trackId, metadata) {
+  if (typeof trackId !== "string" || !trackId) {
+    return;
+  }
+
+  await waitForIframeLoad(iframe);
+
+  const rows = collectTrackRows();
+  const row = rows.find((candidate) => candidate.trackId === trackId);
+  const artifact = await inspectTrackArtifact(trackId).catch((error) => ({
+    opfsState: "broken",
+    metadata: metadata || null,
+    error: error?.message || String(error)
+  }));
+  const artifactMetadata = artifact.metadata || metadata || null;
+
+  iframe.contentWindow?.postMessage(
+    {
+      source: PARENT_MESSAGE_SOURCE,
+      type: TRACK_CAPTURED_MESSAGE,
+      track: {
+        trackId,
+        trackName: row?.trackName || artifactMetadata?.trackName || "",
+        trackArtist: row?.trackArtist || artifactMetadata?.trackArtist || "",
+        trackArtworkSrc: row?.trackArtworkSrc || artifactMetadata?.trackArtworkSrc || "",
+        rowIndex: row?.rowIndex ?? -1,
+        opfsState: artifact.opfsState,
+        metadata: artifactMetadata,
+        ...(artifact.error ? { error: artifact.error } : {})
+      }
+    },
+    origin
+  );
 }
 
 async function prepareTrackJob(trackId, iframe, origin) {
