@@ -277,6 +277,10 @@ button:disabled {
   padding: 0;
 }
 
+.settings-section[aria-label="All OPFS entries"] .settings-list {
+  gap: 4px;
+}
+
 .settings-section {
   display: grid;
   gap: 10px;
@@ -338,8 +342,8 @@ button:disabled {
 .settings-icon-link svg {
   display: block;
   fill: currentColor;
-  height: 18px;
-  width: 66px;
+  height: 20px;
+  width: 20px;
 }
 
 .settings-spotify-link {
@@ -348,20 +352,32 @@ button:disabled {
 
 .settings-row {
   align-items: center;
-  background: #0d1320;
-  border: 1px solid #22304a;
-  border-radius: 8px;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid #1d2940;
+  border-radius: 0;
   color: inherit;
   display: grid;
   gap: 10px;
   grid-template-columns: 44px minmax(0, 1fr) 84px;
-  min-height: 40px;
+  min-height: 30px;
+  padding: 5px 0 0 calc(2px + var(--settings-entry-indent, 0px));
   text-align: left;
   width: 100%;
 }
 
+.settings-row[data-kind="directory"] {
+  background: transparent;
+  border-color: #263753;
+}
+
+.settings-row[data-kind="file"] {
+  background: transparent;
+}
+
 .settings-row:hover,
 .settings-row:focus-visible {
+  background: #121b2d;
   border-color: #78dce8;
   transform: none;
 }
@@ -370,15 +386,24 @@ button:disabled {
   color: #78dce8;
   font-size: 11px;
   font-weight: 700;
+  justify-self: start;
   text-transform: uppercase;
+}
+
+.settings-row[data-kind="directory"] .settings-kind {
+  color: #ffcf70;
 }
 
 .settings-path {
   color: #e4e7f2;
-  font-size: 13px;
+  font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.settings-row[data-kind="directory"] .settings-path {
+  font-weight: 600;
 }
 
 .settings-size {
