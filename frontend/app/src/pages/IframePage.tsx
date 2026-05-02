@@ -2,12 +2,11 @@ import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateA
 
 import {
   buildStemRunRequest,
-  deleteLocalOpfsEntry,
   downloadArtifactsToOpfs,
   findPreparedInputMp3,
   hasLocalOutputMetadata,
   hasRemoteOutputMetadata,
-  listLocalOpfsEntries,
+  saveSpotifyContext,
   type LocalDatabaseEntry
 } from "./iframeArtifacts";
 
@@ -103,6 +102,8 @@ export default function IframePage() {
   const queueFailedRef = useRef(false);
   const successAlertedRef = useRef(false);
   const deleteRefreshWaitersRef = useRef(new Map<string, () => void>());
+  const tracksRef = useRef<IframeTrack[] | null>(null);
+  const spotifyPathRef = useRef("");
   const isReady = tracks !== null;
 
   useEffect(() => {
@@ -126,11 +127,14 @@ export default function IframePage() {
         const nextTracks = message.tracks
           .map((track: unknown) => toIframeTrack(track))
           .filter((track: IframeTrack | null): track is IframeTrack => track !== null);
+        const nextSpotifyPath = readString(message.spotifyPath);
         setIsDev(nextIsDev);
         setViewMode("tracks");
         if (!nextIsDev) {
           setDatabaseSources([]);
         }
+        spotifyPathRef.current = nextSpotifyPath;
+        tracksRef.current = nextTracks;
         setTracks(nextTracks);
         void refreshLocalOutputMetadata(nextTracks, setTracks);
         return;
@@ -176,6 +180,8 @@ export default function IframePage() {
 
   const close = useCallback(() => {
     setTracks(null);
+    tracksRef.current = null;
+    spotifyPathRef.current = "";
     setViewMode("tracks");
     setDatabaseSources([]);
     postParentMessage(CLOSE_OVERLAY_MESSAGE);
@@ -197,25 +203,9 @@ export default function IframePage() {
 
     setViewMode("settings");
     setDatabaseSources([
-      { sourceName: "Spotify content script", entries: [], loading: true },
-      { sourceName: "Iframe", entries: [], loading: true }
+      { sourceName: "Spotify content script", entries: [], loading: true }
     ]);
     postParentMessage(REQUEST_LOCAL_DATABASE_MESSAGE);
-
-    try {
-      const entries = await listLocalOpfsEntries();
-      setDatabaseSources((sources) =>
-        upsertDatabaseSource(sources, { sourceName: "Iframe", entries })
-      );
-    } catch (error) {
-      setDatabaseSources((sources) =>
-        upsertDatabaseSource(sources, {
-          sourceName: "Iframe",
-          entries: [],
-          error: error instanceof Error ? error.message : String(error)
-        })
-      );
-    }
   }, [isDev]);
 
   const toggleSettingsView = useCallback(() => {
@@ -239,26 +229,6 @@ export default function IframePage() {
 
       if (source.sourceName !== "Iframe") {
         return;
-      }
-
-      setDatabaseSources((sources) =>
-        upsertDatabaseSource(sources, { ...source, loading: true, error: undefined })
-      );
-
-      try {
-        await deleteLocalOpfsEntry(entry.path);
-        const entries = await listLocalOpfsEntries();
-        setDatabaseSources((sources) =>
-          upsertDatabaseSource(sources, { sourceName: "Iframe", entries })
-        );
-      } catch (error) {
-        setDatabaseSources((sources) =>
-          upsertDatabaseSource(sources, {
-            sourceName: "Iframe",
-            entries: source.entries,
-            error: error instanceof Error ? error.message : String(error)
-          })
-        );
       }
     },
     []
@@ -474,7 +444,28 @@ export default function IframePage() {
     }
 
     successAlertedRef.current = true;
-    window.alert(`ktv420 capture complete. Processed ${expectedTrackIds.size} track(s).`);
+    saveAndOpenPlayRoute().catch((error) => {
+      queueFailedRef.current = true;
+      window.alert(error instanceof Error ? error.message : String(error));
+    });
+  }
+
+  async function saveAndOpenPlayRoute() {
+    const currentSpotifyPath = spotifyPathRef.current;
+    const currentTracks = tracksRef.current ?? [];
+
+    if (!currentSpotifyPath) {
+      throw new Error("Missing Spotify playlist or album path.");
+    }
+
+    await saveSpotifyContext({
+      id: currentSpotifyPath,
+      tracks: currentTracks.map((track) => track.trackId)
+    });
+
+    const playUrl = new URL("/play", window.location.origin);
+    playUrl.hash = currentSpotifyPath;
+    window.open(playUrl.toString(), "_blank", "noopener,noreferrer");
   }
 
   function waitForDeleteRefresh(trackId: string) {

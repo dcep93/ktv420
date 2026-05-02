@@ -60,6 +60,34 @@ button:disabled {
   transform: none;
 }
 
+.standalone-page {
+  display: grid;
+  gap: 16px;
+  margin: 0 auto;
+  max-width: 960px;
+  min-height: 100vh;
+  padding: 32px 20px;
+  width: 100%;
+}
+
+.standalone-header {
+  align-items: center;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.standalone-header h1 {
+  color: #f8fafc;
+  font-size: 24px;
+  margin: 0;
+}
+
+.standalone-header span {
+  color: #9aa8bd;
+  font-size: 13px;
+}
+
 .iframe-page {
   align-items: center;
   background: #05070d;
@@ -240,6 +268,103 @@ button:disabled {
   color: #ff9bcf;
 }
 
+.settings-list,
+.play-track-list {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.settings-row {
+  align-items: center;
+  background: #0d1320;
+  border: 1px solid #22304a;
+  border-radius: 8px;
+  color: inherit;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 44px minmax(0, 1fr) 84px;
+  min-height: 40px;
+  text-align: left;
+  width: 100%;
+}
+
+.settings-row:hover,
+.settings-row:focus-visible {
+  border-color: #78dce8;
+  transform: none;
+}
+
+.settings-kind {
+  color: #78dce8;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.settings-path {
+  color: #e4e7f2;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-size {
+  color: #9aa8bd;
+  font-size: 12px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.settings-empty,
+.settings-error {
+  font-size: 13px;
+  margin: 0;
+}
+
+.settings-empty {
+  color: #9aa8bd;
+}
+
+.settings-error {
+  color: #ff9bcf;
+}
+
+.play-track-row {
+  align-items: center;
+  background: #0d1320;
+  border: 1px solid #22304a;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 32px 42px minmax(0, 1fr) auto;
+  min-height: 58px;
+  padding: 7px 10px;
+}
+
+.play-track-index {
+  color: #9aa8bd;
+  font-size: 13px;
+  text-align: right;
+}
+
+.play-track-artwork-placeholder {
+  background: #111827;
+  border-radius: 4px;
+  display: block;
+  height: 42px;
+  width: 42px;
+}
+
+.play-track-status {
+  color: #78dce8;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .iframe-track-row {
   align-items: center;
   background: #0d1320;
@@ -307,6 +432,17 @@ button:disabled {
   }
 
   .iframe-settings-size {
+    grid-column: 2;
+    text-align: left;
+  }
+
+  .settings-row,
+  .play-track-row {
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+
+  .settings-size,
+  .play-track-status {
     grid-column: 2;
     text-align: left;
   }

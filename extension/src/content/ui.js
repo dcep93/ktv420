@@ -303,10 +303,15 @@ async function postTracksToIframe(iframe, origin, tracks) {
       source: PARENT_MESSAGE_SOURCE,
       type: TRACKS_MESSAGE,
       isDev: !isProd(),
+      spotifyPath: currentSpotifyPath(),
       tracks
     },
     origin
   );
+}
+
+function currentSpotifyPath() {
+  return window.location.pathname.split("/").filter(Boolean).slice(0, 2).join("/");
 }
 
 async function postLocalDatabaseToIframe(iframe, origin) {
@@ -399,8 +404,8 @@ async function postCaptureCompleteToIframe(iframe, origin, trackIds) {
 
 async function prepareTrackJob(trackId, iframe, origin) {
   try {
-    const result = await prepareTrackRequest(trackId);
-    postActionResult(iframe, origin, PREPARE_JOB_RESULT_MESSAGE, trackId, { ok: true, result });
+    await prepareTrackRequest(trackId);
+    postActionResult(iframe, origin, PREPARE_JOB_RESULT_MESSAGE, trackId, { ok: true });
   } catch (error) {
     postActionResult(iframe, origin, PREPARE_JOB_RESULT_MESSAGE, trackId, {
       ok: false,
@@ -411,10 +416,7 @@ async function prepareTrackJob(trackId, iframe, origin) {
 
 async function runTrackJob(trackId, iframe, origin, request = null) {
   try {
-    const prepareResult = request ? null : await prepareTrackRequest(trackId);
-    const runRequest = request || getPrepareJobRunRequest(prepareResult);
-
-    if (!runRequest) {
+    if (!request) {
       postActionResult(iframe, origin, RUN_JOB_RESULT_MESSAGE, trackId, {
         ok: false,
         error: "MP3 is still preparing. Try again after prepare finishes."
@@ -422,7 +424,7 @@ async function runTrackJob(trackId, iframe, origin, request = null) {
       return;
     }
 
-    const result = await postJson(`${STEM_API_BASE_URL}/run_job`, runRequest, "run_job");
+    const result = await postJson(`${STEM_API_BASE_URL}/run_job`, request, "run_job");
     postActionResult(iframe, origin, RUN_JOB_RESULT_MESSAGE, trackId, { ok: true, result });
   } catch (error) {
     postActionResult(iframe, origin, RUN_JOB_RESULT_MESSAGE, trackId, {
@@ -441,21 +443,9 @@ function isRunRequest(value) {
   );
 }
 
-function getPrepareJobRunRequest(value) {
-  if (isRunRequest(value)) {
-    return value;
-  }
-
-  if (value && typeof value === "object" && isRunRequest(value.request)) {
-    return value.request;
-  }
-
-  return null;
-}
-
 async function prepareTrackRequest(trackId) {
   const artifact = await readTrackArtifact(trackId);
-  return await postJson(
+  await postJson(
     `${STEM_API_BASE_URL}/prepare_job`,
     {
       pcm_s16le_b64: artifact.pcmS16leB64,

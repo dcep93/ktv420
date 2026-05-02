@@ -32,6 +32,11 @@ export type DownloadArtifactsResult = {
   manifestPath: string;
 };
 
+export type SavedSpotifyContext = {
+  id: string;
+  tracks: string[];
+};
+
 export async function downloadArtifactsToOpfs(trackId: string, metadata: Record<string, unknown>) {
   const inputPrefix = `stems/${trackId}/input/`;
   const outputPrefix = `stems/${trackId}/output/`;
@@ -138,6 +143,27 @@ export async function deleteLocalOpfsEntry(path: string) {
   await removeOpfsEntry(path);
 }
 
+export async function saveSpotifyContext(record: SavedSpotifyContext) {
+  await writeOpfsText(spotifyContextPath(record.id), JSON.stringify(record, null, 2));
+}
+
+export async function readSpotifyContext(spotifyPath: string) {
+  const value = await readOpfsJson(spotifyContextPath(spotifyPath));
+  if (!isSavedSpotifyContext(value, spotifyPath)) {
+    return null;
+  }
+
+  return value;
+}
+
+export async function readTrackManifest(trackId: string) {
+  return await readOpfsJson(`stems/${trackId}/manifest.json`);
+}
+
+export async function readTrackOutputMetadata(trackId: string) {
+  return await readOpfsJson(`stems/${trackId}/output/_metadata.json`);
+}
+
 async function listObjectsWithPrefix(prefix: string): Promise<GcsObject[]> {
   const objects: GcsObject[] = [];
   let pageToken: string | undefined;
@@ -207,6 +233,50 @@ async function writeOpfsText(path: string, text: string) {
   const writable = await handle.createWritable();
   await writable.write(text);
   await writable.close();
+}
+
+async function readOpfsText(path: string) {
+  const root = await navigator.storage.getDirectory();
+  const parts = path.split("/").filter(Boolean);
+  const fileName = parts.pop();
+
+  if (!fileName) {
+    return null;
+  }
+
+  let directory = root;
+  for (const part of parts) {
+    try {
+      directory = await directory.getDirectoryHandle(part, { create: false });
+    } catch (error) {
+      if (isNotFoundError(error)) {
+        return null;
+      }
+
+      throw error;
+    }
+  }
+
+  try {
+    const handle = await directory.getFileHandle(fileName, { create: false });
+    const file = await handle.getFile();
+    return await file.text();
+  } catch (error) {
+    if (isNotFoundError(error)) {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+async function readOpfsJson(path: string) {
+  const text = await readOpfsText(path);
+  if (text === null) {
+    return null;
+  }
+
+  return JSON.parse(text) as unknown;
 }
 
 async function getOpfsFileHandle(path: string) {
@@ -301,6 +371,20 @@ function isNotFoundError(error: unknown) {
 function relativeArtifactPath(trackId: string, objectPath: string) {
   const prefix = `stems/${trackId}/`;
   return objectPath.startsWith(prefix) ? objectPath.slice(prefix.length) : objectPath;
+}
+
+function spotifyContextPath(spotifyPath: string) {
+  return `playlists/${spotifyPath}.json`;
+}
+
+function isSavedSpotifyContext(value: unknown, spotifyPath: string): value is SavedSpotifyContext {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      (value as SavedSpotifyContext).id === spotifyPath &&
+      Array.isArray((value as SavedSpotifyContext).tracks) &&
+      (value as SavedSpotifyContext).tracks.every((trackId) => typeof trackId === "string")
+  );
 }
 
 function bucketObjectsUrl() {
