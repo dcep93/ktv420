@@ -9,7 +9,15 @@ import SamplePage from "../pages/SamplePage";
 import SettingsPage from "../pages/SettingsPage";
 import { logPageView } from "./firebaseAnalytics";
 
-function getPageTitle(pathname: string) {
+function getPageTitle(pathname: string, hash: string) {
+  if (pathname === "/play" && hash.startsWith("#album/")) {
+    return "ktv420 album";
+  }
+
+  if (pathname === "/play" && hash.startsWith("#playlist/")) {
+    return "ktv420 playlist";
+  }
+
   if (pathname === "/admin") {
     return "ktv420 admin";
   }
@@ -20,14 +28,6 @@ function getPageTitle(pathname: string) {
 
   if (pathname === "/play") {
     return "ktv420 player";
-  }
-
-  if (pathname.startsWith("/album/")) {
-    return "ktv420 album";
-  }
-
-  if (pathname.startsWith("/playlist/")) {
-    return "ktv420 playlist";
   }
 
   if (pathname === "/sample") {
@@ -45,7 +45,7 @@ export default function AppRoutes() {
   const { hash, pathname, search } = useLocation();
 
   useEffect(() => {
-    const pageTitle = getPageTitle(pathname);
+    const pageTitle = getPageTitle(pathname, hash);
 
     document.title = pageTitle;
     void logPageView(`${pathname}${search}${hash}`, pageTitle);
@@ -57,8 +57,6 @@ export default function AppRoutes() {
       <Route path="/admin" element={<AdminPage />} />
       <Route path="/iframe" element={<IframePage />} />
       <Route path="/play" element={<PlayPage />} />
-      <Route path="/album/:spotifyId" element={<PlayPage spotifyKind="album" />} />
-      <Route path="/playlist/:spotifyId" element={<PlayPage spotifyKind="playlist" />} />
       <Route path="/sample" element={<SamplePage />} />
       <Route path="/settings" element={<SettingsPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />

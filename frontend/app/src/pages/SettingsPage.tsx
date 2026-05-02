@@ -90,7 +90,7 @@ export default function SettingsPage() {
                       </a>
                       <a
                         className="settings-icon-link"
-                        href={`./${playlist.id}`}
+                        href={`/play#${playlist.id}`}
                         aria-label={`Open ${playlist.id} in ktv420`}
                         title="Open in ktv420"
                       >
