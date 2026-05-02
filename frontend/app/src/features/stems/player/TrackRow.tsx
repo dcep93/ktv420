@@ -18,6 +18,8 @@ type TrackRowProps = {
   onResetEffect: (trackId: string) => void;
   onToggleMute: (trackId: string) => void;
   onToggleDeafen: (trackId: string) => void;
+  isSpotlighted: boolean;
+  onToggleSpotlight: () => void;
   registerCanvas: (canvas: HTMLCanvasElement | null) => void;
   onCanvasSeek: (event: PointerEvent<HTMLCanvasElement>) => void;
 };
@@ -37,6 +39,8 @@ export function TrackRow({
   onResetEffect,
   onToggleMute,
   onToggleDeafen,
+  isSpotlighted,
+  onToggleSpotlight,
   registerCanvas,
   onCanvasSeek,
 }: TrackRowProps) {
@@ -71,6 +75,7 @@ export function TrackRow({
   return (
     <div
       key={track.id}
+      className={`player-track-row${isSpotlighted ? " player-track-row--spotlight" : ""}`}
       style={{
         background: "rgba(8, 6, 5, 0.72)",
         border: "1px solid rgba(228, 193, 150, 0.34)",
@@ -81,6 +86,7 @@ export function TrackRow({
       }}
     >
       <div
+        className="player-track-row__header"
         style={{
           display: "flex",
           alignItems: "center",
@@ -90,11 +96,16 @@ export function TrackRow({
           marginBottom: "0.34rem",
         }}
       >
-        <div
+        <button
+          type="button"
+          className="player-track-row__name"
+          onClick={onToggleSpotlight}
+          aria-pressed={isSpotlighted}
+          title={isSpotlighted ? "Exit spotlight view" : "Spotlight track"}
           style={{ minWidth: "187px", fontWeight: 600, color: "var(--ww-text)" }}
         >
           {label}
-        </div>
+        </button>
         <div
           style={{
             alignItems: "center",
@@ -181,7 +192,7 @@ export function TrackRow({
           </label>
         </div>
       </div>
-      <div style={{ marginTop: "0.34rem" }}>
+      <div className="player-track-row__canvas" style={{ marginTop: "0.34rem" }}>
         <canvas
           ref={registerCanvas}
           width={520}

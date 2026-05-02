@@ -356,6 +356,90 @@ button:disabled {
   background: transparent;
 }
 
+.player-shell--spotlight {
+  background: var(--ww-bg-bottom) !important;
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  inset: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 18px 20px 32px !important;
+  position: fixed;
+  width: 100dvw;
+  z-index: 1000;
+}
+
+.player-shell--spotlight .player-main-controls {
+  flex: 0 0 auto;
+}
+
+.player-shell--spotlight .player-track-list {
+  display: flex;
+  flex: 1 1 auto;
+  margin-top: 12px !important;
+  min-height: 0;
+}
+
+.player-track-row {
+  display: block;
+}
+
+.player-track-row__name {
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  box-shadow: none;
+  cursor: pointer;
+  display: block;
+  line-height: 1.25;
+  overflow: hidden;
+  padding: 0.15rem 0.2rem;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-track-row__name:hover,
+.player-track-row__name:focus-visible {
+  background: rgba(255, 123, 195, 0.12);
+  border-color: transparent;
+  transform: none;
+}
+
+.player-shell--spotlight .player-track-row:not(.player-track-row--spotlight) {
+  display: none;
+}
+
+.player-track-row--spotlight {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  margin: 0 !important;
+  overflow: auto;
+  width: 100%;
+}
+
+.player-track-row--spotlight .player-track-row__header {
+  flex: 0 0 auto;
+}
+
+.player-track-row--spotlight .player-track-row__canvas {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 240px;
+}
+
+.player-track-row canvas {
+  height: 102px;
+}
+
+.player-track-row--spotlight canvas {
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
+}
+
 .settings-section[aria-label="OPFS"] .settings-list,
 .settings-section[aria-label="GCS entries"] .settings-list {
   gap: 4px;

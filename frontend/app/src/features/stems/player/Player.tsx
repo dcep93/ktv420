@@ -39,6 +39,20 @@ import {
 import { visualizerOptions } from "./visualizerOptions";
 import { drawVisualizer } from "./visualizers";
 
+type SpotlightIntent =
+  | {
+      kind: "input";
+    }
+  | {
+      kind: "output";
+      name: string;
+    };
+type SpotlightLevel = "track" | "track-with-selectors";
+type SpotlightState = {
+  intent: SpotlightIntent;
+  level: SpotlightLevel;
+};
+
 export default function Player({
   record,
   title,
@@ -83,6 +97,8 @@ export default function Player({
   const [currentChord, setCurrentChord] = useState<string>("Detecting...");
   const [isHarmonicAnalysisRunning, setIsHarmonicAnalysisRunning] =
     useState(false);
+  const [spotlightState, setSpotlightState] =
+    useState<SpotlightState | null>(null);
   const isAnyTrackDeafened = useMemo(
     () => Object.values(trackDeafenStates).some(Boolean),
     [trackDeafenStates]
@@ -142,6 +158,26 @@ export default function Player({
     [tracks]
   );
   const inputTrackId = inputTrack?.id ?? null;
+  const spotlightTrack = useMemo(() => {
+    const spotlightIntent = spotlightState?.intent;
+
+    if (!spotlightIntent) {
+      return null;
+    }
+
+    if (spotlightIntent.kind === "input") {
+      return inputTrack;
+    }
+
+    return (
+      tracks.find(
+        (track) => !track.isInput && track.name === spotlightIntent.name
+      ) ?? null
+    );
+  }, [inputTrack, spotlightState, tracks]);
+  const spotlightTrackId = spotlightTrack?.id ?? null;
+  const shouldShowVisualizerPicker =
+    !spotlightTrackId || spotlightState?.level === "track-with-selectors";
 
   const primaryTrack = tracks.find((track) => track.isInput) ?? tracks[0];
   const playerTitle = title ?? primaryTrack?.name ?? "Playback";
@@ -189,6 +225,32 @@ export default function Player({
   useEffect(() => {
     effectTypesRef.current = effectTypes;
   }, [effectTypes]);
+
+  useEffect(() => {
+    if (!spotlightTrackId) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    const previousOverscrollBehavior = document.body.style.overscrollBehavior;
+    document.body.style.overflow = "hidden";
+    document.body.style.overscrollBehavior = "none";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.body.style.overscrollBehavior = previousOverscrollBehavior;
+    };
+  }, [spotlightTrackId]);
+
+  useEffect(() => {
+    if (
+      tracks.length > 0 &&
+      spotlightState?.intent.kind === "output" &&
+      !spotlightTrackId
+    ) {
+      setSpotlightState(null);
+    }
+  }, [spotlightState, spotlightTrackId, tracks.length]);
 
   const getEffectiveVolumeFromRefs = useCallback(
     (trackId: string, baseVolume?: number) => {
@@ -594,23 +656,36 @@ export default function Player({
           return;
         }
 
-        const parentWidth =
-          canvas.parentElement?.clientWidth ?? window.innerWidth;
-        const nextWidth = Math.max(0, Math.floor(parentWidth));
+        const rect = canvas.getBoundingClientRect();
+        const parentRect = canvas.parentElement?.getBoundingClientRect();
+        const nextWidth = Math.max(
+          0,
+          Math.floor(rect.width || parentRect?.width || window.innerWidth)
+        );
+        const nextHeight = Math.max(
+          0,
+          Math.floor(rect.height || parentRect?.height || 102)
+        );
 
         if (nextWidth && canvas.width !== nextWidth) {
           canvas.width = nextWidth;
+        }
+
+        if (nextHeight && canvas.height !== nextHeight) {
+          canvas.height = nextHeight;
         }
       });
     };
 
     resizeCanvases();
+    const animationFrame = window.requestAnimationFrame(resizeCanvases);
     window.addEventListener("resize", resizeCanvases);
 
     return () => {
+      window.cancelAnimationFrame(animationFrame);
       window.removeEventListener("resize", resizeCanvases);
     };
-  }, [tracks]);
+  }, [spotlightTrackId, tracks]);
 
   useEffect(() => {
     const draw = () => {
@@ -1038,6 +1113,30 @@ export default function Player({
     applyEffectValue(trackId, defaultValue);
   };
 
+  const toggleTrackSpotlight = useCallback((track: Track) => {
+    setSpotlightState((current) => {
+      const nextIntent: SpotlightIntent = track.isInput
+        ? { kind: "input" }
+        : { kind: "output", name: track.name };
+      const currentIntent = current?.intent;
+      const isCurrentIntent =
+        currentIntent?.kind === nextIntent.kind &&
+        (nextIntent.kind === "input" ||
+          (currentIntent?.kind === "output" &&
+            currentIntent.name === nextIntent.name));
+
+      if (!isCurrentIntent) {
+        return { intent: nextIntent, level: "track" };
+      }
+
+      if (current?.level === "track") {
+        return { intent: nextIntent, level: "track-with-selectors" };
+      }
+
+      return null;
+    });
+  }, []);
+
   const toggleTrackMute = (trackId: string) => {
     setTrackMuteStates((previous) => ({
       ...previous,
@@ -1119,12 +1218,14 @@ export default function Player({
 
   return (
     <div
+      className={`player-shell${spotlightTrackId ? " player-shell--spotlight" : ""}`}
       style={{
         padding: 0,
         background: "transparent",
       }}
     >
       <div
+        className="player-main-controls"
         style={{
           display: "flex",
           alignItems: "center",
@@ -1278,7 +1379,7 @@ export default function Player({
       </div>
       {tracks.length ? (
         <>
-          <div style={{ marginTop: "1rem" }}>
+          <div className="player-track-list" style={{ marginTop: "1rem" }}>
             {tracks.map((track) => (
               <TrackRow
                 key={track.id}
@@ -1299,6 +1400,8 @@ export default function Player({
                 onResetEffect={handleEffectReset}
                 onToggleMute={toggleTrackMute}
                 onToggleDeafen={toggleTrackDeafen}
+                isSpotlighted={spotlightTrackId === track.id}
+                onToggleSpotlight={() => toggleTrackSpotlight(track)}
                 registerCanvas={(ref) => {
                   canvasRefs.current[track.id] = ref;
                 }}
@@ -1306,7 +1409,11 @@ export default function Player({
               />
             ))}
           </div>
-          <div style={{ marginTop: "0.75rem" }}>
+          <div
+            className="player-visualizer-picker"
+            hidden={!shouldShowVisualizerPicker}
+            style={{ marginTop: "0.75rem" }}
+          >
             <div
               style={{
                 display: "flex",
