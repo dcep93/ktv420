@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useParams } from "react-router-dom";
 
 import {
   readSpotifyContext,
@@ -15,15 +16,23 @@ type PlayTrack = {
   outputMetadata: Record<string, unknown> | null;
 };
 
-export default function PlayPage() {
-  const [spotifyPath, setSpotifyPath] = useState(readSpotifyPathHash);
+type PlayPageProps = {
+  spotifyKind?: "album" | "playlist";
+};
+
+export default function PlayPage({ spotifyKind }: PlayPageProps = {}) {
+  const params = useParams();
+  const routeSpotifyPath =
+    spotifyKind && params.spotifyId ? `${spotifyKind}/${params.spotifyId}` : "";
+  const [hashSpotifyPath, setHashSpotifyPath] = useState(readSpotifyPathHash);
+  const spotifyPath = routeSpotifyPath || hashSpotifyPath;
   const [record, setRecord] = useState<SavedSpotifyContext | null>(null);
   const [tracks, setTracks] = useState<PlayTrack[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const handleHashChange = () => setSpotifyPath(readSpotifyPathHash());
+    const handleHashChange = () => setHashSpotifyPath(readSpotifyPathHash());
     window.addEventListener("hashchange", handleHashChange);
     return () => window.removeEventListener("hashchange", handleHashChange);
   }, []);

@@ -96,6 +96,7 @@ export default function IframePage() {
   const [viewMode, setViewMode] = useState<ViewMode>("tracks");
   const [databaseSources, setDatabaseSources] = useState<LocalDatabaseSource[]>([]);
   const pendingActionsRef = useRef(new Map<string, PendingAction>());
+  const toggleRunRef = useRef<() => void>(() => {});
   const handleCapturedTrackMessageRef = useRef<(value: MetadataRecord) => void>(() => {});
   const enqueueCapturedTrackRef = useRef<(value: MetadataRecord) => void>(() => {});
   const setExpectedQueueTrackIdsRef = useRef<(trackIds: string[]) => void>(() => {});
@@ -192,7 +193,7 @@ export default function IframePage() {
     postParentMessage(CLOSE_OVERLAY_MESSAGE);
   }, []);
 
-  const toggleRun = useCallback(async () => {
+  async function toggleRun() {
     if (!isReady) {
       return;
     }
@@ -205,8 +206,53 @@ export default function IframePage() {
     }
 
     resetQueueState();
+    const currentTracks = tracksRef.current ?? [];
+    const outputStates = await Promise.all(
+      currentTracks.map(async (track) => ({
+        trackId: track.trackId,
+        hasLocalOutputMetadata: await hasLocalOutputMetadata(track.trackId)
+      }))
+    );
+    const outputStateByTrackId = new Map(
+      outputStates.map((state) => [state.trackId, state.hasLocalOutputMetadata])
+    );
+    const nextTracks = currentTracks.map((track) => ({
+      ...track,
+      hasLocalOutputMetadata: outputStateByTrackId.get(track.trackId) ?? track.hasLocalOutputMetadata
+    }));
+    const queueableTracks = nextTracks.filter(
+      (track) => !track.hasLocalOutputMetadata && track.opfsState === "hydrated" && track.metadata
+    );
+    const tracksNeedingPcmCapture = nextTracks.filter(
+      (track) => !track.hasLocalOutputMetadata && !queueableTracks.includes(track)
+    );
+
+    tracksRef.current = nextTracks;
+    setTracks(nextTracks);
+
+    if (nextTracks.length > 0 && tracksNeedingPcmCapture.length === 0) {
+      expectedCaptureIdsRef.current = new Set(nextTracks.map((track) => track.trackId));
+      for (const track of nextTracks) {
+        if (track.hasLocalOutputMetadata) {
+          completedQueueIdsRef.current.add(track.trackId);
+          continue;
+        }
+
+        knownQueueIdsRef.current.add(track.trackId);
+        queueRef.current.push({ trackId: track.trackId, metadata: track.metadata as MetadataRecord });
+      }
+
+      void processQueue();
+      maybeAlertCaptureSuccess();
+      return;
+    }
+
     postParentMessage(TOGGLE_RUN_MESSAGE);
-  }, [isReady]);
+  }
+
+  toggleRunRef.current = () => {
+    void toggleRun();
+  };
 
   const loadIframeDatabaseSource = useCallback(async () => {
     try {
@@ -309,15 +355,15 @@ export default function IframePage() {
         return;
       }
 
-      if (event.key === "Enter" && isReady) {
+      if (event.key === "Enter") {
         event.preventDefault();
-        toggleRun();
+        toggleRunRef.current();
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [close, isReady, toggleRun]);
+  }, [close]);
 
   function resetQueueState() {
     queueRef.current = [];

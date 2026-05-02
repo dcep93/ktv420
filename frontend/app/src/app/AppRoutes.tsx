@@ -14,6 +14,8 @@ export default function AppRoutes() {
       <Route path="/admin" element={<AdminPage />} />
       <Route path="/iframe" element={<IframePage />} />
       <Route path="/play" element={<PlayPage />} />
+      <Route path="/album/:spotifyId" element={<PlayPage spotifyKind="album" />} />
+      <Route path="/playlist/:spotifyId" element={<PlayPage spotifyKind="playlist" />} />
       <Route path="/sample" element={<SamplePage />} />
       <Route path="/settings" element={<SettingsPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />

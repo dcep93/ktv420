@@ -277,6 +277,75 @@ button:disabled {
   padding: 0;
 }
 
+.settings-section {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-section h2 {
+  color: #f8fafc;
+  font-size: 14px;
+  margin: 0;
+}
+
+.settings-playlist-row {
+  align-items: center;
+  background: #0d1320;
+  border: 1px solid #22304a;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) 92px auto;
+  min-height: 44px;
+  padding: 6px 8px 6px 12px;
+}
+
+.settings-playlist-row:hover {
+  border-color: #78dce8;
+}
+
+.settings-playlist-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.settings-icon-link {
+  align-items: center;
+  background: #111827;
+  border: 1px solid #22304a;
+  border-radius: 8px;
+  color: #e4e7f2;
+  display: inline-flex;
+  height: 32px;
+  justify-content: center;
+  padding: 0 9px;
+  width: 44px;
+}
+
+.settings-icon-link:hover,
+.settings-icon-link:focus-visible {
+  border-color: #78dce8;
+  transform: none;
+}
+
+.settings-icon-link img {
+  display: block;
+  height: 20px;
+  width: 20px;
+}
+
+.settings-icon-link svg {
+  display: block;
+  fill: currentColor;
+  height: 18px;
+  width: 66px;
+}
+
+.settings-spotify-link {
+  color: #1ed760;
+}
+
 .settings-row {
   align-items: center;
   background: #0d1320;
@@ -437,13 +506,26 @@ button:disabled {
   }
 
   .settings-row,
+  .settings-playlist-row,
   .play-track-row {
     grid-template-columns: 40px minmax(0, 1fr);
+  }
+
+  .settings-playlist-row {
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
   .settings-size,
   .play-track-status {
     grid-column: 2;
     text-align: left;
+  }
+
+  .settings-playlist-row .settings-size {
+    grid-column: 1;
+  }
+
+  .settings-playlist-actions {
+    grid-row: 1 / span 2;
   }
 }
