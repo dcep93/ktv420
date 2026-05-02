@@ -41,7 +41,7 @@ const ui = mountButton({
       await runner.toggleRun();
       ui.refresh();
     } catch (error) {
-      console.error("[ktv420] Failed to run capture", error);
+      console.log("[ktv420] Failed to run capture", error);
     }
   }
 });

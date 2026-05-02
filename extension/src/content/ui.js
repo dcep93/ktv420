@@ -186,7 +186,7 @@ function createButton(onClick) {
     event.preventDefault();
     event.stopPropagation();
     onClick().catch((error) => {
-      console.error("[ktv420] Failed to open prepared iframe", error);
+      console.log("[ktv420] Failed to open prepared iframe", error);
     });
   });
   return button;

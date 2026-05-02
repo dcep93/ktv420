@@ -13,7 +13,7 @@
 
     imported = true;
     import(chrome.runtime.getURL("src/content/main.js")).catch((error) => {
-      console.error("[ktv420] Failed to boot extension", error);
+      console.log("[ktv420] Failed to boot extension", error);
     });
   };
 

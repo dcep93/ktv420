@@ -9,7 +9,6 @@ import {
   resolveTrackRow
 } from "./dom.js";
 import { resolveCurrentPlaybackTrack } from "./playbackState.js";
-import { copyJsonToClipboard } from "./clipboard.js";
 import { readCachedTrack, writeTrackArtifact } from "./storage.js";
 import { formatSeconds, looselyMatches } from "./text.js";
 import { md5Hex } from "./md5.js";
@@ -171,13 +170,8 @@ export class CaptureOrchestrator extends EventTarget {
         routePathname: window.location.pathname
       };
 
-      try {
-        await copyJsonToClipboard(report);
-        alert("ktv420 capture failed. Copied the debug report to clipboard.");
-      } catch (clipboardError) {
-        report.clipboardError = serializeError(clipboardError);
-      }
-      console.error("[ktv420] Capture run failed", report);
+      console.log("[ktv420] Capture run failed", report);
+      alert("ktv420 capture failed. See the console for the debug report.");
     } finally {
       await this.bridge.command("capture-abort").catch(() => {});
       this.active = false;
