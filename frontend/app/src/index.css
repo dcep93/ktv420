@@ -1,9 +1,29 @@
 :root {
-  font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --ww-bg-top: #1a1411;
+  --ww-bg-bottom: #0c0907;
+  --ww-panel: rgba(28, 21, 18, 0.84);
+  --ww-panel-strong: rgba(20, 15, 12, 0.92);
+  --ww-panel-soft: rgba(36, 28, 24, 0.78);
+  --ww-panel-soft-reflection: rgba(102, 95, 32, 0.78);
+  --ww-border: rgba(201, 156, 107, 0.2);
+  --ww-border-soft: rgba(201, 156, 107, 0.12);
+  --ww-border-strong: rgba(228, 193, 150, 0.34);
+  --ww-text: #ffffff;
+  --ww-text-strong: #ffffff;
+  --ww-text-muted: rgba(255, 255, 255, 0.72);
+  --ww-text-soft: rgba(255, 255, 255, 0.84);
+  --ww-accent-cyan: #d8b38a;
+  --ww-accent-green: #b98d63;
+  --ww-accent-amber: #c99c6b;
+  --ww-title-pink: #ff7bc3;
+  --ww-danger: #ff9fb0;
+  --ktv-row-hover: rgba(232, 206, 171, 0.06);
+  --ktv-control-bg: rgba(232, 206, 171, 0.07);
+  font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
   line-height: 1.5;
   font-weight: 400;
-  color: #e4e7f2;
-  background-color: #05070d;
+  color: var(--ww-text);
+  background-color: var(--ww-bg-bottom);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -18,9 +38,11 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background: radial-gradient(circle at 20% 20%, #0c1324 0, transparent 35%),
-    radial-gradient(circle at 80% 0%, #0d152b 0, transparent 30%),
-    #05070d;
+  background:
+    radial-gradient(circle at top left, rgba(255, 123, 195, 0.12), transparent 24%),
+    radial-gradient(circle at top right, rgba(201, 156, 107, 0.14), transparent 32%),
+    radial-gradient(circle at bottom center, rgba(185, 141, 99, 0.1), transparent 36%),
+    linear-gradient(180deg, var(--ww-bg-top) 0%, var(--ww-bg-bottom) 100%);
 }
 
 #root {
@@ -41,16 +63,17 @@ textarea {
 
 button {
   border-radius: 8px;
-  border: 1px solid #33415c;
+  border: 1px solid var(--ww-border);
   padding: 0.6em 1.1em;
-  background: linear-gradient(135deg, #0f172a, #0d223f);
-  color: #e4e7f2;
+  background: var(--ktv-control-bg);
+  color: var(--ww-text);
   cursor: pointer;
-  transition: transform 120ms ease, border-color 200ms ease;
+  transition: transform 120ms ease, border-color 200ms ease, background 200ms ease;
 }
 
 button:hover {
-  border-color: #6c8bff;
+  border-color: var(--ww-border-strong);
+  background: linear-gradient(135deg, rgba(232, 206, 171, 0.14), rgba(217, 174, 119, 0.12));
   transform: translateY(-1px);
 }
 
@@ -78,19 +101,24 @@ button:disabled {
 }
 
 .standalone-header h1 {
-  color: #f8fafc;
+  color: var(--ww-title-pink);
+  font-family: "Comic Sans MS", "Comic Sans", cursive;
   font-size: 24px;
+  font-weight: 400;
   margin: 0;
 }
 
 .standalone-header span {
-  color: #9aa8bd;
+  color: var(--ww-text-muted);
   font-size: 13px;
 }
 
 .iframe-page {
   align-items: center;
-  background: #05070d;
+  background:
+    radial-gradient(circle at top, rgba(255, 123, 195, 0.12), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(201, 156, 107, 0.14), transparent 38%),
+    linear-gradient(180deg, var(--ww-bg-top) 0%, var(--ww-bg-bottom) 100%);
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -114,17 +142,17 @@ button:disabled {
 }
 
 .iframe-close-button {
-  background: #111827;
-  border: 1px solid #ff7bc3;
-  color: #fff;
+  background: var(--ww-panel-strong);
+  border: 1px solid var(--ww-title-pink);
+  color: var(--ww-text-strong);
   height: 44px;
   padding: 0;
   width: 44px;
 }
 
 .iframe-logo-button {
-  background: #111;
-  border: 1px solid #ff7bc3;
+  background: var(--ww-panel-strong);
+  border: 1px solid var(--ww-title-pink);
   border-radius: 999px;
   height: 56px;
   padding: 0;
@@ -138,8 +166,8 @@ button:disabled {
 }
 
 .iframe-settings-button {
-  background: #111827;
-  border: 1px solid #78dce8;
+  background: var(--ww-panel-strong);
+  border: 1px solid var(--ww-border-strong);
   font-size: 24px;
   height: 44px;
   line-height: 1;
@@ -148,8 +176,8 @@ button:disabled {
 }
 
 .iframe-settings-button[aria-pressed="true"] {
-  background: #0f2530;
-  box-shadow: 0 0 0 3px rgba(120, 220, 232, 0.2);
+  background: rgba(102, 95, 32, 0.58);
+  box-shadow: 0 0 0 3px rgba(201, 156, 107, 0.18);
 }
 
 .iframe-track-list {
@@ -174,8 +202,8 @@ button:disabled {
 }
 
 .iframe-settings-source {
-  background: #0d1320;
-  border: 1px solid #22304a;
+  background: var(--ww-panel-soft);
+  border: 1px solid var(--ww-border);
   border-radius: 8px;
   display: grid;
   gap: 8px;
@@ -190,13 +218,13 @@ button:disabled {
 }
 
 .iframe-settings-source-header h2 {
-  color: #f8fafc;
+  color: var(--ww-text-strong);
   font-size: 14px;
   margin: 0;
 }
 
 .iframe-settings-source-header span {
-  color: #9aa8bd;
+  color: var(--ww-text-muted);
   font-size: 12px;
   white-space: nowrap;
 }
@@ -213,7 +241,7 @@ button:disabled {
   align-items: center;
   background: transparent;
   border: 0;
-  border-top: 1px solid #1d2940;
+  border-top: 1px solid var(--ww-border-soft);
   border-radius: 0;
   color: inherit;
   display: grid;
@@ -227,20 +255,20 @@ button:disabled {
 
 .iframe-settings-row:hover,
 .iframe-settings-row:focus-visible {
-  background: #121b2d;
-  border-color: #78dce8;
+  background: var(--ktv-row-hover);
+  border-color: var(--ww-border-strong);
   transform: none;
 }
 
 .iframe-settings-kind {
-  color: #78dce8;
+  color: var(--ww-accent-cyan);
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
 }
 
 .iframe-settings-path {
-  color: #e4e7f2;
+  color: var(--ww-text-soft);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -248,7 +276,7 @@ button:disabled {
 }
 
 .iframe-settings-size {
-  color: #9aa8bd;
+  color: var(--ww-text-muted);
   font-size: 12px;
   text-align: right;
   white-space: nowrap;
@@ -261,11 +289,11 @@ button:disabled {
 }
 
 .iframe-settings-empty {
-  color: #9aa8bd;
+  color: var(--ww-text-muted);
 }
 
 .iframe-settings-error {
-  color: #ff9bcf;
+  color: var(--ww-danger);
 }
 
 .settings-list,
@@ -287,15 +315,15 @@ button:disabled {
 }
 
 .settings-section h2 {
-  color: #f8fafc;
+  color: var(--ww-text-strong);
   font-size: 14px;
   margin: 0;
 }
 
 .settings-playlist-row {
   align-items: center;
-  background: #0d1320;
-  border: 1px solid #22304a;
+  background: var(--ww-panel-soft);
+  border: 1px solid var(--ww-border);
   border-radius: 8px;
   display: grid;
   gap: 10px;
@@ -305,7 +333,7 @@ button:disabled {
 }
 
 .settings-playlist-row:hover {
-  border-color: #78dce8;
+  border-color: var(--ww-border-strong);
 }
 
 .settings-playlist-actions {
@@ -316,10 +344,10 @@ button:disabled {
 
 .settings-icon-link {
   align-items: center;
-  background: #111827;
-  border: 1px solid #22304a;
+  background: var(--ktv-control-bg);
+  border: 1px solid var(--ww-border);
   border-radius: 8px;
-  color: #e4e7f2;
+  color: var(--ww-text);
   display: inline-flex;
   height: 32px;
   justify-content: center;
@@ -329,7 +357,7 @@ button:disabled {
 
 .settings-icon-link:hover,
 .settings-icon-link:focus-visible {
-  border-color: #78dce8;
+  border-color: var(--ww-border-strong);
   transform: none;
 }
 
@@ -347,14 +375,14 @@ button:disabled {
 }
 
 .settings-spotify-link {
-  color: #1ed760;
+  color: var(--ww-accent-green);
 }
 
 .settings-row {
   align-items: center;
   background: transparent;
   border: 0;
-  border-top: 1px solid #1d2940;
+  border-top: 1px solid var(--ww-border-soft);
   border-radius: 0;
   color: inherit;
   display: grid;
@@ -368,7 +396,7 @@ button:disabled {
 
 .settings-row[data-kind="directory"] {
   background: transparent;
-  border-color: #263753;
+  border-color: var(--ww-border);
 }
 
 .settings-row[data-kind="file"] {
@@ -377,13 +405,13 @@ button:disabled {
 
 .settings-row:hover,
 .settings-row:focus-visible {
-  background: #121b2d;
-  border-color: #78dce8;
+  background: var(--ktv-row-hover);
+  border-color: var(--ww-border-strong);
   transform: none;
 }
 
 .settings-kind {
-  color: #78dce8;
+  color: var(--ww-accent-cyan);
   font-size: 11px;
   font-weight: 700;
   justify-self: start;
@@ -391,11 +419,11 @@ button:disabled {
 }
 
 .settings-row[data-kind="directory"] .settings-kind {
-  color: #ffcf70;
+  color: var(--ww-accent-amber);
 }
 
 .settings-path {
-  color: #e4e7f2;
+  color: var(--ww-text-soft);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -407,7 +435,7 @@ button:disabled {
 }
 
 .settings-size {
-  color: #9aa8bd;
+  color: var(--ww-text-muted);
   font-size: 12px;
   text-align: right;
   white-space: nowrap;
@@ -420,17 +448,17 @@ button:disabled {
 }
 
 .settings-empty {
-  color: #9aa8bd;
+  color: var(--ww-text-muted);
 }
 
 .settings-error {
-  color: #ff9bcf;
+  color: var(--ww-danger);
 }
 
 .play-track-row {
   align-items: center;
-  background: #0d1320;
-  border: 1px solid #22304a;
+  background: var(--ww-panel-soft);
+  border: 1px solid var(--ww-border);
   border-radius: 8px;
   display: grid;
   gap: 10px;
@@ -440,13 +468,13 @@ button:disabled {
 }
 
 .play-track-index {
-  color: #9aa8bd;
+  color: var(--ww-text-muted);
   font-size: 13px;
   text-align: right;
 }
 
 .play-track-artwork-placeholder {
-  background: #111827;
+  background: var(--ww-panel-strong);
   border-radius: 4px;
   display: block;
   height: 42px;
@@ -454,15 +482,15 @@ button:disabled {
 }
 
 .play-track-status {
-  color: #78dce8;
+  color: var(--ww-accent-cyan);
   font-size: 12px;
   white-space: nowrap;
 }
 
 .iframe-track-row {
   align-items: center;
-  background: #0d1320;
-  border: 1px solid #22304a;
+  background: var(--ww-panel-soft);
+  border: 1px solid var(--ww-border);
   border-radius: 8px;
   display: grid;
   gap: 10px;
@@ -472,11 +500,11 @@ button:disabled {
 }
 
 .iframe-track-row:hover {
-  border-color: #ff7bc3;
+  border-color: var(--ww-title-pink);
 }
 
 .iframe-track-state {
-  color: #f4d5e8;
+  color: var(--ww-title-pink);
   font-size: 20px;
   line-height: 1;
   text-align: center;
@@ -504,13 +532,13 @@ button:disabled {
 }
 
 .iframe-track-name {
-  color: #f8fafc;
+  color: var(--ww-text-strong);
   font-size: 14px;
   font-weight: 700;
 }
 
 .iframe-track-artist {
-  color: #9aa8bd;
+  color: var(--ww-text-muted);
   font-size: 12px;
 }
 

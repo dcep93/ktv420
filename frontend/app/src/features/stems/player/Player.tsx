@@ -1057,7 +1057,13 @@ export default function Player({ record, onClose }: PlayerProps) {
 
   return (
     <div
-      style={{ marginTop: "1.5rem", padding: "1rem", border: "1px solid #444" }}
+      style={{
+        marginTop: "1.5rem",
+        padding: "1rem",
+        border: "1px solid var(--ww-border)",
+        borderRadius: "12px",
+        background: "var(--ww-panel)",
+      }}
     >
       <div
         style={{
@@ -1118,11 +1124,11 @@ export default function Player({ record, onClose }: PlayerProps) {
               alignItems: "center",
               gap: "0.35rem",
               minWidth: "200px",
-              color: "#cbd5e1",
+              color: "var(--ww-text-soft)",
             }}
             aria-label="Detected chord"
           >
-            <span style={{ fontWeight: 700, color: "#e5e7eb" }}>Chord:</span>
+            <span style={{ fontWeight: 700, color: "var(--ww-text)" }}>Chord:</span>
             <span
               style={{ fontStyle: chordTimeline.length ? "normal" : "italic" }}
             >
@@ -1199,7 +1205,9 @@ export default function Player({ record, onClose }: PlayerProps) {
             marginBottom: "0.5rem",
           }}
         >
-          <span style={{ fontWeight: 700, color: "#e5e7eb" }}>Visualizer</span>
+          <span style={{ fontWeight: 700, color: "var(--ww-text)" }}>
+            Visualizer
+          </span>
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: "0.6rem" }}>
           {visualizerOptions.map((option) => {
@@ -1218,7 +1226,7 @@ export default function Player({ record, onClose }: PlayerProps) {
                 </div>
                 <div
                   style={{
-                    color: isActive ? "#eaf2ff" : "#c7d2fe",
+                    color: isActive ? "var(--ww-text)" : "var(--ww-text-muted)",
                     fontSize: "0.9rem",
                     marginTop: "0.1rem",
                   }}

@@ -586,7 +586,7 @@ function injectStyle() {
   style.textContent = `
     #${BUTTON_ID} {
       align-items: center;
-      background: #111;
+      background: rgba(20, 15, 12, 0.92);
       border: 1px solid rgba(255, 123, 195, 0.95);
       border-radius: 999px;
       color: #fff;
@@ -604,8 +604,8 @@ function injectStyle() {
     }
 
     #${BUTTON_ID}:hover:not(:disabled) {
-      background: #201019;
-      box-shadow: 0 0 0 2px rgba(255, 123, 195, 0.2);
+      background: rgba(36, 28, 24, 0.94);
+      box-shadow: 0 0 0 2px rgba(201, 156, 107, 0.2);
     }
 
     #${BUTTON_ID}:disabled {
@@ -614,7 +614,7 @@ function injectStyle() {
     }
 
     #${BUTTON_ID}[data-active="true"] {
-      background: #4b071f;
+      background: rgba(102, 95, 32, 0.78);
       border-color: #ff9bcf;
       box-shadow: 0 0 0 3px rgba(255, 123, 195, 0.22);
     }
@@ -626,7 +626,7 @@ function injectStyle() {
     }
 
     #${IFRAME_ID} {
-      background: #05070d;
+      background: #0c0907;
       border: 0;
       height: 100dvh;
       inset: 0;

@@ -48,11 +48,11 @@ export function TrackRow({
 
   const controlButtonStyle = (isActive: boolean): CSSProperties => ({
     borderRadius: "999px",
-    border: "1px solid #2f384a",
+    border: "1px solid var(--ww-border)",
     background: isActive
-      ? "linear-gradient(135deg, #1f2a3d, #0f172a)"
-      : "rgba(17,23,37,0.75)",
-    color: "#f4f4f5",
+      ? "linear-gradient(135deg, rgba(232,206,171,0.16), rgba(201,156,107,0.18))"
+      : "var(--ktv-control-bg)",
+    color: "var(--ww-text)",
     padding: "0.45rem 0.9rem",
     letterSpacing: "0.02em",
     fontWeight: 600,
@@ -75,7 +75,9 @@ export function TrackRow({
           marginBottom: "0.4rem",
         }}
       >
-        <div style={{ minWidth: "220px", fontWeight: 600, color: "#e5e7eb" }}>
+        <div
+          style={{ minWidth: "220px", fontWeight: 600, color: "var(--ww-text)" }}
+        >
           {label}
         </div>
         <input
@@ -111,7 +113,7 @@ export function TrackRow({
           >
             <span
               title={effectDescription}
-              style={{ color: "#cbd5e1", fontWeight: 600 }}
+              style={{ color: "var(--ww-text-soft)", fontWeight: 600 }}
             >
               Effect
             </span>
@@ -121,9 +123,9 @@ export function TrackRow({
                 onEffectTypeChange(track.id, event.target.value as AudioEffectType)
               }
               style={{
-                background: "rgba(17,23,37,0.75)",
-                border: "1px solid #2f384a",
-                color: "#e5e7eb",
+                background: "var(--ww-panel-strong)",
+                border: "1px solid var(--ww-border)",
+                color: "var(--ww-text)",
                 padding: "0.25rem 0.4rem",
                 borderRadius: "8px",
               }}
@@ -149,7 +151,7 @@ export function TrackRow({
               type="button"
               onClick={() => onResetEffect(track.id)}
               style={{
-                color: "#94a3b8",
+                color: "var(--ww-text-muted)",
                 fontWeight: 600,
                 background: "none",
                 border: "none",
@@ -169,8 +171,8 @@ export function TrackRow({
           height={120}
           onPointerDown={onCanvasSeek}
           style={{
-            border: "1px solid #333",
-            background: "linear-gradient(90deg, #0b0f19, #0f0b19)",
+            border: "1px solid var(--ww-border)",
+            background: "linear-gradient(90deg, #120d0b, #1a1411)",
             width: "100%",
             display: "block",
             cursor: "pointer",

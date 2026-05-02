@@ -1,5 +1,5 @@
 .sample-workspace {
-  color: #e4e7f2;
+  color: var(--ww-text);
   padding: 2rem 2.5rem 3rem;
   margin: 0 auto;
   width: 100%;
@@ -19,8 +19,8 @@
 }
 
 .sample-workspace__panel {
-  background: rgba(12, 17, 33, 0.9);
-  border: 1px solid #1c2740;
+  background: var(--ww-panel-soft);
+  border: 1px solid var(--ww-border);
   border-radius: 12px;
   padding: 1.25rem;
   display: grid;
@@ -35,9 +35,9 @@
 
 .sample-workspace__control-group select {
   border-radius: 10px;
-  border: 1px solid #2b3653;
-  background: #0c1222;
-  color: #e4e7f2;
+  border: 1px solid var(--ww-border);
+  background: var(--ww-panel-strong);
+  color: var(--ww-text);
   padding: 0.65rem 0.8rem;
 }
 
@@ -54,11 +54,11 @@
 }
 
 .sample-workspace__muted {
-  color: #9aa4c2;
+  color: var(--ww-text-muted);
 }
 
 .sample-workspace__error {
-  color: #f26d7d;
+  color: var(--ww-danger);
 }
 
 .sample-workspace__player {

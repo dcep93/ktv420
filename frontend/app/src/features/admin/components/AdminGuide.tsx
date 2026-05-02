@@ -1,9 +1,10 @@
 const guideStyle = {
-  border: "1px solid #d0d7de",
+  border: "1px solid var(--ww-border)",
   borderRadius: 8,
   padding: "16px 20px",
   marginBottom: 24,
-  backgroundColor: "#f6f8fa",
+  backgroundColor: "var(--ww-panel-soft)",
+  color: "var(--ww-text-soft)",
 };
 
 export default function AdminGuide() {
