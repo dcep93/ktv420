@@ -14,7 +14,7 @@ export const getVisualizerButtonStyle = (
   padding: "0.65rem 0.85rem",
   minWidth: "200px",
   textAlign: "left",
-  fontWeight: isActive ? 800 : 600,
+  fontWeight: 600,
   boxShadow: isActive
     ? "0 0 0 2px rgba(255,123,195,0.16), 0 8px 20px rgba(0,0,0,0.34)"
     : "0 10px 28px rgba(0,0,0,0.35)",

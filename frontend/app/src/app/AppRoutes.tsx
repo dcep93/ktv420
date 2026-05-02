@@ -7,37 +7,11 @@ import RootPage from "../pages/RootPage";
 import SettingsPage from "../pages/SettingsPage";
 import { logPageView } from "./firebaseAnalytics";
 
-function getPageTitle(pathname: string, hash: string) {
-  if (pathname === "/play" && hash.startsWith("#album/")) {
-    return "ktv420 album";
-  }
-
-  if (pathname === "/play" && hash.startsWith("#playlist/")) {
-    return "ktv420 playlist";
-  }
-
-  if (pathname === "/iframe") {
-    return "ktv420 iframe";
-  }
-
-  if (pathname === "/play") {
-    return "ktv420 player";
-  }
-
-  if (pathname === "/settings") {
-    return "ktv420 settings";
-  }
-
-  return "ktv420";
-}
-
 export default function AppRoutes() {
   const { hash, pathname, search } = useLocation();
 
   useEffect(() => {
-    const pageTitle = getPageTitle(pathname, hash);
-
-    document.title = pageTitle;
+    document.title = "ktv420";
     void logPageView(`${pathname}${search}${hash}`);
   }, [hash, pathname, search]);
 

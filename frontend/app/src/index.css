@@ -356,7 +356,8 @@ button:disabled {
   background: transparent;
 }
 
-.settings-section[aria-label="All OPFS entries"] .settings-list {
+.settings-section[aria-label="OPFS"] .settings-list,
+.settings-section[aria-label="GCS entries"] .settings-list {
   gap: 4px;
 }
 
@@ -459,6 +460,15 @@ button:disabled {
   background: var(--ktv-row-hover);
   border-color: var(--ww-border-strong);
   transform: none;
+}
+
+.settings-row--readonly {
+  cursor: default;
+}
+
+.settings-row--readonly:hover {
+  background: transparent;
+  border-color: var(--ww-border-soft);
 }
 
 .settings-kind {

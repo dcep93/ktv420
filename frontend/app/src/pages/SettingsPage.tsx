@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
 
+import { buildObjectTree } from "../features/stems/lib/objectTree";
+import { type GcsObject, type ObjectTreeNode } from "../features/stems/lib/types";
+import { listBucketObjects } from "../features/stems/services/gcsClient";
 import {
   deleteLocalOpfsEntry,
   listLocalOpfsEntries,
@@ -18,36 +21,65 @@ type OpfsTreeEntry = LocalDatabaseEntry & {
   tooltip?: string;
 };
 
+type GcsTreeEntry = {
+  path: string;
+  kind: "directory" | "file";
+  depth: number;
+  displayName: string;
+  totalSize?: number;
+  tooltip?: string;
+};
+
 export default function SettingsPage() {
   const [entries, setEntries] = useState<LocalDatabaseEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [opfsLoading, setOpfsLoading] = useState(true);
+  const [opfsError, setOpfsError] = useState("");
+  const [gcsObjects, setGcsObjects] = useState<GcsObject[]>([]);
+  const [gcsLoading, setGcsLoading] = useState(true);
+  const [gcsError, setGcsError] = useState("");
 
-  const loadEntries = useCallback(async () => {
-    setLoading(true);
-    setError("");
+  const loadOpfsEntries = useCallback(async () => {
+    setOpfsLoading(true);
+    setOpfsError("");
 
     try {
       setEntries(await listLocalOpfsEntries());
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : String(loadError));
+      setOpfsError(loadError instanceof Error ? loadError.message : String(loadError));
     } finally {
-      setLoading(false);
+      setOpfsLoading(false);
     }
   }, []);
 
+  const loadGcsEntries = useCallback(async () => {
+    setGcsLoading(true);
+    setGcsError("");
+
+    try {
+      setGcsObjects(await listBucketObjects());
+    } catch (loadError) {
+      setGcsError(loadError instanceof Error ? loadError.message : String(loadError));
+    } finally {
+      setGcsLoading(false);
+    }
+  }, []);
+
+  const loadSettings = useCallback(async () => {
+    await Promise.allSettled([loadOpfsEntries(), loadGcsEntries()]);
+  }, [loadGcsEntries, loadOpfsEntries]);
+
   useEffect(() => {
-    void loadEntries();
-  }, [loadEntries]);
+    void loadSettings();
+  }, [loadSettings]);
 
   const deleteEntry = async (entry: LocalDatabaseEntry) => {
-    setError("");
+    setOpfsError("");
 
     try {
       await deleteLocalOpfsEntry(entry.path);
-      await loadEntries();
+      await loadOpfsEntries();
     } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : String(deleteError));
+      setOpfsError(deleteError instanceof Error ? deleteError.message : String(deleteError));
     }
   };
 
@@ -55,18 +87,19 @@ export default function SettingsPage() {
     .map((entry) => toLocalPlaylist(entry))
     .filter((playlist: LocalPlaylist | null): playlist is LocalPlaylist => playlist !== null);
   const opfsTreeEntries = buildOpfsTreeEntries(entries);
+  const gcsTreeEntries = buildGcsTreeEntries(gcsObjects);
 
   return (
     <main className="standalone-page" aria-label="ktv420 settings">
       <header className="standalone-header">
         <h1>Settings</h1>
-        <button type="button" onClick={loadEntries} disabled={loading}>
+        <button type="button" onClick={loadSettings} disabled={opfsLoading || gcsLoading}>
           Refresh
         </button>
       </header>
-      {error ? <p className="settings-error">{error}</p> : null}
-      {loading ? (
-        <p className="settings-empty">Loading...</p>
+      {opfsError ? <p className="settings-error">{opfsError}</p> : null}
+      {opfsLoading ? (
+        <p className="settings-empty">Loading OPFS entries...</p>
       ) : (
         <>
           <section className="settings-section" aria-label="Saved playlists">
@@ -105,8 +138,8 @@ export default function SettingsPage() {
             )}
           </section>
 
-          <section className="settings-section" aria-label="All OPFS entries">
-            <h2>All OPFS entries</h2>
+          <section className="settings-section" aria-label="OPFS">
+            <h2>OPFS</h2>
             {entries.length > 0 ? (
               <ol className="settings-list">
                 {opfsTreeEntries.map((entry) => (
@@ -135,6 +168,34 @@ export default function SettingsPage() {
           </section>
         </>
       )}
+
+      <section className="settings-section" aria-label="GCS entries">
+        <h2>GCS entries</h2>
+        {gcsError ? (
+          <p className="settings-error">{gcsError}</p>
+        ) : gcsLoading ? (
+          <p className="settings-empty">Loading GCS entries...</p>
+        ) : gcsTreeEntries.length > 0 ? (
+          <ol className="settings-list">
+            {gcsTreeEntries.map((entry) => (
+              <li key={entry.path}>
+                <div
+                  className="settings-row settings-row--readonly"
+                  data-kind={entry.kind}
+                  title={entry.tooltip}
+                  style={entryDepthStyle(entry.depth)}
+                >
+                  <span className="settings-kind">{entry.kind === "directory" ? "dir" : "file"}</span>
+                  <span className="settings-path">{entry.displayName}</span>
+                  <span className="settings-size">{formatBytes(entry.totalSize)}</span>
+                </div>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p className="settings-empty">No GCS entries.</p>
+        )}
+      </section>
     </main>
   );
 }
@@ -189,6 +250,44 @@ function buildOpfsTreeEntries(entries: LocalDatabaseEntry[]): OpfsTreeEntry[] {
       };
     })
     .sort(compareOpfsTreeEntries);
+}
+
+function buildGcsTreeEntries(objects: GcsObject[]): GcsTreeEntry[] {
+  const tree = buildObjectTree(objects);
+  const entries: GcsTreeEntry[] = [];
+
+  for (const node of tree) {
+    collectGcsTreeEntry(node, 0, entries);
+  }
+
+  return entries;
+}
+
+function collectGcsTreeEntry(node: ObjectTreeNode, depth: number, entries: GcsTreeEntry[]) {
+  const kind = node.type === "folder" ? "directory" : "file";
+
+  entries.push({
+    path: node.path,
+    kind,
+    depth,
+    displayName: node.name,
+    totalSize: kind === "directory" ? gcsDirectorySize(node) : node.size,
+    tooltip: node.path
+  });
+
+  for (const child of node.children ?? []) {
+    collectGcsTreeEntry(child, depth + 1, entries);
+  }
+}
+
+function gcsDirectorySize(node: ObjectTreeNode) {
+  let totalSize = node.type === "file" ? node.size ?? 0 : 0;
+
+  for (const child of node.children ?? []) {
+    totalSize += gcsDirectorySize(child);
+  }
+
+  return totalSize;
 }
 
 function directorySize(directoryPath: string, fileSizeByPath: Map<string, number>) {
