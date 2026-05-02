@@ -8,6 +8,8 @@ const STYLE_ID = "ktv420-spotify-capture-style";
 const LOCAL_IFRAME_SRC = "http://localhost:5173/iframe";
 const PROD_IFRAME_SRC = "https://ktv420.web.app/iframe";
 const STEM_API_BASE_URL = "https://stem420-854199998954.us-east1.run.app";
+const GCS_BUCKET_NAME = "stem420-bucket";
+const GCS_UPLOAD_BASE_URL = "https://storage.googleapis.com/upload/storage/v1";
 const IFRAME_MESSAGE_SOURCE = "ktv420-iframe";
 const PARENT_MESSAGE_SOURCE = "ktv420-parent";
 const CLOSE_OVERLAY_MESSAGE = "ktv420:close-overlay";
@@ -445,14 +447,69 @@ function isRunRequest(value) {
 
 async function prepareTrackRequest(trackId) {
   const artifact = await readTrackArtifact(trackId);
+  const pcmPath = await uploadPreparedPcm(trackId, artifact);
+
   await postJson(
     `${STEM_API_BASE_URL}/prepare_job`,
     {
-      pcm_s16le_b64: artifact.pcmS16leB64,
+      pcm_path: `gs://${GCS_BUCKET_NAME}/${pcmPath}`,
       metadata: artifact.metadata
     },
     "prepare_job"
   );
+}
+
+async function uploadPreparedPcm(trackId, artifact) {
+  const md5 = artifact.metadata?.md5;
+  if (typeof md5 !== "string" || !md5) {
+    throw new Error("Cannot upload prepared PCM because metadata.md5 is missing.");
+  }
+
+  const pcmBytes = base64ToBytes(artifact.pcmS16leB64);
+  const pcmPath = `pcm/${trackId}/${md5}.pcm`;
+  const uploadUrl = `${GCS_UPLOAD_BASE_URL}/b/${GCS_BUCKET_NAME}/o?uploadType=media&name=${encodeURIComponent(pcmPath)}`;
+  const response = await fetch(uploadUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/octet-stream"
+    },
+    body: new Blob([pcmBytes], { type: "application/octet-stream" })
+  });
+  const responseText = await response.text();
+
+  if (!response.ok) {
+    throw new Error(`pcm upload failed with ${response.status} ${response.statusText}: ${responseText}`);
+  }
+
+  return pcmPath;
+}
+
+function base64ToBytes(value) {
+  const chunkSize = 0x8000;
+  const chunks = [];
+  let byteLength = 0;
+
+  for (let offset = 0; offset < value.length; offset += chunkSize) {
+    const chunk = atob(value.slice(offset, offset + chunkSize));
+    const bytes = new Uint8Array(chunk.length);
+
+    for (let index = 0; index < chunk.length; index += 1) {
+      bytes[index] = chunk.charCodeAt(index);
+    }
+
+    chunks.push(bytes);
+    byteLength += bytes.byteLength;
+  }
+
+  const output = new Uint8Array(byteLength);
+  let outputOffset = 0;
+
+  for (const chunk of chunks) {
+    output.set(chunk, outputOffset);
+    outputOffset += chunk.byteLength;
+  }
+
+  return output;
 }
 
 async function postJson(url, payload, label) {

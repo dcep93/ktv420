@@ -10,6 +10,7 @@
     "128": "assets/icon-128.png"
   },
   "host_permissions": [
+    "https://storage.googleapis.com/*",
     "https://open.spotify.com/*"
   ],
   "content_scripts": [

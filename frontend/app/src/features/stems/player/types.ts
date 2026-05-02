@@ -40,6 +40,8 @@ export type VisualizerType =
 export type PlayerProps = {
   record: PlaybackRecord;
   title?: string;
+  spotifyTrackId?: string;
+  trackArtworkSrc?: string;
   unavailableMessage?: string;
   hasPreviousTrack?: boolean;
   hasNextTrack?: boolean;

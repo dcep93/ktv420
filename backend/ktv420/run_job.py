@@ -1,5 +1,3 @@
-import base64
-import binascii
 import json
 import os
 import re
@@ -27,7 +25,7 @@ class Request(BaseModel):
 
 
 class PrepareJobRequest(BaseModel):
-    pcm_s16le_b64: str
+    pcm_path: str
     metadata: Dict[str, Any]
 
 
@@ -160,7 +158,7 @@ def _parse_gcs_path(gcs_path: str) -> Tuple[str, str]:
     return bucket_name, blob_path
 
 
-def _download_mp3(client: storage.Client, gcs_path: str, dest: Path) -> None:
+def _download_file(client: storage.Client, gcs_path: str, dest: Path) -> None:
     bucket_name, blob_path = _parse_gcs_path(gcs_path)
     _STATE.log(
         f"run_job.download.start bucket={bucket_name} blob={blob_path} -> {dest}"
@@ -169,6 +167,10 @@ def _download_mp3(client: storage.Client, gcs_path: str, dest: Path) -> None:
     blob = bucket.blob(blob_path)
     blob.download_to_filename(dest)  # type: ignore[call-arg]
     _STATE.log(f"run_job.download.done path={dest}")
+
+
+def _download_mp3(client: storage.Client, gcs_path: str, dest: Path) -> None:
+    _download_file(client, gcs_path, dest)
 
 
 def _decode_to_wav(mp3_path: Path, wav_path: Path) -> Path:
@@ -354,6 +356,15 @@ def _upload_file(client: storage.Client, file_path: Path, gcs_path: str) -> None
     _STATE.log("prepare_job.upload.done")
 
 
+def _delete_gcs_object(client: storage.Client, gcs_path: str) -> None:
+    bucket_name, blob_path = _parse_gcs_path(gcs_path)
+    _STATE.log(f"gcs.delete.start bucket={bucket_name} blob={blob_path}")
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(blob_path)
+    blob.delete()  # type: ignore[no-untyped-call]
+    _STATE.log("gcs.delete.done")
+
+
 def _gcs_object_exists(client: storage.Client, gcs_path: str) -> bool:
     bucket_name, blob_path = _parse_gcs_path(gcs_path)
     bucket = client.bucket(bucket_name)
@@ -429,6 +440,7 @@ def _process_prepare_job(payload: PrepareJobRequest, request: Request) -> None:
         f"output_path={request.output_path}"
     )
 
+    client: storage.Client | None = None
     try:
         sample_rate = _metadata_int(payload.metadata, "audioSampleRate")
         channel_count = _metadata_int(payload.metadata, "audioChannelCount")
@@ -437,13 +449,12 @@ def _process_prepare_job(payload: PrepareJobRequest, request: Request) -> None:
         if channel_count <= 0:
             raise ValueError("prepare_job metadata must include audioChannelCount")
 
-        pcm_bytes = base64.b64decode(payload.pcm_s16le_b64, validate=True)
         client = _make_storage_client()
         with TemporaryDirectory() as tmp_dir:
             tmp = Path(tmp_dir)
             pcm_path = tmp / "input.pcm"
             mp3_path = tmp / "input.mp3"
-            pcm_path.write_bytes(pcm_bytes)
+            _download_file(client, payload.pcm_path, pcm_path)
             _encode_pcm_s16le_to_mp3(
                 pcm_path,
                 mp3_path,
@@ -453,7 +464,7 @@ def _process_prepare_job(payload: PrepareJobRequest, request: Request) -> None:
             )
             _upload_file(client, mp3_path, request.mp3_path)
 
-    except (binascii.Error, ValueError):
+    except ValueError:
         _STATE.log("prepare_job.process.error")
         _STATE.log(traceback.format_exc())
     except Exception:
@@ -462,6 +473,12 @@ def _process_prepare_job(payload: PrepareJobRequest, request: Request) -> None:
     else:
         _STATE.log("prepare_job.process.success")
     finally:
+        if client is not None:
+            try:
+                _delete_gcs_object(client, payload.pcm_path)
+            except Exception:
+                _STATE.log("prepare_job.pcm_delete.error")
+                _STATE.log(traceback.format_exc())
         _STATE.mark_prepare_finished(request.mp3_path)
 
 

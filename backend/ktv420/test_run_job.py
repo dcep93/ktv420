@@ -55,7 +55,7 @@ class RunJobStatusTests(unittest.TestCase):
 
     def _prepare_payload(self) -> run_job.PrepareJobRequest:
         return run_job.PrepareJobRequest(
-            pcm_s16le_b64="",
+            pcm_path="gs://stem420-bucket/pcm/track-1/abc123.pcm",
             metadata={
                 "trackId": "track-1",
                 "trackName": "Song One",
@@ -184,6 +184,30 @@ class RunJobStatusTests(unittest.TestCase):
         state = run_job._STATE.state()
         self.assertEqual(state["finished_jobs"], 1)
         self.assertEqual(state["running_output_paths"], [])
+
+    def test_process_prepare_job_downloads_pcm_and_deletes_staged_pcm(self) -> None:
+        payload = self._prepare_payload()
+        request = self._request()
+        client = MagicMock()
+
+        with (
+            patch.object(run_job, "_make_storage_client", return_value=client),
+            patch.object(run_job, "_download_file") as download_file,
+            patch.object(run_job, "_encode_pcm_s16le_to_mp3") as encode_pcm,
+            patch.object(run_job, "_upload_file") as upload_file,
+            patch.object(run_job, "_delete_gcs_object") as delete_gcs_object,
+        ):
+            run_job._process_prepare_job(payload, request)
+
+        download_file.assert_called_once()
+        self.assertEqual(download_file.call_args.args[0], client)
+        self.assertEqual(download_file.call_args.args[1], payload.pcm_path)
+        encode_pcm.assert_called_once()
+        upload_file.assert_called_once()
+        self.assertEqual(upload_file.call_args.args[0], client)
+        self.assertEqual(upload_file.call_args.args[2], request.mp3_path)
+        delete_gcs_object.assert_called_once_with(client, payload.pcm_path)
+        self.assertEqual(run_job._STATE.state()["preparing_mp3_paths"], [])
 
 
 if __name__ == "__main__":

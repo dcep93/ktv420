@@ -162,6 +162,8 @@ export default function PlayPage() {
               <Player
                 record={playbackRecord}
                 title={activeTrackTitle}
+                spotifyTrackId={activeTrack?.trackId}
+                trackArtworkSrc={activeTrack?.trackArtworkSrc}
                 unavailableMessage={activeUnavailableMessage}
                 hasPreviousTrack={activeTrackIndex > 0}
                 hasNextTrack={activeTrackIndex < tracks.length - 1}
