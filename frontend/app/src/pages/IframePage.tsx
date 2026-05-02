@@ -94,6 +94,7 @@ export default function IframePage() {
   const pendingActionsRef = useRef(new Map<string, PendingAction>());
   const handleCapturedTrackMessageRef = useRef<(value: MetadataRecord) => void>(() => {});
   const enqueueCapturedTrackRef = useRef<(value: MetadataRecord) => void>(() => {});
+  const setExpectedQueueTrackIdsRef = useRef<(trackIds: string[]) => void>(() => {});
   const queueRef = useRef<QueueItem[]>([]);
   const knownQueueIdsRef = useRef(new Set<string>());
   const completedQueueIdsRef = useRef(new Set<string>());
@@ -145,8 +146,7 @@ export default function IframePage() {
         const trackIds = message.trackIds
           .map((trackId: unknown) => readString(trackId))
           .filter(Boolean);
-        expectedCaptureIdsRef.current = new Set(trackIds);
-        maybeAlertCaptureSuccess();
+        setExpectedQueueTrackIdsRef.current(trackIds);
         return;
       }
 
@@ -315,11 +315,17 @@ export default function IframePage() {
     void handleCapturedTrackMessage(value);
   };
 
-  function enqueueCapturedTrack(value: MetadataRecord) {
+  async function enqueueCapturedTrack(value: MetadataRecord) {
     const trackId = readString(value.trackId) || readString((value.metadata as MetadataRecord | null)?.trackId);
     const metadata = isRecord(value.metadata) ? value.metadata : null;
 
     if (!trackId || value.opfsState !== "hydrated" || !metadata) {
+      return;
+    }
+
+    if (await hasLocalOutputMetadata(trackId)) {
+      completedQueueIdsRef.current.add(trackId);
+      maybeAlertCaptureSuccess();
       return;
     }
 
@@ -332,7 +338,28 @@ export default function IframePage() {
     void processQueue();
   }
 
-  enqueueCapturedTrackRef.current = enqueueCapturedTrack;
+  enqueueCapturedTrackRef.current = (value: MetadataRecord) => {
+    void enqueueCapturedTrack(value);
+  };
+
+  async function setExpectedQueueTrackIds(trackIds: string[]) {
+    const expectedTrackIds = new Set<string>();
+
+    for (const trackId of trackIds) {
+      if (await hasLocalOutputMetadata(trackId)) {
+        completedQueueIdsRef.current.add(trackId);
+      } else {
+        expectedTrackIds.add(trackId);
+      }
+    }
+
+    expectedCaptureIdsRef.current = expectedTrackIds;
+    maybeAlertCaptureSuccess();
+  }
+
+  setExpectedQueueTrackIdsRef.current = (trackIds: string[]) => {
+    void setExpectedQueueTrackIds(trackIds);
+  };
 
   async function processQueue() {
     if (processingQueueRef.current || queueFailedRef.current) {
@@ -348,18 +375,26 @@ export default function IframePage() {
     processingQueueRef.current = true;
 
     try {
-      await sendAction(PREPARE_JOB_MESSAGE, PREPARE_JOB_RESULT_MESSAGE, item.trackId);
-      const inputMp3 = await pollEvery(() => findPreparedInputMp3(item.trackId), POLL_INTERVAL_MS);
+      let inputMp3 = await findPreparedInputMp3(item.trackId);
+      if (!inputMp3) {
+        await sendAction(PREPARE_JOB_MESSAGE, PREPARE_JOB_RESULT_MESSAGE, item.trackId);
+        inputMp3 = await pollEvery(() => findPreparedInputMp3(item.trackId), POLL_INTERVAL_MS);
+      }
+
       const runRequest = buildStemRunRequest(item.trackId, inputMp3);
-      await sendAction(RUN_JOB_MESSAGE, RUN_JOB_RESULT_MESSAGE, item.trackId, {
-        request: runRequest
-      });
-      await pollEvery(
-        async () => ((await hasRemoteOutputMetadata(item.trackId)) ? true : null),
-        POLL_INTERVAL_MS
-      );
-      const hasOutputMetadata = await downloadTrackArtifacts(item.trackId, item.metadata);
-      if (!hasOutputMetadata) {
+      const remoteHasOutputMetadata = await hasRemoteOutputMetadata(item.trackId);
+      if (!remoteHasOutputMetadata) {
+        await sendAction(RUN_JOB_MESSAGE, RUN_JOB_RESULT_MESSAGE, item.trackId, {
+          request: runRequest
+        });
+        await pollEvery(
+          async () => ((await hasRemoteOutputMetadata(item.trackId)) ? true : null),
+          POLL_INTERVAL_MS
+        );
+      }
+
+      const localHasOutputMetadata = await downloadTrackArtifacts(item.trackId, item.metadata);
+      if (!localHasOutputMetadata) {
         throw new Error(`Downloaded artifacts for ${item.trackId} did not include output/_metadata.json.`);
       }
       completedQueueIdsRef.current.add(item.trackId);
@@ -428,7 +463,7 @@ export default function IframePage() {
 
   function maybeAlertCaptureSuccess() {
     const expectedTrackIds = expectedCaptureIdsRef.current;
-    if (!expectedTrackIds || expectedTrackIds.size === 0 || successAlertedRef.current || queueFailedRef.current) {
+    if (!expectedTrackIds || successAlertedRef.current || queueFailedRef.current) {
       return;
     }
 
@@ -643,11 +678,11 @@ function upsertDatabaseSource(sources: LocalDatabaseSource[], nextSource: LocalD
 
 async function pollEvery<T>(callback: () => Promise<T | null>, intervalMs: number) {
   while (true) {
-    await delay(intervalMs);
     const value = await callback();
     if (value !== null) {
       return value;
     }
+    await delay(intervalMs);
   }
 }
 

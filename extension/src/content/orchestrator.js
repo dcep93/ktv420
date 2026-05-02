@@ -62,7 +62,7 @@ export class CaptureOrchestrator extends EventTarget {
     };
 
     const summary = [];
-    const capturedTrackIds = [];
+    const queuedTrackIds = [];
 
     try {
       if (!isSupportedRoute()) {
@@ -76,13 +76,16 @@ export class CaptureOrchestrator extends EventTarget {
 
       if (queue.every((item) => item.cached)) {
         for (const item of queue) {
+          queuedTrackIds.push(item.trackId);
           summary.push({
             alreadyInLocalStorage: true,
             metadata: item.cachedMetadata
           });
+          this.dispatchTrackStored(item.trackId, item.cachedMetadata);
         }
 
         debug.events.push({ type: "all-cached", trackCount: queue.length, at: Date.now() });
+        this.dispatchCaptureComplete(queuedTrackIds);
         console.log("[ktv420] Capture run complete", summary);
         return;
       }
@@ -109,11 +112,13 @@ export class CaptureOrchestrator extends EventTarget {
 
         let pendingCapture = null;
         if (item.cached) {
+          queuedTrackIds.push(item.trackId);
           summary.push({
             alreadyInLocalStorage: true,
             metadata: item.cachedMetadata
           });
           debug.events.push({ type: "skip-cached", trackId: item.trackId, at: Date.now() });
+          this.dispatchTrackStored(item.trackId, item.cachedMetadata);
         } else {
           const captureEnd = await this.recordUntilBoundary(item, startInfo, debug);
           pendingCapture = { captureEnd, item };
@@ -136,7 +141,7 @@ export class CaptureOrchestrator extends EventTarget {
 
         if (pendingCapture) {
           const metadata = await this.storeCapturedTrack(pendingCapture.item, pendingCapture.capture, pendingCapture.captureEnd);
-          capturedTrackIds.push(pendingCapture.item.trackId);
+          queuedTrackIds.push(pendingCapture.item.trackId);
           summary.push({
             alreadyInLocalStorage: false,
             metadata
@@ -147,25 +152,12 @@ export class CaptureOrchestrator extends EventTarget {
             audioByteLength: metadata.audioByteLength,
             at: Date.now()
           });
-          this.dispatchEvent(
-            new CustomEvent("trackstored", {
-              detail: {
-                trackId: pendingCapture.item.trackId,
-                metadata
-              }
-            })
-          );
+          this.dispatchTrackStored(pendingCapture.item.trackId, metadata);
         }
       }
 
       pausePlaybackCleanly();
-      this.dispatchEvent(
-        new CustomEvent("capturecomplete", {
-          detail: {
-            trackIds: capturedTrackIds
-          }
-        })
-      );
+      this.dispatchCaptureComplete(queuedTrackIds);
       console.log("[ktv420] Capture run complete", summary);
     } catch (error) {
       pausePlaybackCleanly();
@@ -215,6 +207,27 @@ export class CaptureOrchestrator extends EventTarget {
     });
 
     return queue;
+  }
+
+  dispatchTrackStored(trackId, metadata) {
+    this.dispatchEvent(
+      new CustomEvent("trackstored", {
+        detail: {
+          trackId,
+          metadata
+        }
+      })
+    );
+  }
+
+  dispatchCaptureComplete(trackIds) {
+    this.dispatchEvent(
+      new CustomEvent("capturecomplete", {
+        detail: {
+          trackIds
+        }
+      })
+    );
   }
 
   async beginAndAcceptItem(item, debug, { captureAlreadyBegun = false } = {}) {
