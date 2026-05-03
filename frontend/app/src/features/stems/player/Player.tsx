@@ -44,17 +44,41 @@ import { drawVisualizer, resetVisualizerState } from "./visualizers";
 
 type SpotlightIntent =
   | {
-      kind: "input";
-    }
+    kind: "input";
+  }
   | {
-      kind: "output";
-      name: string;
-    };
+    kind: "output";
+    name: string;
+  };
 type SpotlightLevel = "track" | "track-with-selectors";
 type SpotlightState = {
   intent: SpotlightIntent;
   level: SpotlightLevel;
 };
+
+const MIN_VOLUME_DECIBELS = -64;
+const MAX_VOLUME_DECIBELS = 16;
+const MIN_VOLUME_SLIDER_VALUE = 0;
+const UNITY_VOLUME_SLIDER_VALUE = 1;
+const MAX_VOLUME_SLIDER_VALUE = 2;
+
+function getLogarithmicVolumeGain(volume: number) {
+  const clampedVolume = Math.min(
+    MAX_VOLUME_SLIDER_VALUE,
+    Math.max(MIN_VOLUME_SLIDER_VALUE, volume)
+  );
+
+  if (clampedVolume === MIN_VOLUME_SLIDER_VALUE) {
+    return 0;
+  }
+
+  const decibels =
+    clampedVolume <= UNITY_VOLUME_SLIDER_VALUE
+      ? MIN_VOLUME_DECIBELS * (UNITY_VOLUME_SLIDER_VALUE - clampedVolume)
+      : MAX_VOLUME_DECIBELS * (clampedVolume - UNITY_VOLUME_SLIDER_VALUE);
+
+  return 10 ** (decibels / 20);
+}
 
 export default function Player({
   record,
@@ -308,9 +332,10 @@ export default function Player({
     (trackId: string, baseVolume?: number) => {
       const track = trackLookup[trackId];
       const volume = baseVolume ?? volumesRef.current[trackId] ?? 1;
+      const volumeGain = getLogarithmicVolumeGain(volume);
 
       if (!track) {
-        return volume;
+        return volumeGain;
       }
 
       const isTrackMuted = trackMuteStatesRef.current[trackId];
@@ -327,7 +352,7 @@ export default function Player({
         return 0;
       }
 
-      return volume;
+      return volumeGain;
     },
     [trackLookup]
   );
@@ -336,9 +361,10 @@ export default function Player({
     (trackId: string, baseVolume?: number) => {
       const track = trackLookup[trackId];
       const volume = baseVolume ?? volumes[trackId] ?? 1;
+      const volumeGain = getLogarithmicVolumeGain(volume);
 
       if (!track) {
-        return volume;
+        return volumeGain;
       }
 
       const isTrackMuted = trackMuteStates[trackId];
@@ -352,7 +378,7 @@ export default function Player({
         return 0;
       }
 
-      return volume;
+      return volumeGain;
     },
     [
       isAnyTrackDeafened,
@@ -1302,10 +1328,10 @@ export default function Player({
 
     const playPayload = pausedAtPerformanceTimeRef.current
       ? {
-          durationSeconds: roundDuration(
-            (performance.now() - pausedAtPerformanceTimeRef.current) / 1000
-          ),
-        }
+        durationSeconds: roundDuration(
+          (performance.now() - pausedAtPerformanceTimeRef.current) / 1000
+        ),
+      }
       : undefined;
     pausedAtPerformanceTimeRef.current = null;
     await schedulePlayback(startOffsetRef.current);
@@ -1499,6 +1525,9 @@ export default function Player({
 
   const areTracksReady =
     tracks.length > 0 && readyTrackIds.length === tracks.length;
+  const recordingButtonDisabled = isRecording
+    ? !onStopRecording
+    : !areTracksReady || isPlaying || !onStartRecording;
 
   const handleRecordingButton = useCallback(async () => {
     if (isRecording) {
@@ -1672,23 +1701,51 @@ export default function Player({
             <button
               type="button"
               onClick={() => void handleRecordingButton()}
-              disabled={
-                isRecording
-                  ? !onStopRecording
-                  : !areTracksReady || isPlaying || !onStartRecording
+              disabled={recordingButtonDisabled}
+              aria-label={
+                isRecording ? "Stop and save recording" : "Start recording"
               }
-              aria-label={isRecording ? "Stop recording" : "Record"}
               aria-pressed={isRecording}
-              title={isRecording ? "Stop recording" : "Record"}
+              title={
+                isRecording
+                  ? "Stop and save recording"
+                  : isPlaying
+                    ? "Pause playback before recording"
+                    : "Start recording"
+              }
               style={{
-                fontSize: "20px",
+                alignItems: "center",
+                background: isRecording
+                  ? "linear-gradient(135deg, #e44b4b, #8f1f2d)"
+                  : "rgba(228, 75, 75, 0.12)",
+                border: isRecording
+                  ? "1px solid rgba(255, 205, 205, 0.72)"
+                  : "1px solid rgba(228, 75, 75, 0.55)",
+                boxShadow: isRecording
+                  ? "0 0 0 2px rgba(228, 75, 75, 0.2), 0 8px 18px rgba(0, 0, 0, 0.32)"
+                  : "0 3px 10px rgba(0, 0, 0, 0.22)",
+                color: isRecording ? "#fff8f8" : "var(--ww-text)",
+                display: "inline-flex",
+                fontSize: "1.15rem",
+                fontWeight: 800,
+                justifyContent: "center",
                 height: "40px",
                 lineHeight: 1,
                 minWidth: "40px",
                 padding: "0 0.45rem",
               }}
             >
-              {isRecording ? "⏹️" : "⏺️"}
+              <span
+                aria-hidden="true"
+                style={{
+                  color: isRecording ? "#fff8f8" : "#e44b4b",
+                  display: "inline-block",
+                  fontSize: isRecording ? "0.82rem" : "1.15rem",
+                  lineHeight: 1,
+                }}
+              >
+                {isRecording ? "■" : "●"}
+              </span>
             </button>
           </div>
           {tracks.length ? (
