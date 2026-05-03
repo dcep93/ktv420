@@ -1700,6 +1700,7 @@ export default function Player({
             </button>
             <button
               type="button"
+              className={`player-record-button${isRecording ? " player-record-button--active" : ""}`}
               onClick={() => void handleRecordingButton()}
               disabled={recordingButtonDisabled}
               aria-label={
@@ -1713,39 +1714,8 @@ export default function Player({
                     ? "Pause playback before recording"
                     : "Start recording"
               }
-              style={{
-                alignItems: "center",
-                background: isRecording
-                  ? "linear-gradient(135deg, #e44b4b, #8f1f2d)"
-                  : "rgba(228, 75, 75, 0.12)",
-                border: isRecording
-                  ? "1px solid rgba(255, 205, 205, 0.72)"
-                  : "1px solid rgba(228, 75, 75, 0.55)",
-                boxShadow: isRecording
-                  ? "0 0 0 2px rgba(228, 75, 75, 0.2), 0 8px 18px rgba(0, 0, 0, 0.32)"
-                  : "0 3px 10px rgba(0, 0, 0, 0.22)",
-                color: isRecording ? "#fff8f8" : "var(--ww-text)",
-                display: "inline-flex",
-                fontSize: "1.15rem",
-                fontWeight: 800,
-                justifyContent: "center",
-                height: "40px",
-                lineHeight: 1,
-                minWidth: "40px",
-                padding: "0 0.45rem",
-              }}
             >
-              <span
-                aria-hidden="true"
-                style={{
-                  color: isRecording ? "#fff8f8" : "#e44b4b",
-                  display: "inline-block",
-                  fontSize: isRecording ? "0.82rem" : "1.15rem",
-                  lineHeight: 1,
-                }}
-              >
-                {isRecording ? "■" : "●"}
-              </span>
+              <span className="player-record-button__mark" aria-hidden="true" />
             </button>
           </div>
           {tracks.length ? (

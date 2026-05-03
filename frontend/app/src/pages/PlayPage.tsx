@@ -218,6 +218,9 @@ export default function PlayPage() {
 
       try {
         await savePlaybackRecording(fileName, recording);
+        window.alert(
+          `Recording saved with ${recording.events.length} event${recording.events.length === 1 ? "" : "s"}.`
+        );
         recordingRef.current = null;
         recordingFileNameRef.current = "";
         setIsRecording(false);

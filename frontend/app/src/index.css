@@ -83,6 +83,91 @@ button:disabled {
   transform: none;
 }
 
+.player-record-button {
+  align-items: center;
+  background: rgba(116, 28, 37, 0.72);
+  border: 1px solid rgba(255, 159, 176, 0.34);
+  border-radius: 999px;
+  box-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.22),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+  color: #fff8f8;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 40px;
+  justify-content: center;
+  line-height: 1;
+  min-width: 40px;
+  overflow: hidden;
+  padding: 0;
+  position: relative;
+  width: 40px;
+}
+
+.player-record-button:hover:not(:disabled) {
+  background: rgba(139, 34, 45, 0.82);
+  border-color: rgba(255, 159, 176, 0.5);
+  box-shadow:
+    0 5px 14px rgba(0, 0, 0, 0.26),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+.player-record-button__mark {
+  background: #ff4b5f;
+  border-radius: 999px;
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.08),
+    0 0 8px rgba(255, 75, 95, 0.36);
+  display: inline-block;
+  flex: 0 0 auto;
+  height: 16px;
+  position: relative;
+  width: 16px;
+}
+
+.player-record-button--active {
+  animation: ktv-record-button-pulse 1.4s ease-in-out infinite;
+  background: rgba(194, 49, 62, 0.86);
+  border-color: rgba(255, 205, 205, 0.5);
+}
+
+.player-record-button--active .player-record-button__mark {
+  background: #ffe0e3;
+  border-radius: 5px;
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.1),
+    0 0 8px rgba(255, 187, 196, 0.36);
+  height: 14px;
+  width: 14px;
+}
+
+.player-record-button:disabled {
+  box-shadow: none;
+}
+
+@keyframes ktv-record-button-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 4px 12px rgba(0, 0, 0, 0.22),
+      0 0 0 0 rgba(255, 159, 176, 0.14),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+  }
+
+  50% {
+    box-shadow:
+      0 4px 12px rgba(0, 0, 0, 0.22),
+      0 0 0 3px rgba(255, 159, 176, 0.1),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .player-record-button--active {
+    animation: none;
+  }
+}
+
 .standalone-page {
   display: grid;
   gap: 16px;
