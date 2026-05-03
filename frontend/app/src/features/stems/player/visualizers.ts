@@ -11,6 +11,12 @@ const TWO_PI = Math.PI * 2;
 const KALEIDOSCOPE_EASE = 0.01;
 const KALEIDOSCOPE_ENERGY_WINDOW_SECONDS = 0.5;
 const KALEIDOSCOPE_ENERGY_CAP = 0.45;
+const KALEIDOSCOPE_BASE_AREA = 900 * 102;
+const KALEIDOSCOPE_MAX_MOTION_SCALE = 3;
+const KALEIDOSCOPE_MIN_SPOTLIGHT_ENERGY = 0.05;
+const KALEIDOSCOPE_IMAGE_SRC =
+  "https://images.unsplash.com/photo-1473951574080-01fe45ec8643?q=80&w=2104&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D";
+let kaleidoscopeImage: HTMLImageElement | null = null;
 const highwayStateMap = new WeakMap<
   HTMLCanvasElement,
   {
@@ -42,6 +48,8 @@ type KaleidoscopeState = {
   lastTime: number;
   image: HTMLImageElement;
   pattern: CanvasPattern | null;
+  lastPointerX: number | null;
+  lastPointerY: number | null;
   onMouseMove?: (event: MouseEvent) => void;
 };
 
@@ -50,8 +58,41 @@ const kaleidoscopeStateMap = new WeakMap<
   KaleidoscopeState
 >();
 
+function getKaleidoscopeMotionScale(width: number, height: number) {
+  const areaScale = Math.sqrt(
+    Math.max(1, (width * height) / KALEIDOSCOPE_BASE_AREA)
+  );
+
+  return Math.min(KALEIDOSCOPE_MAX_MOTION_SCALE, areaScale);
+}
+
+function getKaleidoscopeImage() {
+  if (!kaleidoscopeImage) {
+    kaleidoscopeImage = new Image();
+    kaleidoscopeImage.crossOrigin = "Anonymous";
+    kaleidoscopeImage.src = KALEIDOSCOPE_IMAGE_SRC;
+  }
+
+  return kaleidoscopeImage;
+}
+
 function isLowPowerMode(): boolean {
   return cachedPerformanceMode;
+}
+
+export function resetVisualizerState(canvas: HTMLCanvasElement) {
+  const kaleidoscopeState = kaleidoscopeStateMap.get(canvas);
+
+  if (kaleidoscopeState?.onMouseMove) {
+    window.removeEventListener(
+      "mousemove",
+      kaleidoscopeState.onMouseMove,
+      false
+    );
+  }
+
+  kaleidoscopeStateMap.delete(canvas);
+  highwayStateMap.delete(canvas);
 }
 
 export type VisualizerInputs = {
@@ -1468,20 +1509,14 @@ export function drawVisualizer({
   } else if (visualizerType === "kaleidoscope") {
     let cached = kaleidoscopeStateMap.get(canvas);
 
-    if (!cached || cached.width !== width || cached.height !== height) {
-      if (cached?.onMouseMove) {
-        window.removeEventListener("mousemove", cached.onMouseMove, false);
-      }
+    if (!cached) {
       const radius = 1100;
       const slices = 24;
       const zoom = 1.5;
       const randomOffsetX = (Math.random() * 2 - 1) * radius * 0.6;
       const randomOffsetY = (Math.random() * 2 - 1) * radius * 0.6;
 
-      const image = new Image();
-      image.crossOrigin = "Anonymous";
-      image.src =
-        "https://images.unsplash.com/photo-1473951574080-01fe45ec8643?q=80&w=2104&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D";
+      const image = getKaleidoscopeImage();
 
       const state: KaleidoscopeState = {
         width,
@@ -1500,29 +1535,60 @@ export function drawVisualizer({
         lastTime: currentTime,
         image,
         pattern: null,
+        lastPointerX: null,
+        lastPointerY: null,
       };
 
       const handleMouseMove = (event: MouseEvent) => {
-        const dx = event.pageX / Math.max(1, width);
-        const dy = event.pageY / Math.max(1, height);
+        state.lastPointerX = event.pageX;
+        state.lastPointerY = event.pageY;
+        const motionScale = getKaleidoscopeMotionScale(
+          state.width,
+          state.height
+        );
+        const dx = event.pageX / Math.max(1, state.width);
+        const dy = event.pageY / Math.max(1, state.height);
         const hx = dx - 0.1;
         const hy = dy - 0.1;
-        state.targetX = hx * state.radius * -0.8;
-        state.targetY = hy * state.radius * 0.8;
+        state.targetX = hx * state.radius * -0.8 * motionScale;
+        state.targetY = hy * state.radius * 0.8 * motionScale;
       };
 
       state.onMouseMove = handleMouseMove;
       window.addEventListener("mousemove", handleMouseMove, false);
 
-      image.onload = () => {
+      if (image.complete && image.naturalWidth > 0) {
         state.pattern = context.createPattern(image, "repeat");
-      };
+      }
 
       kaleidoscopeStateMap.set(canvas, state);
       cached = state;
     }
 
     if (cached) {
+      if (cached.width !== width || cached.height !== height) {
+        cached.width = width;
+        cached.height = height;
+
+        if (cached.lastPointerX !== null && cached.lastPointerY !== null) {
+          const motionScale = getKaleidoscopeMotionScale(width, height);
+          const dx = cached.lastPointerX / Math.max(1, width);
+          const dy = cached.lastPointerY / Math.max(1, height);
+          const hx = dx - 0.1;
+          const hy = dy - 0.1;
+          cached.targetX = hx * cached.radius * -0.8 * motionScale;
+          cached.targetY = hy * cached.radius * 0.8 * motionScale;
+        }
+      }
+
+      if (
+        !cached.pattern &&
+        cached.image.complete &&
+        cached.image.naturalWidth > 0
+      ) {
+        cached.pattern = context.createPattern(cached.image, "repeat");
+      }
+
       if (
         !cached.pattern ||
         cached.image.width === 0 ||
@@ -1579,14 +1645,24 @@ export function drawVisualizer({
       ) {
         energy = 0;
       }
-      const clampedEnergy = Math.max(
+      let clampedEnergy = Math.max(
         0,
         Math.min(KALEIDOSCOPE_ENERGY_CAP, energy / 25)
       );
-      const weightedDeltaTime = Math.min(1, deltaTime * clampedEnergy);
+      const motionScale = getKaleidoscopeMotionScale(width, height);
+      if (isPlaying && motionScale > 1 && clampedVolume > 0) {
+        clampedEnergy = Math.max(
+          clampedEnergy,
+          KALEIDOSCOPE_MIN_SPOTLIGHT_ENERGY
+        );
+      }
+      const weightedDeltaTime = Math.min(
+        1,
+        deltaTime * clampedEnergy * motionScale
+      );
       cached.rotationTarget -= cached.rotationSpeed * weightedDeltaTime * 60;
 
-      const ease = clampedEnergy * KALEIDOSCOPE_EASE;
+      const ease = clampedEnergy * KALEIDOSCOPE_EASE * motionScale;
 
       cached.offsetX += (cached.targetX - cached.offsetX) * ease;
       cached.offsetY += (cached.targetY - cached.offsetY) * ease;

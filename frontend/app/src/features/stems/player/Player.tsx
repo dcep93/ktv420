@@ -37,7 +37,7 @@ import {
   type VisualizerType,
 } from "./types";
 import { visualizerOptions } from "./visualizerOptions";
-import { drawVisualizer } from "./visualizers";
+import { drawVisualizer, resetVisualizerState } from "./visualizers";
 
 type SpotlightIntent =
   | {
@@ -125,6 +125,7 @@ export default function Player({
   const startOffsetRef = useRef(0);
   const hasHandledPlaybackEndRef = useRef(false);
   const hasAttemptedAutoPlayOnReadyRef = useRef(false);
+  const spotlightModeKeyRef = useRef("default");
 
   const tracks = useMemo<Track[]>(() => {
     return record.files
@@ -176,6 +177,9 @@ export default function Player({
     );
   }, [inputTrack, spotlightState, tracks]);
   const spotlightTrackId = spotlightTrack?.id ?? null;
+  const spotlightModeKey = spotlightTrackId
+    ? `${spotlightTrackId}:${spotlightState?.level ?? "track"}`
+    : "default";
   const shouldShowVisualizerPicker =
     !spotlightTrackId || spotlightState?.level === "track-with-selectors";
 
@@ -251,6 +255,32 @@ export default function Player({
       setSpotlightState(null);
     }
   }, [spotlightState, spotlightTrackId, tracks.length]);
+
+  useEffect(() => {
+    if (spotlightModeKeyRef.current === spotlightModeKey) {
+      return;
+    }
+
+    spotlightModeKeyRef.current = spotlightModeKey;
+
+    const resetCanvases = () => {
+      Object.values(canvasRefs.current).forEach((canvas) => {
+        if (!canvas) {
+          return;
+        }
+
+        resetVisualizerState(canvas);
+
+        const context = canvas.getContext("2d");
+        context?.clearRect(0, 0, canvas.width, canvas.height);
+      });
+    };
+
+    resetCanvases();
+    const animationFrame = window.requestAnimationFrame(resetCanvases);
+
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [spotlightModeKey]);
 
   const getEffectiveVolumeFromRefs = useCallback(
     (trackId: string, baseVolume?: number) => {
@@ -676,16 +706,29 @@ export default function Player({
         }
       });
     };
+    const resizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(() => resizeCanvases());
 
     resizeCanvases();
     const animationFrame = window.requestAnimationFrame(resizeCanvases);
+    Object.values(canvasRefs.current).forEach((canvas) => {
+      if (canvas) {
+        resizeObserver?.observe(canvas);
+        if (canvas.parentElement) {
+          resizeObserver?.observe(canvas.parentElement);
+        }
+      }
+    });
     window.addEventListener("resize", resizeCanvases);
 
     return () => {
       window.cancelAnimationFrame(animationFrame);
+      resizeObserver?.disconnect();
       window.removeEventListener("resize", resizeCanvases);
     };
-  }, [spotlightTrackId, tracks]);
+  }, [shouldShowVisualizerPicker, spotlightTrackId, tracks]);
 
   useEffect(() => {
     const draw = () => {
