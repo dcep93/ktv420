@@ -33,6 +33,9 @@ import {
   FUTURE_WINDOW_SECONDS,
   PAST_WINDOW_SECONDS,
   type PlayerProps,
+  type RecordingEvent,
+  type RecordingEventPayload,
+  type RecordingEventType,
   type Track,
   type VisualizerType,
 } from "./types";
@@ -65,6 +68,11 @@ export default function Player({
   onNextTrack,
   onTrackEnd,
   onAutoPlayOnReadyHandled,
+  isRecording = false,
+  onStartRecording,
+  onStopRecording,
+  onRecordingEvent,
+  onRegisterRecordingFlush,
 }: PlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -109,6 +117,8 @@ export default function Player({
   const trackDeafenStatesRef = useRef<Record<string, boolean>>({});
   const effectValuesRef = useRef<Record<string, number>>({});
   const effectTypesRef = useRef<Record<string, AudioEffectType>>({});
+  const isRecordingRef = useRef(isRecording);
+  const onRecordingEventRef = useRef(onRecordingEvent);
 
   const audioCtxRef = useRef<AudioContext | null>(null);
   const buffersRef = useRef<Record<string, AudioBuffer>>({});
@@ -126,6 +136,10 @@ export default function Player({
   const hasHandledPlaybackEndRef = useRef(false);
   const hasAttemptedAutoPlayOnReadyRef = useRef(false);
   const spotlightModeKeyRef = useRef("default");
+  const pausedAtPerformanceTimeRef = useRef<number | null>(null);
+  const debouncedRecordingEventsRef = useRef(
+    new Map<string, { timeoutId: number; event: RecordingEvent }>()
+  );
 
   const tracks = useMemo<Track[]>(() => {
     return record.files
@@ -213,6 +227,14 @@ export default function Player({
   useEffect(() => {
     volumesRef.current = volumes;
   }, [volumes]);
+
+  useEffect(() => {
+    isRecordingRef.current = isRecording;
+  }, [isRecording]);
+
+  useEffect(() => {
+    onRecordingEventRef.current = onRecordingEvent;
+  }, [onRecordingEvent]);
 
   useEffect(() => {
     trackMuteStatesRef.current = trackMuteStates;
@@ -421,10 +443,202 @@ export default function Player({
     return startOffsetRef.current;
   }, [isPlaying]);
 
+  const createRecordingEvent = useCallback(
+    (
+      type: RecordingEventType,
+      payload?: RecordingEventPayload,
+      trackTimeSeconds = currentPlaybackTime()
+    ): RecordingEvent => ({
+      type,
+      trackTimeSeconds: roundTrackTime(trackTimeSeconds),
+      ...(payload === undefined ? {} : { payload }),
+    }),
+    [currentPlaybackTime]
+  );
+
+  const emitRecordingEvent = useCallback(
+    (
+      type: RecordingEventType,
+      payload?: RecordingEventPayload,
+      trackTimeSeconds?: number
+    ) => {
+      if (!isRecordingRef.current) {
+        return;
+      }
+
+      onRecordingEventRef.current?.(
+        createRecordingEvent(type, payload, trackTimeSeconds)
+      );
+    },
+    [createRecordingEvent]
+  );
+
+  const queueDebouncedRecordingEvent = useCallback(
+    (key: string, event: RecordingEvent) => {
+      if (!isRecordingRef.current) {
+        return;
+      }
+
+      const existing = debouncedRecordingEventsRef.current.get(key);
+
+      if (existing) {
+        window.clearTimeout(existing.timeoutId);
+      }
+
+      const timeoutId = window.setTimeout(() => {
+        debouncedRecordingEventsRef.current.delete(key);
+
+        if (isRecordingRef.current) {
+          onRecordingEventRef.current?.(event);
+        }
+      }, 300);
+
+      debouncedRecordingEventsRef.current.set(key, { timeoutId, event });
+    },
+    []
+  );
+
+  const cancelDebouncedRecordingEvent = useCallback((key: string) => {
+    const existing = debouncedRecordingEventsRef.current.get(key);
+
+    if (!existing) {
+      return;
+    }
+
+    window.clearTimeout(existing.timeoutId);
+    debouncedRecordingEventsRef.current.delete(key);
+  }, []);
+
+  const flushDebouncedRecordingEvents = useCallback(() => {
+    for (const { timeoutId, event } of debouncedRecordingEventsRef.current.values()) {
+      window.clearTimeout(timeoutId);
+
+      if (isRecordingRef.current) {
+        onRecordingEventRef.current?.(event);
+      }
+    }
+
+    debouncedRecordingEventsRef.current.clear();
+  }, []);
+
+  const getStemRecordingPayload = useCallback(
+    (trackId: string) => {
+      const track = trackLookup[trackId];
+
+      return {
+        stemName: track?.name ?? "Unknown stem",
+        stemKind: track?.isInput ? "input" : "output",
+      };
+    },
+    [trackLookup]
+  );
+
+  useEffect(() => {
+    onRegisterRecordingFlush?.(flushDebouncedRecordingEvents);
+
+    return () => onRegisterRecordingFlush?.(null);
+  }, [flushDebouncedRecordingEvents, onRegisterRecordingFlush]);
+
+  const buildRecordingSnapshotPayload = useCallback(
+    (trackTimeSeconds: number): RecordingEventPayload | undefined => {
+      const payload: Record<string, unknown> = {};
+      const roundedTrackTime = roundTrackTime(trackTimeSeconds);
+      const defaultVisualizer = visualizerOptions[0]?.value ?? "time-ribbon";
+
+      if (roundedTrackTime !== 0) {
+        payload.timestamp = roundedTrackTime;
+      }
+
+      if (visualizerType !== defaultVisualizer) {
+        payload.visualizer = visualizerType;
+      }
+
+      const nonDefaultVolumes = tracks
+        .map((track) => ({
+          ...getStemRecordingPayload(track.id),
+          value: volumesRef.current[track.id] ?? 1,
+        }))
+        .filter((volume) => !isNearlyEqual(volume.value, 1));
+
+      if (nonDefaultVolumes.length > 0) {
+        payload.volumes = nonDefaultVolumes;
+      }
+
+      const nonDefaultMuteStates = tracks
+        .map((track) => {
+          const value = trackMuteStatesRef.current[track.id] ?? false;
+          const defaultValue = track.isInput;
+
+          return {
+            ...getStemRecordingPayload(track.id),
+            value,
+            isDefault: value === defaultValue,
+          };
+        })
+        .filter((state) => !state.isDefault)
+        .map(({ isDefault, ...state }) => state);
+
+      if (nonDefaultMuteStates.length > 0) {
+        payload.muteStates = nonDefaultMuteStates;
+      }
+
+      const nonDefaultDeafenStates = tracks
+        .map((track) => ({
+          ...getStemRecordingPayload(track.id),
+          value: trackDeafenStatesRef.current[track.id] ?? false,
+        }))
+        .filter((state) => state.value);
+
+      if (nonDefaultDeafenStates.length > 0) {
+        payload.deafenStates = nonDefaultDeafenStates;
+      }
+
+      const defaultEffectType: AudioEffectType = "wah";
+      const defaultEffectValue = getDefaultEffectValue(defaultEffectType);
+      const nonDefaultEffects = tracks
+        .map((track) => {
+          const effectType =
+            effectTypesRef.current[track.id] ?? defaultEffectType;
+          const effectValue =
+            effectValuesRef.current[track.id] ??
+            getDefaultEffectValue(effectType);
+          const effect: Record<string, unknown> = {
+            ...getStemRecordingPayload(track.id),
+          };
+
+          if (effectType !== defaultEffectType) {
+            effect.effectType = effectType;
+          }
+
+          if (!isNearlyEqual(effectValue, defaultEffectValue)) {
+            effect.effectValue = effectValue;
+          }
+
+          return effect;
+        })
+        .filter(
+          (effect) => "effectType" in effect || "effectValue" in effect
+        );
+
+      if (nonDefaultEffects.length > 0) {
+        payload.effects = nonDefaultEffects;
+      }
+
+      if (spotlightState) {
+        payload.spotlightState = serializeSpotlightState(spotlightState);
+      }
+
+      return Object.keys(payload).length > 0 ? payload : undefined;
+    },
+    [getStemRecordingPayload, spotlightState, tracks, visualizerType]
+  );
+
   useEffect(() => {
     const audioContextSnapshot = audioCtxRef.current;
 
     return () => {
+      flushDebouncedRecordingEvents();
+
       if (drawAnimationFrameRef.current !== null) {
         cancelAnimationFrame(drawAnimationFrameRef.current);
       }
@@ -438,9 +652,11 @@ export default function Player({
         console.error("Failed to close audio context", error);
       });
     };
-  }, [stopAllSources]);
+  }, [flushDebouncedRecordingEvents, stopAllSources]);
 
   useEffect(() => {
+    flushDebouncedRecordingEvents();
+
     const initialVolumes: Record<string, number> = {};
     const initialMuteStates: Record<string, boolean> = {};
     const initialDeafenStates: Record<string, boolean> = {};
@@ -474,6 +690,7 @@ export default function Player({
     setAmplitudeMaximums({});
     startOffsetRef.current = 0;
     startAtCtxTimeRef.current = 0;
+    pausedAtPerformanceTimeRef.current = null;
     stopAllSources();
     buffersRef.current = {};
     gainNodesRef.current = {};
@@ -487,7 +704,7 @@ export default function Player({
         URL.revokeObjectURL(track.url);
       });
     };
-  }, [stopAllSources, tracks]);
+  }, [flushDebouncedRecordingEvents, stopAllSources, tracks]);
 
   useEffect(() => {
     const activeIds = new Set(tracks.map((track) => track.id));
@@ -994,6 +1211,11 @@ export default function Player({
 
     if (!isDraggingSeekRef.current) {
       void commitSeek(newTime);
+      emitRecordingEvent(
+        "seek_commit",
+        { targetSeconds: roundTrackTime(newTime), source: "slider" },
+        newTime
+      );
     }
   };
 
@@ -1007,6 +1229,11 @@ export default function Player({
 
     if (pending !== null) {
       void commitSeek(pending);
+      emitRecordingEvent(
+        "seek_commit",
+        { targetSeconds: roundTrackTime(pending), source: "slider" },
+        pending
+      );
     }
 
     pendingSeekRef.current = null;
@@ -1035,9 +1262,31 @@ export default function Player({
       const targetTime = currentTime + timeOffset;
       pendingSeekRef.current = targetTime;
       void commitSeek(targetTime);
+      emitRecordingEvent(
+        "seek_commit",
+        { targetSeconds: roundTrackTime(targetTime), source: "canvas" },
+        targetTime
+      );
     },
-    [commitSeek, currentTime, duration, visualizerType]
+    [commitSeek, currentTime, duration, emitRecordingEvent, visualizerType]
   );
+
+  const pausePlayback = useCallback(() => {
+    const context = audioCtxRef.current;
+
+    if (!context) {
+      setIsPlaying(false);
+      return startOffsetRef.current;
+    }
+
+    startOffsetRef.current =
+      context.currentTime -
+      startAtCtxTimeRef.current +
+      startOffsetRef.current;
+    stopAllSources();
+    setIsPlaying(false);
+    return startOffsetRef.current;
+  }, [stopAllSources]);
 
   const handlePlayPause = useCallback(async () => {
     if (!tracks.length) {
@@ -1045,24 +1294,44 @@ export default function Player({
     }
 
     if (isPlaying) {
-      const context = audioCtxRef.current;
-
-      if (!context) {
-        setIsPlaying(false);
-        return;
-      }
-
-      startOffsetRef.current =
-        context.currentTime -
-        startAtCtxTimeRef.current +
-        startOffsetRef.current;
-      stopAllSources();
-      setIsPlaying(false);
+      const pausedAt = pausePlayback();
+      pausedAtPerformanceTimeRef.current = performance.now();
+      emitRecordingEvent("transport_pause", undefined, pausedAt);
       return;
     }
 
+    const playPayload = pausedAtPerformanceTimeRef.current
+      ? {
+          durationSeconds: roundDuration(
+            (performance.now() - pausedAtPerformanceTimeRef.current) / 1000
+          ),
+        }
+      : undefined;
+    pausedAtPerformanceTimeRef.current = null;
     await schedulePlayback(startOffsetRef.current);
-  }, [isPlaying, schedulePlayback, stopAllSources, tracks.length]);
+    emitRecordingEvent("transport_play", playPayload);
+  }, [
+    emitRecordingEvent,
+    isPlaying,
+    pausePlayback,
+    schedulePlayback,
+    tracks.length,
+  ]);
+
+  const selectVisualizerType = useCallback(
+    (nextVisualizerType: VisualizerType | undefined) => {
+      if (!nextVisualizerType || nextVisualizerType === visualizerType) {
+        return;
+      }
+
+      emitRecordingEvent("visualizer_change", {
+        previous: visualizerType,
+        next: nextVisualizerType,
+      });
+      setVisualizerType(nextVisualizerType);
+    },
+    [emitRecordingEvent, visualizerType]
+  );
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1074,38 +1343,40 @@ export default function Player({
 
       if (event.code === "ArrowRight" || event.key === "ArrowRight") {
         event.preventDefault();
-        setVisualizerType((current) => {
-          const currentIndex = visualizerOptions.findIndex(
-            (option) => option.value === current
-          );
+        const currentIndex = visualizerOptions.findIndex(
+          (option) => option.value === visualizerType
+        );
 
-          if (currentIndex === -1) {
-            return visualizerOptions[0]?.value ?? "time-ribbon";
-          }
+        if (currentIndex === -1) {
+          selectVisualizerType(visualizerOptions[0]?.value ?? "time-ribbon");
+          return;
+        }
 
-          return visualizerOptions[
+        selectVisualizerType(
+          visualizerOptions[
             (currentIndex + 1) % visualizerOptions.length
-          ]?.value;
-        });
+          ]?.value
+        );
         return;
       }
 
       if (event.code === "ArrowLeft" || event.key === "ArrowLeft") {
         event.preventDefault();
-        setVisualizerType((current) => {
-          const currentIndex = visualizerOptions.findIndex(
-            (option) => option.value === current
-          );
+        const currentIndex = visualizerOptions.findIndex(
+          (option) => option.value === visualizerType
+        );
 
-          if (currentIndex === -1) {
-            return visualizerOptions[0]?.value ?? "time-ribbon";
-          }
+        if (currentIndex === -1) {
+          selectVisualizerType(visualizerOptions[0]?.value ?? "time-ribbon");
+          return;
+        }
 
-          return visualizerOptions[
+        selectVisualizerType(
+          visualizerOptions[
             (currentIndex - 1 + visualizerOptions.length) %
             visualizerOptions.length
-          ]?.value;
-        });
+          ]?.value
+        );
       }
     };
 
@@ -1114,16 +1385,25 @@ export default function Player({
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [handlePlayPause]);
+  }, [handlePlayPause, selectVisualizerType, visualizerType]);
 
   const handleVolumeChange = (trackId: string, value: number) => {
     setVolumes((previous) => ({ ...previous, [trackId]: value }));
     applyEffectiveVolume(trackId, value);
+    queueDebouncedRecordingEvent(
+      `volume:${trackId}`,
+      createRecordingEvent("volume_change", {
+        ...getStemRecordingPayload(trackId),
+        value,
+      })
+    );
   };
 
   const handleVolumeReset = (trackId: string) => {
+    cancelDebouncedRecordingEvent(`volume:${trackId}`);
     setVolumes((previous) => ({ ...previous, [trackId]: 1 }));
     applyEffectiveVolume(trackId, 1);
+    emitRecordingEvent("volume_reset", getStemRecordingPayload(trackId));
   };
 
   const handleEffectValueChange = (trackId: string, value: number) => {
@@ -1131,20 +1411,33 @@ export default function Player({
 
     setEffectValues((previous) => ({ ...previous, [trackId]: clamped }));
     applyEffectValue(trackId, clamped);
+    queueDebouncedRecordingEvent(
+      `effect-value:${trackId}`,
+      createRecordingEvent("effect_value_change", {
+        ...getStemRecordingPayload(trackId),
+        value: clamped,
+      })
+    );
   };
 
   const handleEffectTypeChange = (
     trackId: string,
     effectType: AudioEffectType
   ) => {
+    cancelDebouncedRecordingEvent(`effect-value:${trackId}`);
     const defaultValue = getDefaultEffectValue(effectType);
     effectValuesRef.current[trackId] = defaultValue;
     setEffectValues((previous) => ({ ...previous, [trackId]: defaultValue }));
     setEffectTypes((previous) => ({ ...previous, [trackId]: effectType }));
     applyEffectValue(trackId, defaultValue, effectType);
+    emitRecordingEvent("effect_type_change", {
+      ...getStemRecordingPayload(trackId),
+      effectType,
+    });
   };
 
   const handleEffectReset = (trackId: string) => {
+    cancelDebouncedRecordingEvent(`effect-value:${trackId}`);
     const defaultValue = getDefaultEffectValue(
       effectTypesRef.current[trackId] ?? "wah"
     );
@@ -1154,44 +1447,37 @@ export default function Player({
       [trackId]: defaultValue,
     }));
     applyEffectValue(trackId, defaultValue);
+    emitRecordingEvent("effect_reset", getStemRecordingPayload(trackId));
   };
 
   const toggleTrackSpotlight = useCallback((track: Track) => {
-    setSpotlightState((current) => {
-      const nextIntent: SpotlightIntent = track.isInput
-        ? { kind: "input" }
-        : { kind: "output", name: track.name };
-      const currentIntent = current?.intent;
-      const isCurrentIntent =
-        currentIntent?.kind === nextIntent.kind &&
-        (nextIntent.kind === "input" ||
-          (currentIntent?.kind === "output" &&
-            currentIntent.name === nextIntent.name));
+    const nextState = nextSpotlightState(spotlightState, track);
 
-      if (!isCurrentIntent) {
-        return { intent: nextIntent, level: "track" };
-      }
-
-      if (current?.level === "track") {
-        return { intent: nextIntent, level: "track-with-selectors" };
-      }
-
-      return null;
-    });
-  }, []);
+    setSpotlightState(nextState);
+    emitRecordingEvent(
+      "spotlight_toggle",
+      nextState ? serializeSpotlightState(nextState) : null
+    );
+  }, [emitRecordingEvent, spotlightState]);
 
   const toggleTrackMute = (trackId: string) => {
+    const nextValue = !trackMuteStates[trackId];
+
     setTrackMuteStates((previous) => ({
       ...previous,
       [trackId]: !previous[trackId],
     }));
     applyEffectiveVolume(trackId);
+    emitRecordingEvent("mute_toggle", {
+      ...getStemRecordingPayload(trackId),
+      value: nextValue,
+    });
   };
 
   const toggleTrackDeafen = (trackId: string) => {
-    setTrackDeafenStates((previous) => {
-      const nextValue = !previous[trackId];
+    const nextValue = !trackDeafenStates[trackId];
 
+    setTrackDeafenStates((previous) => {
       if (nextValue) {
         setTrackMuteStates((mutePrevious) => ({
           ...mutePrevious,
@@ -1205,10 +1491,55 @@ export default function Player({
       };
     });
     applyEffectiveVolume(trackId);
+    emitRecordingEvent("deafen_toggle", {
+      ...getStemRecordingPayload(trackId),
+      value: nextValue,
+    });
   };
 
   const areTracksReady =
     tracks.length > 0 && readyTrackIds.length === tracks.length;
+
+  const handleRecordingButton = useCallback(async () => {
+    if (isRecording) {
+      flushDebouncedRecordingEvents();
+      const stoppedAt = isPlaying ? pausePlayback() : currentPlaybackTime();
+      pausedAtPerformanceTimeRef.current = null;
+      await onStopRecording?.(
+        createRecordingEvent("record_stop", undefined, stoppedAt)
+      );
+      return;
+    }
+
+    if (isPlaying || !areTracksReady || !onStartRecording) {
+      return;
+    }
+
+    const startTime = currentPlaybackTime();
+    const didStart = await onStartRecording({
+      trackTimeSeconds: roundTrackTime(startTime),
+      snapshotPayload: buildRecordingSnapshotPayload(startTime),
+    });
+
+    if (!didStart) {
+      return;
+    }
+
+    pausedAtPerformanceTimeRef.current = null;
+    await schedulePlayback(startOffsetRef.current);
+  }, [
+    areTracksReady,
+    buildRecordingSnapshotPayload,
+    createRecordingEvent,
+    currentPlaybackTime,
+    flushDebouncedRecordingEvents,
+    isPlaying,
+    isRecording,
+    onStartRecording,
+    onStopRecording,
+    pausePlayback,
+    schedulePlayback,
+  ]);
 
   useEffect(() => {
     if (!autoPlayOnReady) {
@@ -1289,7 +1620,10 @@ export default function Player({
           <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
             <button
               type="button"
-              onClick={onPreviousTrack}
+              onClick={() => {
+                flushDebouncedRecordingEvents();
+                onPreviousTrack?.();
+              }}
               disabled={!hasPreviousTrack}
               aria-label="Previous track"
               style={{
@@ -1319,7 +1653,10 @@ export default function Player({
             </button>
             <button
               type="button"
-              onClick={onNextTrack}
+              onClick={() => {
+                flushDebouncedRecordingEvents();
+                onNextTrack?.();
+              }}
               disabled={!hasNextTrack}
               aria-label="Next track"
               style={{
@@ -1331,6 +1668,27 @@ export default function Player({
               }}
             >
               ⏭️
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleRecordingButton()}
+              disabled={
+                isRecording
+                  ? !onStopRecording
+                  : !areTracksReady || isPlaying || !onStartRecording
+              }
+              aria-label={isRecording ? "Stop recording" : "Record"}
+              aria-pressed={isRecording}
+              title={isRecording ? "Stop recording" : "Record"}
+              style={{
+                fontSize: "20px",
+                height: "40px",
+                lineHeight: 1,
+                minWidth: "40px",
+                padding: "0 0.45rem",
+              }}
+            >
+              {isRecording ? "⏹️" : "⏺️"}
             </button>
           </div>
           {tracks.length ? (
@@ -1484,7 +1842,7 @@ export default function Player({
                   <button
                     key={option.value}
                     type="button"
-                    onClick={() => setVisualizerType(option.value)}
+                    onClick={() => selectVisualizerType(option.value)}
                     style={getVisualizerButtonStyle(isActive)}
                     aria-pressed={isActive}
                   >
@@ -1509,4 +1867,59 @@ export default function Player({
       ) : null}
     </div>
   );
+}
+
+function nextSpotlightState(
+  current: SpotlightState | null,
+  track: Track
+): SpotlightState | null {
+  const nextIntent: SpotlightIntent = track.isInput
+    ? { kind: "input" }
+    : { kind: "output", name: track.name };
+  const currentIntent = current?.intent;
+  const isCurrentIntent =
+    currentIntent?.kind === nextIntent.kind &&
+    (nextIntent.kind === "input" ||
+      (currentIntent?.kind === "output" &&
+        currentIntent.name === nextIntent.name));
+
+  if (!isCurrentIntent) {
+    return { intent: nextIntent, level: "track" };
+  }
+
+  if (current?.level === "track") {
+    return { intent: nextIntent, level: "track-with-selectors" };
+  }
+
+  return null;
+}
+
+function serializeSpotlightState(state: SpotlightState) {
+  return {
+    level: state.level,
+    intent:
+      state.intent.kind === "input"
+        ? { kind: "input" }
+        : { kind: "output", name: state.intent.name },
+  };
+}
+
+function roundTrackTime(value: number) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.round(value * 1000) / 1000);
+}
+
+function roundDuration(value: number) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.round(value * 1000) / 1000);
+}
+
+function isNearlyEqual(left: number, right: number) {
+  return Math.abs(left - right) < 0.0001;
 }

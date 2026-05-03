@@ -11,6 +11,44 @@ export type PlaybackRecord = {
 
 export type CachedTrackFile = PlaybackFile;
 
+export type RecordingEventType =
+  | "record_start_snapshot"
+  | "track_started"
+  | "record_stop"
+  | "transport_play"
+  | "transport_pause"
+  | "seek_commit"
+  | "volume_change"
+  | "volume_reset"
+  | "mute_toggle"
+  | "deafen_toggle"
+  | "effect_type_change"
+  | "effect_value_change"
+  | "effect_reset"
+  | "spotlight_toggle"
+  | "visualizer_change";
+
+export type RecordingEventPayload = Record<string, unknown> | null;
+
+export type RecordingEvent = {
+  type: RecordingEventType;
+  trackTimeSeconds: number;
+  payload?: RecordingEventPayload;
+};
+
+export type PlaybackRecording = {
+  version: 1;
+  name: string;
+  createdAt: string;
+  trackIds: string[];
+  events: RecordingEvent[];
+};
+
+export type RecordingStartRequest = {
+  trackTimeSeconds: number;
+  snapshotPayload?: RecordingEventPayload;
+};
+
 export type VisualizerType =
   | "laser-ladders"
   | "spectrum-safari"
@@ -49,6 +87,11 @@ export type PlayerProps = {
   onNextTrack?: () => void;
   onTrackEnd?: () => void;
   onAutoPlayOnReadyHandled?: () => void;
+  isRecording?: boolean;
+  onStartRecording?: (request: RecordingStartRequest) => Promise<boolean>;
+  onStopRecording?: (event: RecordingEvent) => Promise<void>;
+  onRecordingEvent?: (event: RecordingEvent) => void;
+  onRegisterRecordingFlush?: (flush: (() => void) | null) => void;
 };
 
 export type Track = {

@@ -1,11 +1,19 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import Player from "../features/stems/player/Player";
 import {
+  type PlaybackRecording,
+  type RecordingEvent,
+  type RecordingStartRequest
+} from "../features/stems/player/types";
+import {
+  recordingExists,
+  renameRecording,
   readTrackPlaybackRecord,
   readSpotifyContext,
   readTrackMetadata,
   readTrackOutputMetadata,
+  savePlaybackRecording,
   type LocalPlaybackRecord,
   type SavedSpotifyContext
 } from "./iframeArtifacts";
@@ -24,6 +32,8 @@ const emptyPlaybackRecord = (trackId: string): LocalPlaybackRecord => ({
   files: []
 });
 
+const RECORDING_VERSION = 1;
+
 export default function PlayPage() {
   const [hashSpotifyPath, setHashSpotifyPath] = useState(readSpotifyPathHash);
   const spotifyPath = hashSpotifyPath;
@@ -38,6 +48,10 @@ export default function PlayPage() {
   const [autoPlayActiveTrack, setAutoPlayActiveTrack] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [isRecording, setIsRecording] = useState(false);
+  const recordingRef = useRef<PlaybackRecording | null>(null);
+  const recordingFileNameRef = useRef("");
+  const flushPlayerRecordingEventsRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     const handleHashChange = () => setHashSpotifyPath(readSpotifyPathHash());
@@ -98,6 +112,122 @@ export default function PlayPage() {
   }, [spotifyPath]);
 
   const activeTrack = tracks[activeTrackIndex] ?? null;
+
+  const appendRecordingEvent = useCallback((event: RecordingEvent) => {
+    const recording = recordingRef.current;
+
+    if (!recording) {
+      return;
+    }
+
+    recording.events.push(event);
+
+    if (event.type !== "track_started" || !isRecord(event.payload)) {
+      return;
+    }
+
+    const trackId = readString(event.payload.trackId);
+    if (trackId && !recording.trackIds.includes(trackId)) {
+      recording.trackIds.push(trackId);
+    }
+  }, []);
+
+  const appendTrackStarted = useCallback(
+    (trackId: string, trackTimeSeconds = 0) => {
+      appendRecordingEvent({
+        type: "track_started",
+        trackTimeSeconds: roundTrackTime(trackTimeSeconds),
+        payload: { trackId }
+      });
+    },
+    [appendRecordingEvent]
+  );
+
+  const appendTrackStartedForIndex = useCallback(
+    (index: number) => {
+      const track = tracks[index];
+
+      if (!isRecording || !track) {
+        return;
+      }
+
+      flushPlayerRecordingEventsRef.current();
+      appendTrackStarted(track.trackId);
+    },
+    [appendTrackStarted, isRecording, tracks]
+  );
+
+  const handleStartRecording = useCallback(
+    async ({ trackTimeSeconds, snapshotPayload }: RecordingStartRequest) => {
+      if (!activeTrack) {
+        return false;
+      }
+
+      const fileName = window.prompt("Name this recording");
+      if (fileName === null) {
+        return false;
+      }
+
+      const recordingFileName = toRecordingFileName(fileName);
+      if (!recordingFileName) {
+        window.alert("Recording names cannot be empty or contain path separators.");
+        return false;
+      }
+
+      try {
+        if (!(await resolveRecordingNameConflict(recordingFileName))) {
+          return false;
+        }
+      } catch (conflictError) {
+        window.alert(formatError(conflictError));
+        return false;
+      }
+
+      const recording: PlaybackRecording = {
+        version: RECORDING_VERSION,
+        name: recordingFileName,
+        createdAt: new Date().toISOString(),
+        trackIds: [],
+        events: []
+      };
+      recordingRef.current = recording;
+      recordingFileNameRef.current = recordingFileName;
+      setIsRecording(true);
+
+      appendRecordingEvent({
+        type: "record_start_snapshot",
+        trackTimeSeconds: roundTrackTime(trackTimeSeconds),
+        ...(snapshotPayload === undefined ? {} : { payload: snapshotPayload })
+      });
+      appendTrackStarted(activeTrack.trackId, trackTimeSeconds);
+      return true;
+    },
+    [activeTrack, appendRecordingEvent, appendTrackStarted]
+  );
+
+  const handleStopRecording = useCallback(
+    async (event: RecordingEvent) => {
+      const recording = recordingRef.current;
+      const fileName = recordingFileNameRef.current;
+
+      if (!recording || !fileName) {
+        return;
+      }
+
+      appendRecordingEvent(event);
+
+      try {
+        await savePlaybackRecording(fileName, recording);
+        recordingRef.current = null;
+        recordingFileNameRef.current = "";
+        setIsRecording(false);
+      } catch (saveError) {
+        recording.events.pop();
+        window.alert(formatError(saveError));
+      }
+    },
+    [appendRecordingEvent]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -200,17 +330,36 @@ export default function PlayPage() {
                 autoPlayOnReady={autoPlayActiveTrack && Boolean(activeTrackPlaybackRecord)}
                 onPreviousTrack={() => {
                   setAutoPlayActiveTrack(false);
-                  setActiveTrackIndex((index) => Math.max(0, index - 1));
+                  const nextIndex = Math.max(0, activeTrackIndex - 1);
+                  if (nextIndex !== activeTrackIndex) {
+                    appendTrackStartedForIndex(nextIndex);
+                  }
+                  setActiveTrackIndex(nextIndex);
                 }}
                 onNextTrack={() => {
                   setAutoPlayActiveTrack(false);
-                  setActiveTrackIndex((index) => Math.min(tracks.length - 1, index + 1));
+                  const nextIndex = Math.min(tracks.length - 1, activeTrackIndex + 1);
+                  if (nextIndex !== activeTrackIndex) {
+                    appendTrackStartedForIndex(nextIndex);
+                  }
+                  setActiveTrackIndex(nextIndex);
                 }}
                 onTrackEnd={() => {
                   setAutoPlayActiveTrack(true);
-                  setActiveTrackIndex((index) => Math.min(tracks.length - 1, index + 1));
+                  const nextIndex = Math.min(tracks.length - 1, activeTrackIndex + 1);
+                  if (nextIndex !== activeTrackIndex) {
+                    appendTrackStartedForIndex(nextIndex);
+                  }
+                  setActiveTrackIndex(nextIndex);
                 }}
                 onAutoPlayOnReadyHandled={() => setAutoPlayActiveTrack(false)}
+                isRecording={isRecording}
+                onStartRecording={handleStartRecording}
+                onStopRecording={handleStopRecording}
+                onRecordingEvent={appendRecordingEvent}
+                onRegisterRecordingFlush={(flush) => {
+                  flushPlayerRecordingEventsRef.current = flush ?? (() => {});
+                }}
               />
             </section>
           ) : null}
@@ -236,6 +385,9 @@ export default function PlayPage() {
                     aria-current={isActive ? "true" : undefined}
                     onClick={() => {
                       setAutoPlayActiveTrack(false);
+                      if (index !== activeTrackIndex) {
+                        appendTrackStartedForIndex(index);
+                      }
                       setActiveTrackIndex(index);
                     }}
                   >
@@ -261,6 +413,63 @@ export default function PlayPage() {
       )}
     </main>
   );
+}
+
+async function resolveRecordingNameConflict(fileName: string): Promise<boolean> {
+  if (!(await recordingExists(fileName))) {
+    return true;
+  }
+
+  const renameInput = window.prompt(
+    `A recording named "${fileName}" already exists. Rename the existing saved recording to (leave blank to overwrite):`
+  );
+
+  if (renameInput === null) {
+    return false;
+  }
+
+  if (renameInput.trim() === "") {
+    return true;
+  }
+
+  const renameFileName = toRecordingFileName(renameInput);
+  if (!renameFileName) {
+    window.alert("Recording names cannot be empty or contain path separators.");
+    return await resolveRecordingNameConflict(fileName);
+  }
+
+  if (renameFileName === fileName) {
+    return await resolveRecordingNameConflict(fileName);
+  }
+
+  if (!(await resolveRecordingNameConflict(renameFileName))) {
+    return false;
+  }
+
+  await renameRecording(fileName, renameFileName);
+  return true;
+}
+
+function toRecordingFileName(input: string) {
+  const trimmed = input.trim();
+
+  if (!trimmed || trimmed.includes("/") || trimmed.includes("\\")) {
+    return null;
+  }
+
+  return `${trimmed}.json`;
+}
+
+function roundTrackTime(value: number) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.round(value * 1000) / 1000);
+}
+
+function formatError(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function loadPlayTrack(trackId: string): Promise<PlayTrack> {

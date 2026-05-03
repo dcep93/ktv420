@@ -51,6 +51,18 @@ export type LocalPlaybackRecord = {
   files: LocalPlaybackFile[];
 };
 
+export type StoredPlaybackRecording = {
+  version: 1;
+  name: string;
+  createdAt: string;
+  trackIds: string[];
+  events: Array<{
+    type: string;
+    trackTimeSeconds: number;
+    payload?: Record<string, unknown> | null;
+  }>;
+};
+
 let unpartitionedOpfsRoot: FileSystemDirectoryHandle | null = null;
 let unpartitionedOpfsRootPromise: Promise<FileSystemDirectoryHandle> | null = null;
 
@@ -155,6 +167,25 @@ export async function deleteLocalOpfsEntry(path: string) {
 
 export async function saveSpotifyContext(record: SavedSpotifyContext) {
   await writeOpfsText(spotifyContextPath(record.id), JSON.stringify(record, null, 2));
+}
+
+export async function recordingExists(fileName: string) {
+  return (await readOpfsText(recordingPath(fileName))) !== null;
+}
+
+export async function renameRecording(fromFileName: string, toFileName: string) {
+  const text = await readOpfsText(recordingPath(fromFileName));
+
+  if (text === null) {
+    return;
+  }
+
+  await writeOpfsText(recordingPath(toFileName), text);
+  await removeOpfsEntry(recordingPath(fromFileName));
+}
+
+export async function savePlaybackRecording(fileName: string, recording: StoredPlaybackRecording) {
+  await writeOpfsText(recordingPath(fileName), JSON.stringify(recording, null, 2));
 }
 
 export async function readSpotifyContext(spotifyPath: string) {
@@ -529,6 +560,10 @@ function relativeArtifactPath(trackId: string, objectPath: string) {
 
 function spotifyContextPath(spotifyPath: string) {
   return `playlists/${spotifyPath}.json`;
+}
+
+function recordingPath(fileName: string) {
+  return `recordings/${fileName}`;
 }
 
 function isSavedSpotifyContext(value: unknown, spotifyPath: string): value is SavedSpotifyContext {
