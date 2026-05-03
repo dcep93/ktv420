@@ -1649,6 +1649,7 @@ export default function Player({
           <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
             <button
               type="button"
+              className="player-transport-button"
               onClick={() => {
                 flushDebouncedRecordingEvents();
                 onPreviousTrack?.();
@@ -1663,10 +1664,14 @@ export default function Player({
                 padding: "0 0.45rem",
               }}
             >
-              ⏮️
+              <span
+                className="player-transport-icon player-transport-icon--previous"
+                aria-hidden="true"
+              />
             </button>
             <button
               type="button"
+              className={`player-transport-button${isPlaying ? " player-transport-button--active" : ""}`}
               onClick={() => void handlePlayPause()}
               disabled={!areTracksReady}
               aria-label={isPlaying ? "Pause" : "Play"}
@@ -1678,10 +1683,14 @@ export default function Player({
                 padding: "0 0.5rem",
               }}
             >
-              {isPlaying ? "⏸️" : "▶️"}
+              <span
+                className={`player-transport-icon player-transport-icon--${isPlaying ? "pause" : "play"}`}
+                aria-hidden="true"
+              />
             </button>
             <button
               type="button"
+              className="player-transport-button"
               onClick={() => {
                 flushDebouncedRecordingEvents();
                 onNextTrack?.();
@@ -1696,7 +1705,10 @@ export default function Player({
                 padding: "0 0.45rem",
               }}
             >
-              ⏭️
+              <span
+                className="player-transport-icon player-transport-icon--next"
+                aria-hidden="true"
+              />
             </button>
             <button
               type="button"
