@@ -18,6 +18,12 @@ type QueueItem = {
   track_id: string;
 };
 
+const cacheBustedUrl = (url: string | URL) => {
+  const nextUrl = new URL(url.toString());
+  nextUrl.searchParams.set("_ktv420_ts", `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  return nextUrl.toString();
+};
+
 export type QueueHeadState = {
   revision: string;
   head_object: string | null;
@@ -345,7 +351,7 @@ async function listObjectsWithPrefix(prefix: string): Promise<GcsObject[]> {
       listUrl.searchParams.set("pageToken", pageToken);
     }
 
-    const response = await fetch(listUrl.toString(), { cache: "no-store" });
+    const response = await fetch(cacheBustedUrl(listUrl), { cache: "no-store" });
 
     if (!response.ok) {
       throw new Error(`Failed to list ${prefix}: ${response.status} ${response.statusText}`);
@@ -380,14 +386,15 @@ async function listObjectsWithPrefixLimit(prefix: string, maxResults: number) {
   listUrl.searchParams.set("prefix", prefix);
   listUrl.searchParams.set("maxResults", String(maxResults));
 
-  const response = await fetch(listUrl.toString(), { cache: "no-store" });
+  const requestUrl = cacheBustedUrl(listUrl);
+  const response = await fetch(requestUrl, { cache: "no-store" });
   const data = response.ok
     ? (await response.json()) as { items?: GcsObject[] }
     : null;
 
   console.log("[ktv420 iframe] GCS prefix probe", {
     prefix,
-    url: listUrl.toString(),
+    url: requestUrl,
     status: response.status,
     ok: response.ok,
     matchedObjects: data?.items?.map((object) => object.name) ?? []
@@ -401,7 +408,9 @@ async function listObjectsWithPrefixLimit(prefix: string, maxResults: number) {
 }
 
 async function fetchObjectBlob(objectPath: string) {
-  const response = await fetch(objectUrl(objectPath, { media: true }), { cache: "no-store" });
+  const response = await fetch(cacheBustedUrl(objectUrl(objectPath, { media: true })), {
+    cache: "no-store"
+  });
 
   if (!response.ok) {
     throw new Error(`Failed to fetch ${objectPath}: ${response.status} ${response.statusText}`);
@@ -411,7 +420,7 @@ async function fetchObjectBlob(objectPath: string) {
 }
 
 async function objectMediaExists(objectPath: string) {
-  const url = objectUrl(objectPath, { media: true });
+  const url = cacheBustedUrl(objectUrl(objectPath, { media: true }));
   const response = await fetch(url, { cache: "no-store" });
   console.log("[ktv420 iframe] GCS media existence probe", {
     path: objectPath,
@@ -433,7 +442,9 @@ async function objectMediaExists(objectPath: string) {
 }
 
 async function fetchObjectJsonOrNull(objectPath: string) {
-  const response = await fetch(objectUrl(objectPath, { media: true }), { cache: "no-store" });
+  const response = await fetch(cacheBustedUrl(objectUrl(objectPath, { media: true })), {
+    cache: "no-store"
+  });
 
   if (response.status === 404) {
     return null;

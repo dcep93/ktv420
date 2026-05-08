@@ -11,6 +11,12 @@ const STORAGE_UPLOAD_BASE_URL =
 const bucketObjectsUrl = () =>
   new URL(`${STORAGE_API_BASE_URL}/b/${BUCKET_NAME}/o`);
 
+const cacheBustedUrl = (url: string | URL) => {
+  const nextUrl = new URL(url.toString());
+  nextUrl.searchParams.set("_ktv420_ts", `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  return nextUrl.toString();
+};
+
 const objectUrl = (objectPath: string, { media = false } = {}) => {
   const encodedName = encodeURIComponent(objectPath);
   const mediaQuery = media ? "?alt=media" : "";
@@ -51,7 +57,8 @@ export async function listBucketObjects(): Promise<GcsObject[]> {
         listUrl.searchParams.set("pageToken", pageToken);
       }
 
-      const listResponse = await fetch(listUrl.toString(), { cache: "no-store" });
+      const requestUrl = cacheBustedUrl(listUrl);
+      const listResponse = await fetch(requestUrl, { cache: "no-store" });
 
       if (!listResponse.ok) {
         throw new Error(
@@ -67,7 +74,7 @@ export async function listBucketObjects(): Promise<GcsObject[]> {
 
       const items = listData.items ?? [];
       console.log("[ktv420 settings] GCS list page", {
-        url: listUrl.toString(),
+        url: requestUrl,
         status: listResponse.status,
         itemCount: items.length,
         itemNames: items.map((item) => item.name),
@@ -121,7 +128,9 @@ export async function fetchObjectContents(objectPath: string): Promise<string> {
   const functionName = "fetchObjectContents";
 
   try {
-    const response = await fetch(objectUrl(objectPath, { media: true }), { cache: "no-store" });
+    const response = await fetch(cacheBustedUrl(objectUrl(objectPath, { media: true })), {
+      cache: "no-store"
+    });
 
     if (!response.ok) {
       throw new Error(
@@ -139,7 +148,9 @@ export async function fetchObjectBlob(objectPath: string): Promise<Blob> {
   const functionName = "fetchObjectBlob";
 
   try {
-    const response = await fetch(objectUrl(objectPath, { media: true }), { cache: "no-store" });
+    const response = await fetch(cacheBustedUrl(objectUrl(objectPath, { media: true })), {
+      cache: "no-store"
+    });
 
     if (!response.ok) {
       throw new Error(
@@ -157,7 +168,9 @@ export async function objectExists(objectPath: string): Promise<boolean> {
   const functionName = "objectExists";
 
   try {
-    const metadataResponse = await fetch(objectUrl(objectPath), { cache: "no-store" });
+    const metadataResponse = await fetch(cacheBustedUrl(objectUrl(objectPath)), {
+      cache: "no-store"
+    });
 
     if (metadataResponse.ok) {
       return true;
@@ -230,7 +243,7 @@ export async function deleteObjectsWithPrefix(prefix: string): Promise<number> {
         listUrl.searchParams.set("pageToken", pageToken);
       }
 
-      const listResponse = await fetch(listUrl.toString(), { cache: "no-store" });
+      const listResponse = await fetch(cacheBustedUrl(listUrl), { cache: "no-store" });
 
       if (!listResponse.ok) {
         throw new Error(
