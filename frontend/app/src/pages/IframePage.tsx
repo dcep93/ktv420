@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 
 import {
-  deleteLocalOpfsEntry,
   downloadArtifactsToOpfs,
   hasLocalOutputMetadata,
   hasRemoteOutputMetadata,
   kickProcessQueue,
-  listLocalOpfsEntries,
   readQueueHeadState,
   readRemoteOutputStatus,
   requestUnpartitionedOpfsAccess,
@@ -29,7 +27,6 @@ const CAPTURE_COMPLETE_MESSAGE = "ktv420:capture-complete";
 const ENQUEUE_TRACK_RESULT_MESSAGE = "ktv420:enqueue-track-result";
 const POLL_INTERVAL_MS = 1000;
 const PROCESS_QUEUE_WATCHDOG_MS = 30000;
-const IFRAME_DATABASE_SOURCE_NAME = "Iframe";
 const SPOTIFY_DATABASE_SOURCE_NAME = "Spotify content script";
 
 type IframeMessageType =
@@ -98,6 +95,7 @@ export default function IframePage() {
   const knownQueueIdsRef = useRef(new Set<string>());
   const tracksNeedingCaptureRef = useRef(new Set<string>());
   const pendingRemoteTrackIdsRef = useRef(new Set<string>());
+  const checkingRemoteTrackIdsRef = useRef(new Set<string>());
   const completedQueueIdsRef = useRef(new Set<string>());
   const expectedCaptureIdsRef = useRef<Set<string> | null>(null);
   const captureStartedRef = useRef(false);
@@ -105,6 +103,7 @@ export default function IframePage() {
   const remotePollRunningRef = useRef(false);
   const lastQueueRevisionRef = useRef<string | null>(null);
   const lastProcessQueueKickRef = useRef(0);
+  const lastRemoteReconcileRef = useRef(0);
   const queueFailedRef = useRef(false);
   const successAlertedRef = useRef(false);
   const deleteRefreshWaitersRef = useRef(new Map<string, () => void>());
@@ -233,47 +232,13 @@ export default function IframePage() {
     void toggleRun();
   };
 
-  const loadIframeDatabaseSource = useCallback(async () => {
-    try {
-      const entries = await listLocalOpfsEntries();
-      setDatabaseSources((sources) =>
-        upsertDatabaseSource(sources, {
-          sourceName: IFRAME_DATABASE_SOURCE_NAME,
-          entries
-        })
-      );
-    } catch (error) {
-      setDatabaseSources((sources) =>
-        upsertDatabaseSource(sources, {
-          sourceName: IFRAME_DATABASE_SOURCE_NAME,
-          entries: [],
-          error: error instanceof Error ? error.message : String(error)
-        })
-      );
-    }
-  }, []);
-
   const loadSettingsView = useCallback(async () => {
     setViewMode("settings");
     setDatabaseSources([
-      { sourceName: SPOTIFY_DATABASE_SOURCE_NAME, entries: [], loading: true },
-      { sourceName: IFRAME_DATABASE_SOURCE_NAME, entries: [], loading: true }
+      { sourceName: SPOTIFY_DATABASE_SOURCE_NAME, entries: [], loading: true }
     ]);
     postParentMessage(REQUEST_LOCAL_DATABASE_MESSAGE);
-    try {
-      await requestUnpartitionedOpfsAccess();
-      await loadIframeDatabaseSource();
-      void refreshLocalOutputMetadata(tracksRef.current ?? [], setTracks);
-    } catch (error) {
-      setDatabaseSources((sources) =>
-        upsertDatabaseSource(sources, {
-          sourceName: IFRAME_DATABASE_SOURCE_NAME,
-          entries: [],
-          error: error instanceof Error ? error.message : String(error)
-        })
-      );
-    }
-  }, [loadIframeDatabaseSource]);
+  }, []);
 
   const toggleSettingsView = useCallback(() => {
     if (viewMode === "settings") {
@@ -291,31 +256,9 @@ export default function IframePage() {
           upsertDatabaseSource(sources, { ...source, loading: true, error: undefined })
         );
         postParentMessage(DELETE_LOCAL_DATABASE_ENTRY_MESSAGE, { path: entry.path });
-        return;
-      }
-
-      if (source.sourceName !== IFRAME_DATABASE_SOURCE_NAME) {
-        return;
-      }
-
-      setDatabaseSources((sources) =>
-        upsertDatabaseSource(sources, { ...source, loading: true, error: undefined })
-      );
-
-      try {
-        await deleteLocalOpfsEntry(entry.path);
-        await loadIframeDatabaseSource();
-      } catch (error) {
-        setDatabaseSources((sources) =>
-          upsertDatabaseSource(sources, {
-            sourceName: IFRAME_DATABASE_SOURCE_NAME,
-            entries: [],
-            error: error instanceof Error ? error.message : String(error)
-          })
-        );
       }
     },
-    [loadIframeDatabaseSource]
+    []
   );
 
   useEffect(() => {
@@ -345,6 +288,7 @@ export default function IframePage() {
     knownQueueIdsRef.current.clear();
     tracksNeedingCaptureRef.current.clear();
     pendingRemoteTrackIdsRef.current.clear();
+    checkingRemoteTrackIdsRef.current.clear();
     completedQueueIdsRef.current.clear();
     expectedCaptureIdsRef.current = null;
     captureStartedRef.current = false;
@@ -352,6 +296,7 @@ export default function IframePage() {
     remotePollRunningRef.current = false;
     lastQueueRevisionRef.current = null;
     lastProcessQueueKickRef.current = 0;
+    lastRemoteReconcileRef.current = 0;
     queueFailedRef.current = false;
     successAlertedRef.current = false;
     for (const pending of pendingActionsRef.current.values()) {
@@ -477,6 +422,7 @@ export default function IframePage() {
     }
 
     pendingRemoteTrackIdsRef.current.add(trackId);
+    void checkRemoteTrackOnce(trackId).catch(handleRemotePollError);
     startRemoteOutputPoll();
   }
 
@@ -492,23 +438,28 @@ export default function IframePage() {
   async function pollRemoteOutputs() {
     try {
       while (pendingRemoteTrackIdsRef.current.size > 0 && !queueFailedRef.current) {
-        await kickProcessQueueWatchdog();
+        const watchdogKicked = await kickProcessQueueWatchdog();
         const queueState = await readQueueHeadState();
 
         if (queueState?.revision && queueState.revision !== lastQueueRevisionRef.current) {
           lastQueueRevisionRef.current = queueState.revision;
-          await checkChangedRemoteTracks([
-            ...(queueState.changed_track_ids ?? []),
-            queueState.last_changed_track_id,
-            queueState.head_track_id
-          ]);
+          if (queueState.head_state === "empty") {
+            await checkPendingRemoteTracks(true);
+          } else {
+            await checkChangedRemoteTracks([
+              ...(queueState.changed_track_ids ?? []),
+              queueState.last_changed_track_id,
+              queueState.head_track_id
+            ]);
+          }
+        } else if (watchdogKicked) {
+          await checkPendingRemoteTracks();
         }
 
         await delay(POLL_INTERVAL_MS);
       }
     } catch (error) {
-      queueFailedRef.current = true;
-      window.alert(error instanceof Error ? error.message : String(error));
+      handleRemotePollError(error);
     } finally {
       remotePollRunningRef.current = false;
       maybeAlertCaptureSuccess();
@@ -521,25 +472,54 @@ export default function IframePage() {
   async function kickProcessQueueWatchdog() {
     const now = Date.now();
     if (now - lastProcessQueueKickRef.current < PROCESS_QUEUE_WATCHDOG_MS) {
-      return;
+      return false;
     }
 
     lastProcessQueueKickRef.current = now;
     try {
       await kickProcessQueue();
+      return true;
     } catch (error) {
       console.warn("[ktv420] process_queue watchdog failed", error);
+      return true;
     }
   }
 
   async function checkChangedRemoteTracks(trackIds: Array<string | null>) {
     const uniqueTrackIds = [...new Set(trackIds.filter((trackId): trackId is string => Boolean(trackId)))];
     for (const trackId of uniqueTrackIds) {
-      if (!pendingRemoteTrackIdsRef.current.has(trackId)) {
-        continue;
-      }
-      await checkRemoteTrack(trackId);
+      await checkRemoteTrackOnce(trackId);
     }
+  }
+
+  async function checkPendingRemoteTracks(force = false) {
+    const now = Date.now();
+    if (!force && now - lastRemoteReconcileRef.current < PROCESS_QUEUE_WATCHDOG_MS) {
+      return;
+    }
+
+    lastRemoteReconcileRef.current = now;
+    for (const trackId of [...pendingRemoteTrackIdsRef.current]) {
+      await checkRemoteTrackOnce(trackId);
+    }
+  }
+
+  async function checkRemoteTrackOnce(trackId: string) {
+    if (!pendingRemoteTrackIdsRef.current.has(trackId) || checkingRemoteTrackIdsRef.current.has(trackId)) {
+      return;
+    }
+
+    checkingRemoteTrackIdsRef.current.add(trackId);
+    try {
+      await checkRemoteTrack(trackId);
+    } finally {
+      checkingRemoteTrackIdsRef.current.delete(trackId);
+    }
+  }
+
+  function handleRemotePollError(error: unknown) {
+    queueFailedRef.current = true;
+    window.alert(error instanceof Error ? error.message : String(error));
   }
 
   async function checkRemoteTrack(trackId: string) {
@@ -780,6 +760,19 @@ export default function IframePage() {
               )}
             </section>
           ))}
+          <section className="iframe-settings-source">
+            <header className="iframe-settings-source-header">
+              <h2>Iframe OPFS</h2>
+              <a
+                className="iframe-settings-link"
+                href="./settings"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Open settings
+              </a>
+            </header>
+          </section>
         </section>
       ) : tracks ? (
         <ol className="iframe-track-list" aria-label="Spotify page tracks">
@@ -1052,11 +1045,7 @@ function databaseSourceOrder(sourceName: string) {
     return 0;
   }
 
-  if (sourceName === IFRAME_DATABASE_SOURCE_NAME) {
-    return 1;
-  }
-
-  return 2;
+  return 1;
 }
 
 function isRecord(value: unknown): value is MetadataRecord {

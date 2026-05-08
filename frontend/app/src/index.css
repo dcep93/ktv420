@@ -485,6 +485,20 @@ button:disabled {
   white-space: nowrap;
 }
 
+.iframe-settings-link {
+  color: var(--ww-accent-cyan);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.iframe-settings-link:hover,
+.iframe-settings-link:focus-visible {
+  color: var(--ww-text-strong);
+  text-decoration: underline;
+}
+
 .iframe-settings-list {
   display: grid;
   gap: 4px;
