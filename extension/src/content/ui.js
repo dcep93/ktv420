@@ -113,16 +113,12 @@ export function mountButton({ isRunActive, onToggleRun }) {
     }
 
     if (message.type === REQUEST_LOCAL_DATABASE_MESSAGE) {
-      if (!isProd()) {
-        await postLocalDatabaseToIframe(iframe, iframeOrigin);
-      }
+      await postLocalDatabaseToIframe(iframe, iframeOrigin);
       return;
     }
 
     if (message.type === DELETE_LOCAL_DATABASE_ENTRY_MESSAGE && typeof message.path === "string") {
-      if (!isProd()) {
-        await deleteLocalDatabaseEntryAndRefresh(message.path, iframe, iframeOrigin);
-      }
+      await deleteLocalDatabaseEntryAndRefresh(message.path, iframe, iframeOrigin);
       return;
     }
 

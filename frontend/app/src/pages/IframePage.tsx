@@ -87,7 +87,6 @@ function postParentMessage(type: IframeMessageType, payload: MetadataRecord = {}
 
 export default function IframePage() {
   const [tracks, setTracks] = useState<IframeTrack[] | null>(null);
-  const [isDev, setIsDev] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("tracks");
   const [databaseSources, setDatabaseSources] = useState<LocalDatabaseSource[]>([]);
   const pendingActionsRef = useRef(new Map<string, PendingAction>());
@@ -130,16 +129,12 @@ export default function IframePage() {
       }
 
       if (message.type === TRACKS_MESSAGE && Array.isArray(message.tracks)) {
-        const nextIsDev = message.isDev === true;
         const nextTracks = message.tracks
           .map((track: unknown) => toIframeTrack(track))
           .filter((track: IframeTrack | null): track is IframeTrack => track !== null);
         const nextSpotifyPath = readString(message.spotifyPath);
-        setIsDev(nextIsDev);
         setViewMode("tracks");
-        if (!nextIsDev) {
-          setDatabaseSources([]);
-        }
+        setDatabaseSources([]);
         spotifyPathRef.current = nextSpotifyPath;
         tracksRef.current = nextTracks;
         setTracks(nextTracks);
@@ -259,10 +254,6 @@ export default function IframePage() {
   }, []);
 
   const loadSettingsView = useCallback(async () => {
-    if (!isDev) {
-      return;
-    }
-
     setViewMode("settings");
     setDatabaseSources([
       { sourceName: SPOTIFY_DATABASE_SOURCE_NAME, entries: [], loading: true },
@@ -282,7 +273,7 @@ export default function IframePage() {
         })
       );
     }
-  }, [isDev, loadIframeDatabaseSource]);
+  }, [loadIframeDatabaseSource]);
 
   const toggleSettingsView = useCallback(() => {
     if (viewMode === "settings") {
