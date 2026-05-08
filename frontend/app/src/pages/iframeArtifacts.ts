@@ -176,13 +176,7 @@ export async function hasLocalOutputMetadata(trackId: string) {
 
 export async function hasRemoteOutputMetadata(trackId: string) {
   const metadataPath = `stems/${trackId}/output/_metadata.json`;
-  const exists = await objectMediaExists(metadataPath);
-  console.log("[ktv420 iframe] GCS output metadata probe", {
-    trackId,
-    path: metadataPath,
-    exists
-  });
-  return exists;
+  return await objectMediaExists(metadataPath);
 }
 
 export async function hasRemoteStemArtifacts(trackId: string) {
@@ -392,14 +386,6 @@ async function listObjectsWithPrefixLimit(prefix: string, maxResults: number) {
     ? (await response.json()) as { items?: GcsObject[] }
     : null;
 
-  console.log("[ktv420 iframe] GCS prefix probe", {
-    prefix,
-    url: requestUrl,
-    status: response.status,
-    ok: response.ok,
-    matchedObjects: data?.items?.map((object) => object.name) ?? []
-  });
-
   if (!response.ok) {
     throw new Error(`Failed to check ${prefix}: ${response.status} ${response.statusText}`);
   }
@@ -422,12 +408,6 @@ async function fetchObjectBlob(objectPath: string) {
 async function objectMediaExists(objectPath: string) {
   const url = cacheBustedUrl(objectUrl(objectPath, { media: true }));
   const response = await fetch(url, { cache: "no-store" });
-  console.log("[ktv420 iframe] GCS media existence probe", {
-    path: objectPath,
-    url,
-    status: response.status,
-    ok: response.ok
-  });
 
   if (response.status === 404) {
     return false;

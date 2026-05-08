@@ -128,14 +128,6 @@ export default function IframePage() {
   const isReady = tracks !== null;
 
   useEffect(() => {
-    if (!tracks) {
-      return;
-    }
-
-    console.log("[ktv420 iframe] rendered track states", tracks.map(describeTrackState));
-  }, [tracks]);
-
-  useEffect(() => {
     const parentOrigin = getParentOrigin();
     const handleMessage = (event: MessageEvent) => {
       if (event.source !== window.parent) {
@@ -156,12 +148,6 @@ export default function IframePage() {
           .map((track: unknown) => toIframeTrack(track))
           .filter((track: IframeTrack | null): track is IframeTrack => track !== null);
         const nextSpotifyPath = readString(message.spotifyPath);
-        console.log("[ktv420 iframe] tracks message received", {
-          spotifyPath: nextSpotifyPath,
-          rawTrackCount: message.tracks.length,
-          parsedTrackCount: nextTracks.length,
-          tracks: nextTracks.map(describeTrackState)
-        });
         setViewMode("tracks");
         setDatabaseSources([]);
         spotifyPathRef.current = nextSpotifyPath;
@@ -194,11 +180,6 @@ export default function IframePage() {
       if (message.type === LOCAL_DATABASE_MESSAGE) {
         const source = toLocalDatabaseSource(message);
         if (source) {
-          console.log("[ktv420 iframe] local database message received", {
-            sourceName: source.sourceName,
-            entryCount: source.entries.length,
-            entries: source.entries
-          });
           setDatabaseSources((sources) => upsertDatabaseSource(sources, source));
           if (source.sourceName === SPOTIFY_DATABASE_SOURCE_NAME) {
             setTracks((currentTracks) => {
@@ -1080,12 +1061,6 @@ function reconcileTracksWithSpotifyOpfsEntries(
     };
   });
 
-  console.log("[ktv420 iframe] spotify opfs reconciliation applied", {
-    hydratedTrackIds: [...hydratedTrackIds],
-    before: currentTracks.map(describeTrackState),
-    after: nextTracks.map(describeTrackState)
-  });
-
   return nextTracks;
 }
 
@@ -1176,8 +1151,6 @@ async function refreshTrackProgressStates(
       }
     })
   );
-  console.log("[ktv420 iframe] storage refresh results", states);
-
   updateTracks((currentTracks) => {
     if (!currentTracks) {
       return currentTracks;
@@ -1198,11 +1171,6 @@ async function refreshTrackProgressStates(
                 : track.isRemoteProcessing
           };
     });
-    console.log("[ktv420 iframe] storage refresh applied", {
-      before: currentTracks.map(describeTrackState),
-      after: nextTracks.map(describeTrackState)
-    });
-
     return nextTracks;
   });
 }
@@ -1385,49 +1353,6 @@ function delay(ms: number) {
 
 function isOpfsState(value: unknown): value is OpfsState {
   return value === "missing" || value === "hydrated" || value === "broken";
-}
-
-function describeTrackState(track: IframeTrack) {
-  return {
-    trackId: track.trackId,
-    trackName: track.trackName,
-    displayState: stateKind(track),
-    reason: stateReason(track),
-    opfsState: track.opfsState,
-    hasLocalOutputMetadata: track.hasLocalOutputMetadata,
-    hasRemoteStemArtifacts: track.hasRemoteStemArtifacts,
-    isRemoteProcessing: track.isRemoteProcessing,
-    hasMetadata: Boolean(track.metadata),
-    error: track.error ?? null
-  };
-}
-
-function stateReason(track: IframeTrack) {
-  if (track.hasLocalOutputMetadata) {
-    return "local processed output artifacts exist in iframe OPFS";
-  }
-
-  if (track.error) {
-    return "track has an error";
-  }
-
-  if (track.opfsState === "hydrated") {
-    return "Spotify content script reports local captured PCM artifacts";
-  }
-
-  if (track.hasRemoteStemArtifacts) {
-    return "GCS has at least one stems/{trackId}/ object";
-  }
-
-  if (track.opfsState === "broken") {
-    return "Spotify content script reports broken local artifacts";
-  }
-
-  if (track.isRemoteProcessing) {
-    return "remote-processing flag is true but no storage evidence is currently rendering it in progress";
-  }
-
-  return "no local capture, no local output, no GCS stem artifacts";
 }
 
 function stateKind(track: IframeTrack): TrackDisplayState {
