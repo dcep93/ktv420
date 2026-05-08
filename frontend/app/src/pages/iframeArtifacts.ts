@@ -162,7 +162,13 @@ export async function hasLocalOutputMetadata(trackId: string) {
 
 export async function hasRemoteOutputMetadata(trackId: string) {
   const metadataPath = `stems/${trackId}/output/_metadata.json`;
-  return await objectMediaExists(metadataPath);
+  const exists = await objectMediaExists(metadataPath);
+  console.log("[ktv420 iframe] GCS output metadata probe", {
+    trackId,
+    path: metadataPath,
+    exists
+  });
+  return exists;
 }
 
 export async function hasRemoteStemArtifacts(trackId: string) {
@@ -348,16 +354,23 @@ async function hasObjectsWithPrefix(prefix: string) {
   listUrl.searchParams.set("maxResults", "1");
 
   const response = await fetch(listUrl.toString(), { cache: "no-store" });
+  const data = response.ok
+    ? (await response.json()) as { items?: GcsObject[] }
+    : null;
+
+  console.log("[ktv420 iframe] GCS prefix probe", {
+    prefix,
+    url: listUrl.toString(),
+    status: response.status,
+    ok: response.ok,
+    matchedObjects: data?.items?.map((object) => object.name) ?? []
+  });
 
   if (!response.ok) {
     throw new Error(`Failed to check ${prefix}: ${response.status} ${response.statusText}`);
   }
 
-  const data = (await response.json()) as {
-    items?: GcsObject[];
-  };
-
-  return (data.items ?? []).length > 0;
+  return (data?.items ?? []).length > 0;
 }
 
 async function fetchObjectBlob(objectPath: string) {
@@ -371,7 +384,14 @@ async function fetchObjectBlob(objectPath: string) {
 }
 
 async function objectMediaExists(objectPath: string) {
-  const response = await fetch(objectUrl(objectPath, { media: true }), { cache: "no-store" });
+  const url = objectUrl(objectPath, { media: true });
+  const response = await fetch(url, { cache: "no-store" });
+  console.log("[ktv420 iframe] GCS media existence probe", {
+    path: objectPath,
+    url,
+    status: response.status,
+    ok: response.ok
+  });
 
   if (response.status === 404) {
     return false;

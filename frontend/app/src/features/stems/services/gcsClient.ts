@@ -66,6 +66,13 @@ export async function listBucketObjects(): Promise<GcsObject[]> {
       };
 
       const items = listData.items ?? [];
+      console.log("[ktv420 settings] GCS list page", {
+        url: listUrl.toString(),
+        status: listResponse.status,
+        itemCount: items.length,
+        itemNames: items.map((item) => item.name),
+        nextPageToken: listData.nextPageToken ?? null
+      });
       const parsedObjects = items.map((item) => ({
         name: item.name,
         size: Number(item.size ?? 0),
@@ -97,7 +104,14 @@ export async function listBucketObjects(): Promise<GcsObject[]> {
       type: "folder" as const,
     }));
 
-    return [...objects, ...parsedFolders];
+    const result = [...objects, ...parsedFolders];
+    console.log("[ktv420 settings] GCS list complete", {
+      objectCount: objects.length,
+      folderCount: parsedFolders.length,
+      resultCount: result.length,
+      names: result.map((object) => object.name)
+    });
+    return result;
   } catch (error) {
     throw new Error(formatErrorMessage(functionName, error));
   }
