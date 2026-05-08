@@ -35,10 +35,10 @@ async function getOrchestrator() {
 
 const ui = mountButton({
   isRunActive: () => Boolean(orchestrator?.isActive()),
-  onToggleRun: async () => {
+  onToggleRun: async (options = {}) => {
     try {
       const runner = await getOrchestrator();
-      await runner.toggleRun();
+      await runner.toggleRun(options);
       ui.refresh();
     } catch (error) {
       console.log("[ktv420] Failed to run capture", error);

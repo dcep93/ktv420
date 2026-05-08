@@ -102,7 +102,11 @@ export function mountButton({ isRunActive, onToggleRun }) {
     }
 
     if (message.type === TOGGLE_RUN_MESSAGE) {
-      await onToggleRun();
+      await onToggleRun({
+        trackIds: Array.isArray(message.trackIds)
+          ? message.trackIds.filter((trackId) => typeof trackId === "string" && trackId)
+          : null
+      });
       schedulePlace();
       return;
     }

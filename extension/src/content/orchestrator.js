@@ -29,13 +29,13 @@ export class CaptureOrchestrator extends EventTarget {
     return this.active;
   }
 
-  async toggleRun() {
+  async toggleRun(options = {}) {
     if (this.active) {
       await this.requestStop();
       return;
     }
 
-    await this.run();
+    await this.run(options);
   }
 
   async requestStop() {
@@ -43,7 +43,7 @@ export class CaptureOrchestrator extends EventTarget {
     pausePlaybackCleanly();
   }
 
-  async run() {
+  async run({ trackIds = null } = {}) {
     if (this.active) {
       return;
     }
@@ -68,9 +68,11 @@ export class CaptureOrchestrator extends EventTarget {
         throw new Error("ktv420 runs only on Spotify album and playlist routes.");
       }
 
-      const queue = await this.preflightQueue(debug);
+      const queue = await this.preflightQueue(debug, trackIds);
       if (queue.length === 0) {
-        throw new Error("No Spotify track rows were found on this page.");
+        throw new Error(trackIds
+          ? "No requested Spotify track rows need PCM capture on this page."
+          : "No Spotify track rows were found on this page.");
       }
 
       if (queue.every((item) => item.cached)) {
@@ -180,11 +182,17 @@ export class CaptureOrchestrator extends EventTarget {
     }
   }
 
-  async preflightQueue(debug) {
+  async preflightQueue(debug, trackIds = null) {
     const rows = collectTrackRows();
     const queue = [];
+    const requestedTrackIds = new Set(Array.isArray(trackIds) ? trackIds : []);
+    const shouldFilterTracks = requestedTrackIds.size > 0;
 
     for (const row of rows) {
+      if (shouldFilterTracks && !requestedTrackIds.has(row.trackId)) {
+        continue;
+      }
+
       const cachedMetadata = await readCachedTrack(row.trackId);
       queue.push({
         ...row,
@@ -196,6 +204,8 @@ export class CaptureOrchestrator extends EventTarget {
     debug.events.push({
       type: "preflight",
       trackCount: queue.length,
+      pageTrackCount: rows.length,
+      requestedTrackCount: shouldFilterTracks ? requestedTrackIds.size : null,
       cachedCount: queue.filter((item) => item.cached).length,
       at: Date.now()
     });

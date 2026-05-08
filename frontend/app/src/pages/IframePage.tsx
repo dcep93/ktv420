@@ -595,8 +595,9 @@ export default function IframePage() {
       return;
     }
 
+    const trackIds = Array.from(tracksNeedingCaptureRef.current);
     captureStartedRef.current = true;
-    postParentMessage(TOGGLE_RUN_MESSAGE);
+    postParentMessage(TOGGLE_RUN_MESSAGE, { trackIds });
   }
 
   function markTrackComplete(trackId: string) {
