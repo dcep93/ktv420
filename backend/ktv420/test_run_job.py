@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import sys
 import types
 import unittest
@@ -106,11 +107,11 @@ class FakeBlob:
     def upload_from_string(self, value: str, **kwargs: object) -> None:
         self.bucket.objects[self.name] = value
 
-    def upload_from_filename(self, file_path: object) -> None:
+    def upload_from_filename(self, file_path: str | os.PathLike[str]) -> None:
         with open(file_path, "rb") as fh:
             self.bucket.objects[self.name] = fh.read().decode("utf-8", errors="replace")
 
-    def download_to_filename(self, file_path: object) -> None:
+    def download_to_filename(self, file_path: str | os.PathLike[str]) -> None:
         with open(file_path, "w") as fh:
             fh.write(self.bucket.objects[self.name])
 
