@@ -172,6 +172,13 @@ export default function IframePage() {
         const source = toLocalDatabaseSource(message);
         if (source) {
           setDatabaseSources((sources) => upsertDatabaseSource(sources, source));
+          if (source.sourceName === SPOTIFY_DATABASE_SOURCE_NAME) {
+            setTracks((currentTracks) => {
+              const reconciledTracks = reconcileTracksWithSpotifyOpfsEntries(currentTracks, source.entries);
+              tracksRef.current = reconciledTracks;
+              return reconciledTracks;
+            });
+          }
         }
         return;
       }
@@ -997,6 +1004,55 @@ function toLocalDatabaseEntry(value: unknown): LocalDatabaseEntry | null {
   };
 }
 
+function trackIdsWithLocalCaptureArtifacts(entries: LocalDatabaseEntry[]) {
+  const trackArtifacts = new Map<string, Set<string>>();
+
+  for (const entry of entries) {
+    if (entry.kind !== "file") {
+      continue;
+    }
+
+    const [trackId, artifactName] = entry.path.split("/");
+    if (!trackId || !artifactName) {
+      continue;
+    }
+
+    const artifacts = trackArtifacts.get(trackId) ?? new Set<string>();
+    artifacts.add(artifactName);
+    trackArtifacts.set(trackId, artifacts);
+  }
+
+  return new Set(
+    [...trackArtifacts.entries()]
+      .filter(([, artifacts]) => artifacts.has("metadata.json") && artifacts.has("pcm_s16le.b64"))
+      .map(([trackId]) => trackId)
+  );
+}
+
+function reconcileTracksWithSpotifyOpfsEntries(
+  currentTracks: IframeTrack[] | null,
+  entries: LocalDatabaseEntry[]
+) {
+  if (!currentTracks) {
+    return currentTracks;
+  }
+
+  const hydratedTrackIds = trackIdsWithLocalCaptureArtifacts(entries);
+  return currentTracks.map((track) => {
+    const hasLocalCapture = hydratedTrackIds.has(track.trackId);
+    const opfsState: OpfsState = hasLocalCapture
+      ? "hydrated"
+      : track.opfsState === "hydrated"
+        ? "missing"
+        : track.opfsState;
+
+    return {
+      ...track,
+      opfsState
+    };
+  });
+}
+
 function upsertDatabaseSource(sources: LocalDatabaseSource[], nextSource: LocalDatabaseSource) {
   const nextSources = sources.filter((source) => source.sourceName !== nextSource.sourceName);
   nextSources.push(nextSource);
@@ -1096,7 +1152,10 @@ async function refreshTrackProgressStates(
             ...track,
             hasLocalOutputMetadata: state.hasLocalOutputMetadata,
             hasRemoteStemArtifacts: state.hasRemoteStemArtifacts,
-            isRemoteProcessing: state.hasLocalOutputMetadata ? false : track.isRemoteProcessing
+            isRemoteProcessing:
+              state.hasLocalOutputMetadata || !state.hasRemoteStemArtifacts
+                ? false
+                : track.isRemoteProcessing
           };
     });
   });
