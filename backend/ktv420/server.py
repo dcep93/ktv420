@@ -12,13 +12,10 @@ from fastapi.responses import JSONResponse  # type: ignore
 from . import logger
 from . import run_job
 
-NUM_WORKERS = 1
-
 
 @dataclass
 class ServerState:
     start_time: float = field(default_factory=time.time)
-    manager: run_job.Manager | None = None
     health: int = 0
     sha: Any | None = None
 
@@ -36,13 +33,8 @@ def _load_sha_metadata() -> Any:
         return json.load(fh)
 
 
-def _build_manager() -> run_job.Manager:
-    return run_job.Manager(lambda: run_job.run_job, NUM_WORKERS)
-
-
 def init() -> None:
     state.sha = _load_sha_metadata()
-    state.manager = _build_manager()
 
 
 web_app = FastAPI()
@@ -57,8 +49,7 @@ web_app.add_middleware(
 
 @web_app.on_event("shutdown")
 def shutdown() -> None:
-    if state.manager:
-        state.manager.close()
+    return None
 
 
 @web_app.get("/")
@@ -89,28 +80,12 @@ def get_start_time() -> Response:
     return Response(str(state.start_time))
 
 
-@web_app.post("/run_job")
-def post_run_job(payload: run_job.Request) -> JSONResponse:
-    logger.log("server.receive")
+@web_app.post("/process_queue")
+def post_process_queue() -> JSONResponse:
+    logger.log("server.process_queue.receive")
     try:
-        if not state.manager:
-            raise RuntimeError("server not initialized")
-
-        screenshot_response = state.manager.run(payload)
-        resp = screenshot_response.model_dump()
-        logger.log("server.respond")
-        return JSONResponse(resp)
-    except Exception:
-        err = traceback.format_exc()
-        return JSONResponse({"err": err}, 500)
-
-
-@web_app.post("/prepare_job")
-def post_prepare_job(payload: run_job.PrepareJobRequest) -> JSONResponse:
-    logger.log("server.prepare_job.receive")
-    try:
-        response = run_job.prepare_job(payload)
-        logger.log("server.prepare_job.respond")
+        response = run_job.process_queue()
+        logger.log("server.process_queue.respond")
         return JSONResponse(response.model_dump())
     except Exception:
         err = traceback.format_exc()

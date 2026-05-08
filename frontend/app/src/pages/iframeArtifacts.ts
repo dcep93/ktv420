@@ -1,14 +1,25 @@
 const BUCKET_NAME = "stem420-bucket";
 const STORAGE_API_BASE_URL = "https://storage.googleapis.com/storage/v1";
+const STEM_API_BASE_URL = "https://stem420-854199998954.us-east1.run.app";
+const QUEUE_HEAD_STATE_PATH = "queue/state/head.json";
 
-export type GcsObject = {
+type GcsObject = {
   name: string;
 };
 
-export type StemRunRequest = {
-  mp3_path: string;
-  output_path: string;
+export type QueueHeadState = {
+  revision: string;
+  head_object: string | null;
+  head_track_id: string | null;
+  head_state: "pending" | "running" | "empty";
+  last_changed_track_id: string | null;
+  last_changed_status: "completed" | "failed" | null;
+  changed_track_ids?: string[];
 };
+
+export type RemoteOutputStatus =
+  | { status: "completed" }
+  | { status: "failed"; error: string };
 
 type StorageAccessDocument = Document & {
   hasStorageAccess?: () => Promise<boolean>;
@@ -132,22 +143,46 @@ export async function hasLocalOutputMetadata(trackId: string) {
   }
 }
 
-export async function findPreparedInputMp3(trackId: string) {
-  const inputObjects = await listObjectsWithPrefix(`stems/${trackId}/input/`);
-  return inputObjects.find((object) => object.name.toLowerCase().endsWith(".mp3")) ?? null;
-}
-
 export async function hasRemoteOutputMetadata(trackId: string) {
   const metadataPath = `stems/${trackId}/output/_metadata.json`;
-  const outputObjects = await listObjectsWithPrefix(metadataPath);
-  return outputObjects.some((object) => object.name === metadataPath);
+  return await objectExists(metadataPath);
 }
 
-export function buildStemRunRequest(trackId: string, inputMp3: GcsObject): StemRunRequest {
-  return {
-    mp3_path: `gs://${BUCKET_NAME}/${inputMp3.name}`,
-    output_path: `gs://${BUCKET_NAME}/stems/${trackId}/output/`
-  };
+export async function readRemoteOutputStatus(trackId: string): Promise<RemoteOutputStatus | null> {
+  const metadataPath = `stems/${trackId}/output/_metadata.json`;
+  if (await objectExists(metadataPath)) {
+    return { status: "completed" };
+  }
+
+  const errorPath = `stems/${trackId}/output/_error.json`;
+  const errorPayload = await fetchObjectJsonOrNull(errorPath);
+  if (errorPayload !== null) {
+    return {
+      status: "failed",
+      error: readString((errorPayload as Record<string, unknown>).error) || "Remote processing failed."
+    };
+  }
+
+  return null;
+}
+
+export async function readQueueHeadState() {
+  const value = await fetchObjectJsonOrNull(QUEUE_HEAD_STATE_PATH);
+  if (!isQueueHeadState(value)) {
+    return null;
+  }
+
+  return value;
+}
+
+export async function kickProcessQueue() {
+  const response = await fetch(`${STEM_API_BASE_URL}/process_queue`, { method: "POST" });
+  const responseText = await response.text();
+  if (!response.ok) {
+    throw new Error(`process_queue failed with ${response.status} ${response.statusText}: ${responseText}`);
+  }
+
+  return responseText ? JSON.parse(responseText) as unknown : null;
 }
 
 export async function listLocalOpfsEntries() {
@@ -252,6 +287,34 @@ async function fetchObjectBlob(objectPath: string) {
   }
 
   return await response.blob();
+}
+
+async function fetchObjectJsonOrNull(objectPath: string) {
+  const response = await fetch(objectUrl(objectPath, { media: true }));
+
+  if (response.status === 404) {
+    return null;
+  }
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch ${objectPath}: ${response.status} ${response.statusText}`);
+  }
+
+  return await response.json() as unknown;
+}
+
+async function objectExists(objectPath: string) {
+  const response = await fetch(objectUrl(objectPath));
+
+  if (response.status === 404) {
+    return false;
+  }
+
+  if (!response.ok) {
+    throw new Error(`Failed to check ${objectPath}: ${response.status} ${response.statusText}`);
+  }
+
+  return true;
 }
 
 async function deleteObjectsWithPrefix(prefix: string) {
@@ -571,6 +634,35 @@ function isSavedSpotifyContext(value: unknown, spotifyPath: string): value is Sa
       Array.isArray((value as SavedSpotifyContext).tracks) &&
       (value as SavedSpotifyContext).tracks.every((trackId) => typeof trackId === "string")
   );
+}
+
+function isQueueHeadState(value: unknown): value is QueueHeadState {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  const headState = record.head_state;
+  const lastStatus = record.last_changed_status;
+  return Boolean(
+    typeof record.revision === "string" &&
+      (record.head_object === null || typeof record.head_object === "string") &&
+      (record.head_track_id === null || typeof record.head_track_id === "string") &&
+      (headState === "pending" || headState === "running" || headState === "empty") &&
+      (record.last_changed_track_id === null || typeof record.last_changed_track_id === "string") &&
+      (lastStatus === null || lastStatus === "completed" || lastStatus === "failed") &&
+      (
+        record.changed_track_ids === undefined ||
+        (
+          Array.isArray(record.changed_track_ids) &&
+          record.changed_track_ids.every((trackId) => typeof trackId === "string")
+        )
+      )
+  );
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" ? value : "";
 }
 
 function bucketObjectsUrl() {

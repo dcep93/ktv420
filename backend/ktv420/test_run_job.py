@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import sys
 import types
 import unittest
@@ -46,7 +47,96 @@ def _install_google_stubs_if_needed() -> None:
 
 _install_google_stubs_if_needed()
 
+
+def _install_pydantic_stubs_if_needed() -> None:
+    try:
+        has_pydantic = importlib.util.find_spec("pydantic") is not None
+    except ModuleNotFoundError:
+        has_pydantic = False
+
+    if has_pydantic:
+        return
+
+    class _BaseModel:
+        def __init__(self, **kwargs: object) -> None:
+            annotations = getattr(self, "__annotations__", {})
+            for key in annotations:
+                if key in kwargs:
+                    setattr(self, key, kwargs[key])
+                elif hasattr(type(self), key):
+                    setattr(self, key, getattr(type(self), key))
+            for key, value in kwargs.items():
+                if key not in annotations:
+                    setattr(self, key, value)
+
+        def model_dump(self) -> dict[str, object]:
+            annotations = getattr(self, "__annotations__", {})
+            return {key: _dump_value(getattr(self, key)) for key in annotations if hasattr(self, key)}
+
+    def _dump_value(value: object) -> object:
+        if hasattr(value, "model_dump"):
+            return value.model_dump()  # type: ignore[no-any-return, no-untyped-call]
+        if isinstance(value, dict):
+            return {key: _dump_value(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [_dump_value(item) for item in value]
+        return value
+
+    pydantic_module = types.ModuleType("pydantic")
+    setattr(pydantic_module, "BaseModel", _BaseModel)
+    sys.modules.setdefault("pydantic", pydantic_module)
+
+
+_install_pydantic_stubs_if_needed()
+
 from . import run_job
+
+
+class FakeBlob:
+    def __init__(self, bucket: "FakeBucket", name: str) -> None:
+        self.bucket = bucket
+        self.name = name
+
+    def exists(self) -> bool:
+        return self.name in self.bucket.objects
+
+    def download_as_text(self) -> str:
+        return self.bucket.objects[self.name]
+
+    def upload_from_string(self, value: str, **kwargs: object) -> None:
+        self.bucket.objects[self.name] = value
+
+    def upload_from_filename(self, file_path: object) -> None:
+        with open(file_path, "rb") as fh:
+            self.bucket.objects[self.name] = fh.read().decode("utf-8", errors="replace")
+
+    def download_to_filename(self, file_path: object) -> None:
+        with open(file_path, "w") as fh:
+            fh.write(self.bucket.objects[self.name])
+
+    def delete(self) -> None:
+        self.bucket.objects.pop(self.name, None)
+
+
+class FakeBucket:
+    def __init__(self) -> None:
+        self.objects: dict[str, str] = {}
+
+    def blob(self, name: str) -> FakeBlob:
+        return FakeBlob(self, name)
+
+
+class FakeStorageClient:
+    def __init__(self) -> None:
+        self.buckets: dict[str, FakeBucket] = {}
+
+    def bucket(self, name: str) -> FakeBucket:
+        self.buckets.setdefault(name, FakeBucket())
+        return self.buckets[name]
+
+    def list_blobs(self, bucket_name: str, prefix: str) -> list[FakeBlob]:
+        bucket = self.bucket(bucket_name)
+        return [FakeBlob(bucket, name) for name in bucket.objects if name.startswith(prefix)]
 
 
 class RunJobStatusTests(unittest.TestCase):
@@ -208,6 +298,105 @@ class RunJobStatusTests(unittest.TestCase):
         self.assertEqual(upload_file.call_args.args[2], request.mp3_path)
         delete_gcs_object.assert_called_once_with(client, payload.pcm_path)
         self.assertEqual(run_job._STATE.state()["preparing_mp3_paths"], [])
+
+    def test_list_pending_queue_blobs_sorts_unix_timestamp_filenames(self) -> None:
+        client = FakeStorageClient()
+        bucket = client.bucket("stem420-bucket")
+        bucket.objects["queue/pending/2000.json"] = "{}"
+        bucket.objects["queue/pending/1000.json"] = "{}"
+        bucket.objects["queue/pending/not-a-job.txt"] = "{}"
+
+        pending = run_job._list_pending_queue_blobs(client)  # type: ignore[arg-type]
+
+        self.assertEqual(
+            [blob.name for blob in pending],
+            ["queue/pending/1000.json", "queue/pending/2000.json"],
+        )
+
+    def test_process_queue_empty_writes_empty_head_state(self) -> None:
+        client = FakeStorageClient()
+
+        with patch.object(run_job, "_make_storage_client", return_value=client):
+            response = run_job.process_queue()
+
+        self.assertEqual(response.status, "empty")
+        state = json.loads(client.bucket("stem420-bucket").objects["queue/state/head.json"])
+        self.assertEqual(state["head_state"], "empty")
+        self.assertIsNone(state["head_track_id"])
+
+    def test_process_queue_starts_worker_once(self) -> None:
+        client = FakeStorageClient()
+        bucket = client.bucket("stem420-bucket")
+        bucket.objects["queue/pending/1000.json"] = json.dumps(self._queue_item())
+        thread = MagicMock()
+
+        with (
+            patch.object(run_job, "_make_storage_client", return_value=client),
+            patch.object(run_job.threading, "Thread", return_value=thread),
+        ):
+            response = run_job.process_queue()
+            second_response = run_job.process_queue()
+
+        self.assertEqual(response.status, "started")
+        self.assertEqual(second_response.status, "already_running")
+        thread.start.assert_called_once_with()
+
+    def test_queue_worker_processes_item_and_updates_head_state(self) -> None:
+        client = FakeStorageClient()
+        bucket = client.bucket("stem420-bucket")
+        bucket.objects["queue/pending/1000.json"] = json.dumps(self._queue_item())
+
+        with (
+            patch.object(run_job, "_make_storage_client", return_value=client),
+            patch.object(run_job, "_gcs_object_exists", side_effect=[False, False]),
+            patch.object(run_job, "_prepare_mp3_from_pcm") as prepare_mp3,
+            patch.object(run_job, "_run_request_sync") as run_request,
+            patch.object(run_job, "_delete_gcs_object_if_exists") as delete_if_exists,
+        ):
+            run_job._process_queue_worker("worker-1")
+
+        prepare_mp3.assert_called_once()
+        run_request.assert_called_once()
+        delete_if_exists.assert_called_once()
+        self.assertNotIn("queue/pending/1000.json", bucket.objects)
+        state = json.loads(bucket.objects["queue/state/head.json"])
+        self.assertEqual(state["head_state"], "empty")
+        self.assertEqual(state["last_changed_track_id"], "track-1")
+        self.assertEqual(state["last_changed_status"], "completed")
+        self.assertIn("track-1", state["changed_track_ids"])
+
+    def test_queue_worker_writes_error_and_moves_failed_item(self) -> None:
+        client = FakeStorageClient()
+        bucket = client.bucket("stem420-bucket")
+        bucket.objects["queue/pending/1000.json"] = json.dumps(self._queue_item())
+
+        with (
+            patch.object(run_job, "_make_storage_client", return_value=client),
+            patch.object(run_job, "_gcs_object_exists", side_effect=[False, True]),
+            patch.object(run_job, "_run_request_sync", side_effect=RuntimeError("boom")),
+        ):
+            run_job._process_queue_worker("worker-1")
+
+        self.assertNotIn("queue/pending/1000.json", bucket.objects)
+        self.assertIn("queue/failed/1000.json", bucket.objects)
+        self.assertIn("stems/track-1/output/_error.json", bucket.objects)
+        state = json.loads(bucket.objects["queue/state/head.json"])
+        self.assertEqual(state["last_changed_track_id"], "track-1")
+        self.assertEqual(state["last_changed_status"], "failed")
+
+    def _queue_item(self) -> dict[str, object]:
+        return {
+            "version": 1,
+            "created_at_ms": 1000,
+            "track_id": "track-1",
+            "pcm_path": "gs://stem420-bucket/pcm/track-1/abc123.pcm",
+            "metadata": {
+                "trackId": "track-1",
+                "trackName": "Song One",
+                "audioSampleRate": 44100,
+                "audioChannelCount": 2,
+            },
+        }
 
 
 if __name__ == "__main__":

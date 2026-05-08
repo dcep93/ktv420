@@ -15,16 +15,16 @@ const PARENT_MESSAGE_SOURCE = "ktv420-parent";
 const CLOSE_OVERLAY_MESSAGE = "ktv420:close-overlay";
 const TRACKS_MESSAGE = "ktv420:tracks";
 const TOGGLE_RUN_MESSAGE = "ktv420:toggle-run";
-const PREPARE_JOB_MESSAGE = "ktv420:prepare-job";
-const RUN_JOB_MESSAGE = "ktv420:run-job";
+const ENQUEUE_TRACK_MESSAGE = "ktv420:enqueue-track";
 const REQUEST_LOCAL_DATABASE_MESSAGE = "ktv420:request-local-database";
 const DELETE_LOCAL_DATABASE_ENTRY_MESSAGE = "ktv420:delete-local-database-entry";
 const DELETE_TRACK_ARTIFACT_MESSAGE = "ktv420:delete-track-artifact";
 const LOCAL_DATABASE_MESSAGE = "ktv420:local-database";
 const TRACK_CAPTURED_MESSAGE = "ktv420:track-captured";
 const CAPTURE_COMPLETE_MESSAGE = "ktv420:capture-complete";
-const PREPARE_JOB_RESULT_MESSAGE = "ktv420:prepare-job-result";
-const RUN_JOB_RESULT_MESSAGE = "ktv420:run-job-result";
+const ENQUEUE_TRACK_RESULT_MESSAGE = "ktv420:enqueue-track-result";
+
+const queuedTrackPromises = new Map();
 
 export function mountButton({ isRunActive, onToggleRun }) {
   injectStyle();
@@ -107,18 +107,8 @@ export function mountButton({ isRunActive, onToggleRun }) {
       return;
     }
 
-    if (message.type === PREPARE_JOB_MESSAGE && typeof message.trackId === "string") {
-      await prepareTrackJob(message.trackId, iframe, iframeOrigin);
-      return;
-    }
-
-    if (message.type === RUN_JOB_MESSAGE && typeof message.trackId === "string") {
-      await runTrackJob(
-        message.trackId,
-        iframe,
-        iframeOrigin,
-        isRunRequest(message.request) ? message.request : null
-      );
+    if (message.type === ENQUEUE_TRACK_MESSAGE && typeof message.trackId === "string") {
+      await enqueueTrackJob(message.trackId, iframe, iframeOrigin);
       return;
     }
 
@@ -151,7 +141,14 @@ export function mountButton({ isRunActive, onToggleRun }) {
         return;
       }
 
-      await postTrackCapturedToIframe(iframe, iframeOrigin, trackId, metadata);
+      let queueError = "";
+      try {
+        await enqueueTrackForProcessing(trackId);
+      } catch (error) {
+        queueError = error?.message || String(error);
+        console.warn(`[ktv420] Failed to enqueue captured track ${trackId}`, error);
+      }
+      await postTrackCapturedToIframe(iframe, iframeOrigin, trackId, metadata, queueError);
     },
     notifyCaptureComplete: async (trackIds) => {
       const iframe = document.getElementById(IFRAME_ID);
@@ -355,7 +352,7 @@ async function deleteTrackArtifactAndNotify(trackId, iframe, origin) {
   await postTrackCapturedToIframe(iframe, origin, trackId, null);
 }
 
-async function postTrackCapturedToIframe(iframe, origin, trackId, metadata) {
+async function postTrackCapturedToIframe(iframe, origin, trackId, metadata, queueError = "") {
   if (typeof trackId !== "string" || !trackId) {
     return;
   }
@@ -383,7 +380,7 @@ async function postTrackCapturedToIframe(iframe, origin, trackId, metadata) {
         rowIndex: row?.rowIndex ?? -1,
         opfsState: artifact.opfsState,
         metadata: artifactMetadata,
-        ...(artifact.error ? { error: artifact.error } : {})
+        ...(artifact.error || queueError ? { error: artifact.error || queueError } : {})
       }
     },
     origin
@@ -404,59 +401,41 @@ async function postCaptureCompleteToIframe(iframe, origin, trackIds) {
   );
 }
 
-async function prepareTrackJob(trackId, iframe, origin) {
+async function enqueueTrackJob(trackId, iframe, origin) {
   try {
-    await prepareTrackRequest(trackId);
-    postActionResult(iframe, origin, PREPARE_JOB_RESULT_MESSAGE, trackId, { ok: true });
+    const result = await enqueueTrackForProcessing(trackId);
+    postActionResult(iframe, origin, ENQUEUE_TRACK_RESULT_MESSAGE, trackId, { ok: true, result });
   } catch (error) {
-    postActionResult(iframe, origin, PREPARE_JOB_RESULT_MESSAGE, trackId, {
+    postActionResult(iframe, origin, ENQUEUE_TRACK_RESULT_MESSAGE, trackId, {
       ok: false,
       error: error?.message || String(error)
     });
   }
 }
 
-async function runTrackJob(trackId, iframe, origin, request = null) {
-  try {
-    if (!request) {
-      postActionResult(iframe, origin, RUN_JOB_RESULT_MESSAGE, trackId, {
-        ok: false,
-        error: "MP3 is still preparing. Try again after prepare finishes."
-      });
-      return;
-    }
-
-    const result = await postJson(`${STEM_API_BASE_URL}/run_job`, request, "run_job");
-    postActionResult(iframe, origin, RUN_JOB_RESULT_MESSAGE, trackId, { ok: true, result });
-  } catch (error) {
-    postActionResult(iframe, origin, RUN_JOB_RESULT_MESSAGE, trackId, {
-      ok: false,
-      error: error?.message || String(error)
-    });
+async function enqueueTrackForProcessing(trackId) {
+  if (queuedTrackPromises.has(trackId)) {
+    return await queuedTrackPromises.get(trackId);
   }
+
+  const promise = enqueueTrackForProcessingOnce(trackId).catch((error) => {
+    queuedTrackPromises.delete(trackId);
+    throw error;
+  });
+  queuedTrackPromises.set(trackId, promise);
+  return await promise;
 }
 
-function isRunRequest(value) {
-  return Boolean(
-    value &&
-    typeof value === "object" &&
-    typeof value.mp3_path === "string" &&
-    typeof value.output_path === "string"
-  );
-}
-
-async function prepareTrackRequest(trackId) {
+async function enqueueTrackForProcessingOnce(trackId) {
   const artifact = await readTrackArtifact(trackId);
   const pcmPath = await uploadPreparedPcm(trackId, artifact);
+  const queuePath = await uploadQueueItem(trackId, artifact, pcmPath);
+  const processQueueResult = await postJson(`${STEM_API_BASE_URL}/process_queue`, undefined, "process_queue");
 
-  await postJson(
-    `${STEM_API_BASE_URL}/prepare_job`,
-    {
-      pcm_path: `gs://${GCS_BUCKET_NAME}/${pcmPath}`,
-      metadata: artifact.metadata
-    },
-    "prepare_job"
-  );
+  return {
+    queuePath,
+    processQueueResult
+  };
 }
 
 async function uploadPreparedPcm(trackId, artifact) {
@@ -482,6 +461,33 @@ async function uploadPreparedPcm(trackId, artifact) {
   }
 
   return pcmPath;
+}
+
+async function uploadQueueItem(trackId, artifact, pcmPath) {
+  const createdAtMs = Date.now();
+  const queuePath = `queue/pending/${createdAtMs}.json`;
+  const queueItem = {
+    version: 1,
+    created_at_ms: createdAtMs,
+    track_id: trackId,
+    pcm_path: `gs://${GCS_BUCKET_NAME}/${pcmPath}`,
+    metadata: artifact.metadata
+  };
+  const uploadUrl = `${GCS_UPLOAD_BASE_URL}/b/${GCS_BUCKET_NAME}/o?uploadType=media&name=${encodeURIComponent(queuePath)}`;
+  const response = await fetch(uploadUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(queueItem)
+  });
+  const responseText = await response.text();
+
+  if (!response.ok) {
+    throw new Error(`queue upload failed with ${response.status} ${response.statusText}: ${responseText}`);
+  }
+
+  return queuePath;
 }
 
 function base64ToBytes(value) {
@@ -513,13 +519,15 @@ function base64ToBytes(value) {
 }
 
 async function postJson(url, payload, label) {
-  const response = await fetch(url, {
+  const request = {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(payload)
-  });
+    headers: {}
+  };
+  if (payload !== undefined) {
+    request.headers["Content-Type"] = "application/json";
+    request.body = JSON.stringify(payload);
+  }
+  const response = await fetch(url, request);
   const responseText = await response.text();
   const result = parseJsonSafely(responseText);
 

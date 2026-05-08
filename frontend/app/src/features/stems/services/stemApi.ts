@@ -1,4 +1,3 @@
-import { BUCKET_NAME } from "./gcsClient";
 import { parseJsonSafely } from "../lib/utils";
 
 const STEM_API_BASE_URL = "https://stem420-854199998954.us-east1.run.app";
@@ -22,14 +21,9 @@ export const fetchRootResponse = async () => {
   return readJsonResponse(response);
 };
 
-export const runStemJob = async (objectPath: string, outputPath: string) => {
-  const mp3Path = `gs://${BUCKET_NAME}/${objectPath}`;
-  const response = await fetch(`${STEM_API_BASE_URL}/run_job`, {
+export const processQueue = async () => {
+  const response = await fetch(`${STEM_API_BASE_URL}/process_queue`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ mp3_path: mp3Path, output_path: outputPath }),
   });
 
   return readJsonResponse(response);

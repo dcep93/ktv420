@@ -5,6 +5,7 @@ import shutil
 import threading
 import time
 import traceback
+import uuid
 import wave
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -29,6 +30,14 @@ class PrepareJobRequest(BaseModel):
     metadata: Dict[str, Any]
 
 
+class QueueItem(BaseModel):
+    version: int
+    created_at_ms: int
+    track_id: str
+    pcm_path: str
+    metadata: Dict[str, Any]
+
+
 class PrepareJobResponse(BaseModel):
     status: Literal["started", "already_running", "already_exists"]
     request: Optional[Request] = None
@@ -38,7 +47,18 @@ class RunJobResponse(BaseModel):
     status: Literal["started", "already_running", "already_exists"]
 
 
+class ProcessQueueResponse(BaseModel):
+    status: Literal["started", "already_running", "empty"]
+
+
 Manager = manager.Manager[Request, RunJobResponse]
+
+_QUEUE_STATE_EMPTY = "empty"
+_QUEUE_STATE_PENDING = "pending"
+_QUEUE_STATE_RUNNING = "running"
+_QUEUE_ITEM_VERSION = 1
+_QUEUE_LOCK_TTL_SECONDS = 30 * 60
+_QUEUE_LOCK_REFRESH_SECONDS = 30
 
 
 class _RunJobState:
@@ -49,6 +69,12 @@ class _RunJobState:
         self.finished_jobs = 0
         self.preparing_mp3_paths: Set[str] = set()
         self.running_output_paths: Set[str] = set()
+        self.queue_worker_running = False
+        self.queue_worker_id: str | None = None
+        self.queue_active_object: str | None = None
+        self.queue_active_track_id: str | None = None
+        self.queue_revision_count = 0
+        self.queue_recent_changed_track_ids: List[str] = []
 
     def log(self, msg: str) -> None:
         logger.log(msg)
@@ -85,6 +111,47 @@ class _RunJobState:
         with self._lock:
             self.running_output_paths.discard(output_path)
 
+    def mark_queue_worker_started(self, worker_id: str) -> bool:
+        with self._lock:
+            if self.queue_worker_running:
+                return False
+            self.queue_worker_running = True
+            self.queue_worker_id = worker_id
+            return True
+
+    def mark_queue_worker_finished(self, worker_id: str) -> None:
+        with self._lock:
+            if self.queue_worker_id == worker_id:
+                self.queue_worker_running = False
+                self.queue_worker_id = None
+                self.queue_active_object = None
+                self.queue_active_track_id = None
+
+    def mark_queue_active(self, object_name: str | None, track_id: str | None) -> None:
+        with self._lock:
+            self.queue_active_object = object_name
+            self.queue_active_track_id = track_id
+
+    def record_queue_changed_track(self, track_id: str) -> None:
+        with self._lock:
+            self.queue_recent_changed_track_ids = [
+                existing
+                for existing in self.queue_recent_changed_track_ids
+                if existing != track_id
+            ]
+            self.queue_recent_changed_track_ids.append(track_id)
+            self.queue_recent_changed_track_ids = self.queue_recent_changed_track_ids[-20:]
+
+    def recent_queue_changed_track_ids(self) -> List[str]:
+        with self._lock:
+            return list(self.queue_recent_changed_track_ids)
+
+    def next_queue_revision(self) -> str:
+        with self._lock:
+            self.queue_revision_count += 1
+            revision_count = self.queue_revision_count
+        return f"{int(time.time() * 1000)}-{revision_count}"
+
     def state(self) -> Dict[str, object]:
         with self._lock:
             return {
@@ -93,6 +160,11 @@ class _RunJobState:
                 "finished_jobs": self.finished_jobs,
                 "preparing_mp3_paths": sorted(self.preparing_mp3_paths),
                 "running_output_paths": sorted(self.running_output_paths),
+                "queue_worker_running": self.queue_worker_running,
+                "queue_worker_id": self.queue_worker_id,
+                "queue_active_object": self.queue_active_object,
+                "queue_active_track_id": self.queue_active_track_id,
+                "queue_recent_changed_track_ids": list(self.queue_recent_changed_track_ids),
             }
 
 
@@ -374,6 +446,16 @@ def _gcs_object_exists(client: storage.Client, gcs_path: str) -> bool:
     return exists
 
 
+def _upload_json(client: storage.Client, gcs_path: str, payload: Dict[str, Any]) -> None:
+    bucket_name, blob_path = _parse_gcs_path(gcs_path)
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(blob_path)
+    blob.upload_from_string(
+        json.dumps(payload, sort_keys=True),
+        content_type="application/json",
+    )  # type: ignore[call-arg]
+
+
 def _write_metadata(
     output_dir: Path,
     processing_duration_s: float,
@@ -434,6 +516,35 @@ def _output_metadata_path(output_path: str) -> str:
     return f"{output_path.rstrip('/')}/_metadata.json"
 
 
+def _output_error_path(output_path: str) -> str:
+    return f"{output_path.rstrip('/')}/_error.json"
+
+
+def _prepare_mp3_from_pcm(
+    client: storage.Client, payload: PrepareJobRequest, request: Request
+) -> None:
+    sample_rate = _metadata_int(payload.metadata, "audioSampleRate")
+    channel_count = _metadata_int(payload.metadata, "audioChannelCount")
+    if sample_rate <= 0:
+        raise ValueError("prepare_job metadata must include audioSampleRate")
+    if channel_count <= 0:
+        raise ValueError("prepare_job metadata must include audioChannelCount")
+
+    with TemporaryDirectory() as tmp_dir:
+        tmp = Path(tmp_dir)
+        pcm_path = tmp / "input.pcm"
+        mp3_path = tmp / "input.mp3"
+        _download_file(client, payload.pcm_path, pcm_path)
+        _encode_pcm_s16le_to_mp3(
+            pcm_path,
+            mp3_path,
+            sample_rate,
+            channel_count,
+            _metadata_string(payload.metadata, "crop"),
+        )
+        _upload_file(client, mp3_path, request.mp3_path)
+
+
 def _process_prepare_job(payload: PrepareJobRequest, request: Request) -> None:
     _STATE.log(
         f"prepare_job.process.start mp3_path={request.mp3_path} "
@@ -442,27 +553,8 @@ def _process_prepare_job(payload: PrepareJobRequest, request: Request) -> None:
 
     client: storage.Client | None = None
     try:
-        sample_rate = _metadata_int(payload.metadata, "audioSampleRate")
-        channel_count = _metadata_int(payload.metadata, "audioChannelCount")
-        if sample_rate <= 0:
-            raise ValueError("prepare_job metadata must include audioSampleRate")
-        if channel_count <= 0:
-            raise ValueError("prepare_job metadata must include audioChannelCount")
-
         client = _make_storage_client()
-        with TemporaryDirectory() as tmp_dir:
-            tmp = Path(tmp_dir)
-            pcm_path = tmp / "input.pcm"
-            mp3_path = tmp / "input.mp3"
-            _download_file(client, payload.pcm_path, pcm_path)
-            _encode_pcm_s16le_to_mp3(
-                pcm_path,
-                mp3_path,
-                sample_rate,
-                channel_count,
-                _metadata_string(payload.metadata, "crop"),
-            )
-            _upload_file(client, mp3_path, request.mp3_path)
+        _prepare_mp3_from_pcm(client, payload, request)
 
     except ValueError:
         _STATE.log("prepare_job.process.error")
@@ -502,32 +594,36 @@ def prepare_job(payload: PrepareJobRequest) -> PrepareJobResponse:
     return PrepareJobResponse(status="started")
 
 
-def _process_request(request: Request) -> None:
+def _run_request_sync(client: storage.Client, request: Request) -> None:
     _STATE.log(
         f"run_job.process.start mp3_path={request.mp3_path} "
         f"output_path={request.output_path}"
     )
 
     start_time = time.perf_counter()
+    with TemporaryDirectory() as tmp_dir:
+        tmp = Path(tmp_dir)
+        mp3_path = tmp / "input.mp3"
+        _download_mp3(client, request.mp3_path, mp3_path)
+
+        reference_wav = tmp / "reference.wav"
+        _decode_to_wav(mp3_path, reference_wav)
+        ref_sample_rate, ref_samples = _wav_info(reference_wav)
+
+        demucs_output = tmp / "demucs_output"
+        _run_demucs(reference_wav, demucs_output)
+        _align_and_encode_stems_to_mp3(demucs_output, ref_samples, ref_sample_rate)
+
+        duration_s = time.perf_counter() - start_time
+        _write_metadata(demucs_output, duration_s, ref_samples, ref_sample_rate)
+
+        _upload_directory(client, demucs_output, request.output_path)
+
+
+def _process_request(request: Request) -> None:
     try:
         client = _make_storage_client()
-        with TemporaryDirectory() as tmp_dir:
-            tmp = Path(tmp_dir)
-            mp3_path = tmp / "input.mp3"
-            _download_mp3(client, request.mp3_path, mp3_path)
-
-            reference_wav = tmp / "reference.wav"
-            _decode_to_wav(mp3_path, reference_wav)
-            ref_sample_rate, ref_samples = _wav_info(reference_wav)
-
-            demucs_output = tmp / "demucs_output"
-            _run_demucs(reference_wav, demucs_output)
-            _align_and_encode_stems_to_mp3(demucs_output, ref_samples, ref_sample_rate)
-
-            duration_s = time.perf_counter() - start_time
-            _write_metadata(demucs_output, duration_s, ref_samples, ref_sample_rate)
-
-            _upload_directory(client, demucs_output, request.output_path)
+        _run_request_sync(client, request)
 
     except Exception:
         _STATE.log("run_job.process.error")
@@ -554,6 +650,344 @@ def run_job(request: Request) -> RunJobResponse:
     thread = threading.Thread(target=_process_request, args=(request,), daemon=True)
     thread.start()
     return RunJobResponse(status="started")
+
+
+def process_queue() -> ProcessQueueResponse:
+    client = _make_storage_client()
+    pending = _list_pending_queue_blobs(client)
+    if not pending:
+        _write_queue_head_state(
+            client,
+            None,
+            None,
+            _QUEUE_STATE_EMPTY,
+            None,
+            None,
+        )
+        return ProcessQueueResponse(status="empty")
+
+    worker_id = str(uuid.uuid4())
+    if not _STATE.mark_queue_worker_started(worker_id):
+        return ProcessQueueResponse(status="already_running")
+
+    if not _acquire_queue_lease(client, worker_id):
+        _STATE.mark_queue_worker_finished(worker_id)
+        return ProcessQueueResponse(status="already_running")
+
+    thread = threading.Thread(
+        target=_process_queue_worker,
+        args=(worker_id,),
+        daemon=True,
+    )
+    thread.start()
+    return ProcessQueueResponse(status="started")
+
+
+def _process_queue_worker(worker_id: str) -> None:
+    client = _make_storage_client()
+    stop_heartbeat = threading.Event()
+    heartbeat = threading.Thread(
+        target=_refresh_queue_lease_until_stopped,
+        args=(client, worker_id, stop_heartbeat),
+        daemon=True,
+    )
+    heartbeat.start()
+
+    try:
+        last_changed_track_id: str | None = None
+        last_changed_status: str | None = None
+        while True:
+            pending_blobs = _list_pending_queue_blobs(client)
+            if not pending_blobs:
+                _STATE.mark_queue_active(None, None)
+                _write_queue_head_state(
+                    client,
+                    None,
+                    None,
+                    _QUEUE_STATE_EMPTY,
+                    last_changed_track_id,
+                    last_changed_status,
+                )
+                return
+
+            queue_blob = pending_blobs[0]
+            item = _read_queue_item(queue_blob)
+            _STATE.mark_queue_active(queue_blob.name, item.track_id)
+            _write_queue_head_state(
+                client,
+                queue_blob.name,
+                item.track_id,
+                _QUEUE_STATE_RUNNING,
+                last_changed_track_id,
+                last_changed_status,
+            )
+
+            try:
+                _process_queue_item(client, item)
+            except Exception:
+                _STATE.log("process_queue.item.error")
+                error = traceback.format_exc()
+                _STATE.log(error)
+                _write_queue_item_error(client, item, error)
+                _move_queue_item_to_failed(client, queue_blob, item, error)
+                last_changed_track_id = item.track_id
+                last_changed_status = "failed"
+            else:
+                _delete_blob(queue_blob)
+                last_changed_track_id = item.track_id
+                last_changed_status = "completed"
+
+            _STATE.record_queue_changed_track(item.track_id)
+            next_blob, next_item = _next_pending_queue_head(client)
+            if next_blob and next_item:
+                _STATE.mark_queue_active(next_blob.name, next_item.track_id)
+                _write_queue_head_state(
+                    client,
+                    next_blob.name,
+                    next_item.track_id,
+                    _QUEUE_STATE_PENDING,
+                    last_changed_track_id,
+                    last_changed_status,
+                )
+            else:
+                _STATE.mark_queue_active(None, None)
+                _write_queue_head_state(
+                    client,
+                    None,
+                    None,
+                    _QUEUE_STATE_EMPTY,
+                    last_changed_track_id,
+                    last_changed_status,
+                )
+    finally:
+        stop_heartbeat.set()
+        heartbeat.join(timeout=1)
+        _release_queue_lease(client, worker_id)
+        _STATE.mark_queue_worker_finished(worker_id)
+
+
+def _process_queue_item(client: storage.Client, item: QueueItem) -> None:
+    if item.version != _QUEUE_ITEM_VERSION:
+        raise ValueError(f"Unsupported queue item version: {item.version}")
+    if item.track_id != _metadata_string(item.metadata, "trackId"):
+        raise ValueError("Queue item track_id must match metadata.trackId")
+
+    payload = PrepareJobRequest(pcm_path=item.pcm_path, metadata=item.metadata)
+    request = _prepare_job_request(payload)
+    metadata_path = _output_metadata_path(request.output_path)
+
+    if _gcs_object_exists(client, metadata_path):
+        _delete_gcs_object_if_exists(client, item.pcm_path)
+        return
+
+    if not _gcs_object_exists(client, request.mp3_path):
+        _prepare_mp3_from_pcm(client, payload, request)
+
+    _STATE.mark_started()
+    try:
+        _run_request_sync(client, request)
+    finally:
+        _STATE.mark_finished()
+
+    _delete_gcs_object_if_exists(client, item.pcm_path)
+
+
+def _list_pending_queue_blobs(client: storage.Client) -> List[Any]:
+    bucket_name = _queue_bucket_name()
+    prefix = _queue_pending_prefix()
+    blobs = list(client.list_blobs(bucket_name, prefix=f"{prefix}/"))  # type: ignore[no-untyped-call]
+    pending = [
+        blob
+        for blob in blobs
+        if re.fullmatch(r"[0-9]+\.json", Path(blob.name).name)
+    ]
+    return sorted(pending, key=lambda blob: Path(blob.name).name)
+
+
+def _next_pending_queue_head(client: storage.Client) -> Tuple[Any | None, QueueItem | None]:
+    pending = _list_pending_queue_blobs(client)
+    if not pending:
+        return None, None
+    blob = pending[0]
+    return blob, _read_queue_item(blob)
+
+
+def _read_queue_item(blob: Any) -> QueueItem:
+    data = json.loads(blob.download_as_text())  # type: ignore[no-untyped-call]
+    return QueueItem(**data)
+
+
+def _write_queue_head_state(
+    client: storage.Client,
+    head_object: str | None,
+    head_track_id: str | None,
+    head_state: str,
+    last_changed_track_id: str | None,
+    last_changed_status: str | None,
+) -> None:
+    _upload_json(
+        client,
+        _queue_state_path(),
+        {
+            "revision": _STATE.next_queue_revision(),
+            "head_object": head_object,
+            "head_track_id": head_track_id,
+            "head_state": head_state,
+            "last_changed_track_id": last_changed_track_id,
+            "last_changed_status": last_changed_status,
+            "changed_track_ids": _STATE.recent_queue_changed_track_ids(),
+            "updated_at_ms": int(time.time() * 1000),
+        },
+    )
+
+
+def _write_queue_item_error(
+    client: storage.Client, item: QueueItem, error: str
+) -> None:
+    _upload_json(
+        client,
+        _output_error_path(_queue_item_output_path(item)),
+        {
+            "track_id": item.track_id,
+            "status": "failed",
+            "error": error,
+            "updated_at_ms": int(time.time() * 1000),
+        },
+    )
+
+
+def _move_queue_item_to_failed(
+    client: storage.Client, queue_blob: Any, item: QueueItem, error: str
+) -> None:
+    failed_path = f"gs://{_queue_bucket_name()}/{_queue_failed_prefix()}/{Path(queue_blob.name).name}"
+    _upload_json(
+        client,
+        failed_path,
+        {
+            "item": _model_dump(item),
+            "error": error,
+            "failed_at_ms": int(time.time() * 1000),
+        },
+    )
+    _delete_blob(queue_blob)
+
+
+def _delete_blob(blob: Any) -> None:
+    blob.delete()  # type: ignore[no-untyped-call]
+
+
+def _delete_gcs_object_if_exists(client: storage.Client, gcs_path: str) -> None:
+    try:
+        if _gcs_object_exists(client, gcs_path):
+            _delete_gcs_object(client, gcs_path)
+    except Exception:
+        _STATE.log("gcs.delete_if_exists.error")
+        _STATE.log(traceback.format_exc())
+
+
+def _acquire_queue_lease(client: storage.Client, worker_id: str) -> bool:
+    lock_blob = _queue_lock_blob(client)
+    now_ms = int(time.time() * 1000)
+    if bool(lock_blob.exists()):  # type: ignore[no-untyped-call]
+        try:
+            current = json.loads(lock_blob.download_as_text())  # type: ignore[no-untyped-call]
+        except Exception:
+            current = {}
+        expires_at_ms = _json_int(current, "expires_at_ms")
+        if expires_at_ms > now_ms:
+            return False
+
+    _write_queue_lease(lock_blob, worker_id)
+    return True
+
+
+def _refresh_queue_lease_until_stopped(
+    client: storage.Client, worker_id: str, stop_event: threading.Event
+) -> None:
+    while not stop_event.wait(_QUEUE_LOCK_REFRESH_SECONDS):
+        try:
+            _write_queue_lease(_queue_lock_blob(client), worker_id)
+        except Exception:
+            _STATE.log("process_queue.lease_refresh.error")
+            _STATE.log(traceback.format_exc())
+
+
+def _write_queue_lease(lock_blob: Any, worker_id: str) -> None:
+    now_ms = int(time.time() * 1000)
+    lock_blob.upload_from_string(  # type: ignore[no-untyped-call]
+        json.dumps(
+            {
+                "worker_id": worker_id,
+                "updated_at_ms": now_ms,
+                "expires_at_ms": now_ms + (_QUEUE_LOCK_TTL_SECONDS * 1000),
+            },
+            sort_keys=True,
+        ),
+        content_type="application/json",
+    )
+
+
+def _release_queue_lease(client: storage.Client, worker_id: str) -> None:
+    lock_blob = _queue_lock_blob(client)
+    try:
+        if not bool(lock_blob.exists()):  # type: ignore[no-untyped-call]
+            return
+        current = json.loads(lock_blob.download_as_text())  # type: ignore[no-untyped-call]
+        if current.get("worker_id") == worker_id:
+            lock_blob.delete()  # type: ignore[no-untyped-call]
+    except Exception:
+        _STATE.log("process_queue.lease_release.error")
+        _STATE.log(traceback.format_exc())
+
+
+def _queue_lock_blob(client: storage.Client) -> Any:
+    return client.bucket(_queue_bucket_name()).blob(_queue_lock_path())
+
+
+def _queue_item_output_path(item: QueueItem) -> str:
+    try:
+        payload = PrepareJobRequest(pcm_path=item.pcm_path, metadata=item.metadata)
+        return _prepare_job_request(payload).output_path
+    except Exception:
+        safe_track_id = _make_safe_path_part(item.track_id) or "unknown"
+        prefix = os.getenv("PREPARE_JOB_PREFIX", os.getenv("ONEOFF_PREFIX", "stems/")).strip("/")
+        base_path = f"{prefix}/{safe_track_id}" if prefix else safe_track_id
+        return f"gs://{_queue_bucket_name()}/{base_path}/output/"
+
+
+def _model_dump(model: Any) -> Dict[str, Any]:
+    if hasattr(model, "model_dump"):
+        return model.model_dump()  # type: ignore[no-any-return, no-untyped-call]
+    return model.dict()  # type: ignore[no-any-return, no-untyped-call]
+
+
+def _queue_bucket_name() -> str:
+    return os.getenv(
+        "PROCESS_QUEUE_BUCKET",
+        os.getenv("PREPARE_JOB_BUCKET", os.getenv("ONEOFF_BUCKET", "stem420-bucket")),
+    )
+
+
+def _queue_pending_prefix() -> str:
+    return os.getenv("PROCESS_QUEUE_PENDING_PREFIX", "queue/pending").strip("/")
+
+
+def _queue_failed_prefix() -> str:
+    return os.getenv("PROCESS_QUEUE_FAILED_PREFIX", "queue/failed").strip("/")
+
+
+def _queue_state_path() -> str:
+    path = os.getenv("PROCESS_QUEUE_STATE_PATH", "queue/state/head.json").strip("/")
+    return f"gs://{_queue_bucket_name()}/{path}"
+
+
+def _queue_lock_path() -> str:
+    return os.getenv("PROCESS_QUEUE_LOCK_PATH", "queue/state/worker-lock.json").strip("/")
+
+
+def _json_int(value: Dict[str, Any], key: str) -> int:
+    raw = value.get(key)
+    return raw if isinstance(raw, int) and not isinstance(raw, bool) else 0
 
 
 def get_state() -> Dict[str, object]:
