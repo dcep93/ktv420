@@ -2,6 +2,13 @@ const BUCKET_NAME = "stem420-bucket";
 const STORAGE_API_BASE_URL = "https://storage.googleapis.com/storage/v1";
 const STEM_API_BASE_URL = "https://stem420-854199998954.us-east1.run.app";
 const QUEUE_HEAD_STATE_PATH = "queue/state/head.json";
+const REQUIRED_OUTPUT_ARTIFACTS = [
+  "_metadata.json",
+  "bass.mp3",
+  "drums.mp3",
+  "other.mp3",
+  "vocals.mp3"
+];
 
 type GcsObject = {
   name: string;
@@ -105,7 +112,9 @@ export async function downloadArtifactsToOpfs(trackId: string, metadata: Record<
 
   await removeOpfsEntry(`stems/${trackId}`);
 
-  const objects = [...inputObjects, ...outputObjects];
+  const objects = [...inputObjects, ...outputObjects].sort((a, b) =>
+    compareDownloadOrder(a.name, b.name, outputMetadataPath)
+  );
   let fileCount = 0;
 
   for (const object of objects) {
@@ -136,7 +145,11 @@ export async function hasLocalOutputMetadata(trackId: string) {
     const stemsDirectory = await root.getDirectoryHandle("stems", { create: false });
     const trackDirectory = await stemsDirectory.getDirectoryHandle(trackId, { create: false });
     const outputDirectory = await trackDirectory.getDirectoryHandle("output", { create: false });
-    await outputDirectory.getFileHandle("_metadata.json", { create: false });
+    await Promise.all(
+      REQUIRED_OUTPUT_ARTIFACTS.map((artifact) =>
+        outputDirectory.getFileHandle(artifact, { create: false })
+      )
+    );
     return true;
   } catch (error) {
     if (isNotFoundError(error) || isStorageAccessRequiredError(error)) {
@@ -316,6 +329,18 @@ async function listObjectsWithPrefix(prefix: string): Promise<GcsObject[]> {
   } while (pageToken);
 
   return objects;
+}
+
+function compareDownloadOrder(a: string, b: string, markerPath: string) {
+  if (a === markerPath) {
+    return 1;
+  }
+
+  if (b === markerPath) {
+    return -1;
+  }
+
+  return a.localeCompare(b);
 }
 
 async function hasObjectsWithPrefix(prefix: string) {
