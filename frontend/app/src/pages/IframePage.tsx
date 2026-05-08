@@ -91,10 +91,10 @@ export default function IframePage() {
   const [viewMode, setViewMode] = useState<ViewMode>("tracks");
   const [databaseSources, setDatabaseSources] = useState<LocalDatabaseSource[]>([]);
   const pendingActionsRef = useRef(new Map<string, PendingAction>());
-  const toggleRunRef = useRef<() => void>(() => {});
-  const handleCapturedTrackMessageRef = useRef<(value: MetadataRecord) => void>(() => {});
-  const enqueueCapturedTrackRef = useRef<(value: MetadataRecord) => void>(() => {});
-  const setExpectedQueueTrackIdsRef = useRef<(trackIds: string[]) => void>(() => {});
+  const toggleRunRef = useRef<() => void>(() => { });
+  const handleCapturedTrackMessageRef = useRef<(value: MetadataRecord) => void>(() => { });
+  const enqueueCapturedTrackRef = useRef<(value: MetadataRecord) => void>(() => { });
+  const setExpectedQueueTrackIdsRef = useRef<(trackIds: string[]) => void>(() => { });
   const queueRef = useRef<IframeTrack[]>([]);
   const knownQueueIdsRef = useRef(new Set<string>());
   const tracksNeedingCaptureRef = useRef(new Set<string>());
@@ -741,17 +741,15 @@ export default function IframePage() {
         >
           <img alt="" src="/favicon.svg" />
         </button>
-        {isDev && (
-          <button
-            type="button"
-            className="iframe-settings-button"
-            aria-label="Toggle settings view"
-            aria-pressed={viewMode === "settings"}
-            onClick={toggleSettingsView}
-          >
-            ⚙️
-          </button>
-        )}
+        <button
+          type="button"
+          className="iframe-settings-button"
+          aria-label="Toggle settings view"
+          aria-pressed={viewMode === "settings"}
+          onClick={toggleSettingsView}
+        >
+          ⚙️
+        </button>
       </div>
       {viewMode === "settings" ? (
         <section className="iframe-settings-view" aria-label="Settings view">
