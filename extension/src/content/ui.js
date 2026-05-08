@@ -463,7 +463,7 @@ async function uploadPreparedPcm(trackId, artifact) {
   }
 
   const pcmBytes = base64ToBytes(artifact.pcmS16leB64);
-  const pcmPath = `pcm/${trackId}/${md5}.pcm`;
+  const pcmPath = `stems/${trackId}/pcm/${md5}.pcm`;
   const uploadUrl = `${GCS_UPLOAD_BASE_URL}/b/${GCS_BUCKET_NAME}/o?uploadType=media&name=${encodeURIComponent(pcmPath)}`;
   const response = await fetch(uploadUrl, {
     method: "POST",

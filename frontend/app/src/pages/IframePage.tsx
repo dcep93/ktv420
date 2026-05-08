@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   downloadArtifactsToOpfs,
   hasLocalOutputMetadata,
+  hasRemoteStemArtifacts,
   kickProcessQueue,
   listPendingQueueTrackIds,
   readQueueHeadState,
@@ -53,6 +54,7 @@ type IframeTrack = {
   rowIndex: number;
   opfsState: OpfsState;
   hasLocalOutputMetadata: boolean;
+  hasRemoteStemArtifacts: boolean;
   isRemoteProcessing: boolean;
   metadata: MetadataRecord | null;
   error?: string;
@@ -142,7 +144,13 @@ export default function IframePage() {
         spotifyPathRef.current = nextSpotifyPath;
         tracksRef.current = nextTracks;
         setTracks(nextTracks);
-        void refreshLocalOutputMetadata(nextTracks, setTracks);
+        void refreshTrackProgressStates(nextTracks, (updater) => {
+          setTracks((currentTracks) => {
+            const refreshedTracks = updater(currentTracks);
+            tracksRef.current = refreshedTracks;
+            return refreshedTracks;
+          });
+        });
         return;
       }
 
@@ -208,17 +216,26 @@ export default function IframePage() {
     resetQueueState();
     const currentTracks = tracksRef.current ?? [];
     const outputStates = await Promise.all(
-      currentTracks.map(async (track) => ({
-        trackId: track.trackId,
-        hasLocalOutputMetadata: await hasLocalOutputMetadata(track.trackId)
-      }))
+      currentTracks.map(async (track) => {
+        const [hasOutputMetadata, hasRemoteArtifacts] = await Promise.all([
+          hasLocalOutputMetadata(track.trackId),
+          hasRemoteStemArtifacts(track.trackId)
+        ]);
+
+        return {
+          trackId: track.trackId,
+          hasLocalOutputMetadata: hasOutputMetadata,
+          hasRemoteStemArtifacts: hasRemoteArtifacts
+        };
+      })
     );
-    const outputStateByTrackId = new Map(
-      outputStates.map((state) => [state.trackId, state.hasLocalOutputMetadata])
-    );
+    const outputStateByTrackId = new Map(outputStates.map((state) => [state.trackId, state]));
     const nextTracks = currentTracks.map((track) => ({
       ...track,
-      hasLocalOutputMetadata: outputStateByTrackId.get(track.trackId) ?? track.hasLocalOutputMetadata,
+      hasLocalOutputMetadata:
+        outputStateByTrackId.get(track.trackId)?.hasLocalOutputMetadata ?? track.hasLocalOutputMetadata,
+      hasRemoteStemArtifacts:
+        outputStateByTrackId.get(track.trackId)?.hasRemoteStemArtifacts ?? track.hasRemoteStemArtifacts,
       isRemoteProcessing: false,
       error: undefined
     }));
@@ -443,6 +460,12 @@ export default function IframePage() {
       return "pending_remote";
     }
 
+    if (await hasRemoteStemArtifacts(track.trackId)) {
+      markTrackRemoteStemArtifacts(track.trackId, true);
+      await waitForRemoteTrack(track.trackId);
+      return "pending_remote";
+    }
+
     if (track.opfsState !== "hydrated" || !track.metadata) {
       return "needs_capture";
     }
@@ -636,6 +659,12 @@ export default function IframePage() {
   function markTrackRemoteProcessing(trackId: string, isRemoteProcessing: boolean) {
     updateTracks((currentTracks) =>
       markTrackRemoteProcessingState(currentTracks, trackId, isRemoteProcessing)
+    );
+  }
+
+  function markTrackRemoteStemArtifacts(trackId: string, hasRemoteArtifacts: boolean) {
+    updateTracks((currentTracks) =>
+      markTrackRemoteStemArtifactsState(currentTracks, trackId, hasRemoteArtifacts)
     );
   }
 
@@ -907,6 +936,7 @@ function toIframeTrack(value: unknown): IframeTrack | null {
   const rowIndex = typeof track.rowIndex === "number" ? track.rowIndex : null;
   const opfsState = isOpfsState(track.opfsState) ? track.opfsState : null;
   const hasOutputMetadata = track.hasLocalOutputMetadata === true;
+  const hasRemoteArtifacts = track.hasRemoteStemArtifacts === true;
   const isRemoteProcessing = track.isRemoteProcessing === true;
 
   if (!trackId || !trackName || rowIndex === null || !opfsState) {
@@ -921,6 +951,7 @@ function toIframeTrack(value: unknown): IframeTrack | null {
     rowIndex,
     opfsState,
     hasLocalOutputMetadata: hasOutputMetadata,
+    hasRemoteStemArtifacts: hasRemoteArtifacts,
     isRemoteProcessing,
     metadata,
     error: readString(track.error) || undefined
@@ -1001,6 +1032,9 @@ function updateCapturedTrack(currentTracks: IframeTrack[] | null, value: Metadat
         readString(metadata?.trackArtworkSrc) ||
         track.trackArtworkSrc,
       opfsState: isOpfsState(value.opfsState) ? value.opfsState : track.opfsState,
+      hasRemoteStemArtifacts:
+        value.hasRemoteStemArtifacts === true ||
+        (track.hasRemoteStemArtifacts && value.hasRemoteStemArtifacts !== false),
       isRemoteProcessing:
         value.isRemoteProcessing === true ||
         (track.isRemoteProcessing && value.isRemoteProcessing !== false),
@@ -1020,33 +1054,40 @@ function metadataForTrack(track: IframeTrack): MetadataRecord {
   };
 }
 
-async function refreshLocalOutputMetadata(
+async function refreshTrackProgressStates(
   tracks: IframeTrack[],
-  setTracks: Dispatch<SetStateAction<IframeTrack[] | null>>
+  updateTracks: (updater: (currentTracks: IframeTrack[] | null) => IframeTrack[] | null) => void
 ) {
   const states = await Promise.all(
-    tracks.map(async (track) => ({
-      trackId: track.trackId,
-      hasLocalOutputMetadata: await hasLocalOutputMetadata(track.trackId)
-    }))
+    tracks.map(async (track) => {
+      const [hasOutputMetadata, hasRemoteArtifacts] = await Promise.all([
+        hasLocalOutputMetadata(track.trackId),
+        hasRemoteStemArtifacts(track.trackId)
+      ]);
+
+      return {
+        trackId: track.trackId,
+        hasLocalOutputMetadata: hasOutputMetadata,
+        hasRemoteStemArtifacts: hasRemoteArtifacts
+      };
+    })
   );
 
-  setTracks((currentTracks) => {
+  updateTracks((currentTracks) => {
     if (!currentTracks) {
       return currentTracks;
     }
 
-    const stateByTrackId = new Map(
-      states.map((state) => [state.trackId, state.hasLocalOutputMetadata])
-    );
+    const stateByTrackId = new Map(states.map((state) => [state.trackId, state]));
     return currentTracks.map((track) => {
-      const hasOutputMetadata = stateByTrackId.get(track.trackId);
-      return hasOutputMetadata === undefined
+      const state = stateByTrackId.get(track.trackId);
+      return state === undefined
         ? track
         : {
             ...track,
-            hasLocalOutputMetadata: hasOutputMetadata,
-            isRemoteProcessing: hasOutputMetadata ? false : track.isRemoteProcessing
+            hasLocalOutputMetadata: state.hasLocalOutputMetadata,
+            hasRemoteStemArtifacts: state.hasRemoteStemArtifacts,
+            isRemoteProcessing: state.hasLocalOutputMetadata ? false : track.isRemoteProcessing
           };
     });
   });
@@ -1101,6 +1142,25 @@ function markTrackRemoteProcessingState(
           ...track,
           isRemoteProcessing,
           error: isRemoteProcessing ? undefined : track.error
+        }
+      : track
+  );
+}
+
+function markTrackRemoteStemArtifactsState(
+  currentTracks: IframeTrack[] | null,
+  trackId: string,
+  hasRemoteArtifacts: boolean
+) {
+  if (!currentTracks) {
+    return currentTracks;
+  }
+
+  return currentTracks.map((track) =>
+    track.trackId === trackId
+      ? {
+          ...track,
+          hasRemoteStemArtifacts: hasRemoteArtifacts
         }
       : track
   );
@@ -1221,7 +1281,7 @@ function stateKind(track: IframeTrack): TrackDisplayState {
     return "broken";
   }
 
-  if (track.isRemoteProcessing || track.opfsState === "hydrated") {
+  if (track.isRemoteProcessing || track.opfsState === "hydrated" || track.hasRemoteStemArtifacts) {
     return "in-progress";
   }
 
@@ -1241,7 +1301,7 @@ function stateLabel(track: IframeTrack) {
     return track.error;
   }
 
-  if (track.isRemoteProcessing || track.opfsState === "hydrated") {
+  if (track.isRemoteProcessing || track.opfsState === "hydrated" || track.hasRemoteStemArtifacts) {
     return "In progress";
   }
 

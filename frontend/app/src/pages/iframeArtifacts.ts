@@ -152,6 +152,10 @@ export async function hasRemoteOutputMetadata(trackId: string) {
   return await objectExists(metadataPath);
 }
 
+export async function hasRemoteStemArtifacts(trackId: string) {
+  return await hasObjectsWithPrefix(`stems/${trackId}/`);
+}
+
 export async function readRemoteOutputStatus(trackId: string): Promise<RemoteOutputStatus | null> {
   const metadataPath = `stems/${trackId}/output/_metadata.json`;
   if (await objectExists(metadataPath)) {
@@ -308,6 +312,24 @@ async function listObjectsWithPrefix(prefix: string): Promise<GcsObject[]> {
   } while (pageToken);
 
   return objects;
+}
+
+async function hasObjectsWithPrefix(prefix: string) {
+  const listUrl = bucketObjectsUrl();
+  listUrl.searchParams.set("prefix", prefix);
+  listUrl.searchParams.set("maxResults", "1");
+
+  const response = await fetch(listUrl.toString());
+
+  if (!response.ok) {
+    throw new Error(`Failed to check ${prefix}: ${response.status} ${response.statusText}`);
+  }
+
+  const data = (await response.json()) as {
+    items?: GcsObject[];
+  };
+
+  return (data.items ?? []).length > 0;
 }
 
 async function fetchObjectBlob(objectPath: string) {
