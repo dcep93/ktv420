@@ -13,7 +13,7 @@ import { readCachedTrack, writeTrackArtifact } from "./storage.js";
 import { formatSeconds, looselyMatches } from "./text.js";
 import { md5Hex } from "./md5.js";
 
-const START_TIMEOUT_MS = 1000;
+const START_TIMEOUT_MS = 3000;
 const PAUSE_TIMEOUT_MS = 1000;
 const END_TOLERANCE_SECONDS = 0.25;
 

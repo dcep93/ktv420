@@ -43,7 +43,7 @@ export function isUsableCaptureTarget(element) {
   return Boolean(getMediaSource(element)) &&
     Number.isFinite(element.duration) &&
     element.duration > 0 &&
-    element.readyState >= 2 &&
+    element.readyState >= 1 &&
     element.muted === false &&
     element.volume > 0 &&
     element.playbackRate > 0;
