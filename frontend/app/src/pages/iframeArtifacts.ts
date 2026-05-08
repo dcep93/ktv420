@@ -312,7 +312,7 @@ async function listObjectsWithPrefix(prefix: string): Promise<GcsObject[]> {
       listUrl.searchParams.set("pageToken", pageToken);
     }
 
-    const response = await fetch(listUrl.toString());
+    const response = await fetch(listUrl.toString(), { cache: "no-store" });
 
     if (!response.ok) {
       throw new Error(`Failed to list ${prefix}: ${response.status} ${response.statusText}`);
@@ -347,7 +347,7 @@ async function hasObjectsWithPrefix(prefix: string) {
   listUrl.searchParams.set("prefix", prefix);
   listUrl.searchParams.set("maxResults", "1");
 
-  const response = await fetch(listUrl.toString());
+  const response = await fetch(listUrl.toString(), { cache: "no-store" });
 
   if (!response.ok) {
     throw new Error(`Failed to check ${prefix}: ${response.status} ${response.statusText}`);
@@ -361,7 +361,7 @@ async function hasObjectsWithPrefix(prefix: string) {
 }
 
 async function fetchObjectBlob(objectPath: string) {
-  const response = await fetch(objectUrl(objectPath, { media: true }));
+  const response = await fetch(objectUrl(objectPath, { media: true }), { cache: "no-store" });
 
   if (!response.ok) {
     throw new Error(`Failed to fetch ${objectPath}: ${response.status} ${response.statusText}`);
@@ -371,7 +371,7 @@ async function fetchObjectBlob(objectPath: string) {
 }
 
 async function objectMediaExists(objectPath: string) {
-  const response = await fetch(objectUrl(objectPath, { media: true }));
+  const response = await fetch(objectUrl(objectPath, { media: true }), { cache: "no-store" });
 
   if (response.status === 404) {
     return false;
@@ -386,7 +386,7 @@ async function objectMediaExists(objectPath: string) {
 }
 
 async function fetchObjectJsonOrNull(objectPath: string) {
-  const response = await fetch(objectUrl(objectPath, { media: true }));
+  const response = await fetch(objectUrl(objectPath, { media: true }), { cache: "no-store" });
 
   if (response.status === 404) {
     return null;

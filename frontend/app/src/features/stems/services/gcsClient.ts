@@ -51,7 +51,7 @@ export async function listBucketObjects(): Promise<GcsObject[]> {
         listUrl.searchParams.set("pageToken", pageToken);
       }
 
-      const listResponse = await fetch(listUrl.toString());
+      const listResponse = await fetch(listUrl.toString(), { cache: "no-store" });
 
       if (!listResponse.ok) {
         throw new Error(
@@ -107,7 +107,7 @@ export async function fetchObjectContents(objectPath: string): Promise<string> {
   const functionName = "fetchObjectContents";
 
   try {
-    const response = await fetch(objectUrl(objectPath, { media: true }));
+    const response = await fetch(objectUrl(objectPath, { media: true }), { cache: "no-store" });
 
     if (!response.ok) {
       throw new Error(
@@ -125,7 +125,7 @@ export async function fetchObjectBlob(objectPath: string): Promise<Blob> {
   const functionName = "fetchObjectBlob";
 
   try {
-    const response = await fetch(objectUrl(objectPath, { media: true }));
+    const response = await fetch(objectUrl(objectPath, { media: true }), { cache: "no-store" });
 
     if (!response.ok) {
       throw new Error(
@@ -143,7 +143,7 @@ export async function objectExists(objectPath: string): Promise<boolean> {
   const functionName = "objectExists";
 
   try {
-    const metadataResponse = await fetch(objectUrl(objectPath));
+    const metadataResponse = await fetch(objectUrl(objectPath), { cache: "no-store" });
 
     if (metadataResponse.ok) {
       return true;
@@ -216,7 +216,7 @@ export async function deleteObjectsWithPrefix(prefix: string): Promise<number> {
         listUrl.searchParams.set("pageToken", pageToken);
       }
 
-      const listResponse = await fetch(listUrl.toString());
+      const listResponse = await fetch(listUrl.toString(), { cache: "no-store" });
 
       if (!listResponse.ok) {
         throw new Error(
