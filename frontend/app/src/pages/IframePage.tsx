@@ -1060,16 +1060,25 @@ async function refreshTrackProgressStates(
 ) {
   const states = await Promise.all(
     tracks.map(async (track) => {
-      const [hasOutputMetadata, hasRemoteArtifacts] = await Promise.all([
-        hasLocalOutputMetadata(track.trackId),
-        hasRemoteStemArtifacts(track.trackId)
-      ]);
+      try {
+        const [hasOutputMetadata, hasRemoteArtifacts] = await Promise.all([
+          hasLocalOutputMetadata(track.trackId),
+          hasRemoteStemArtifacts(track.trackId)
+        ]);
 
-      return {
-        trackId: track.trackId,
-        hasLocalOutputMetadata: hasOutputMetadata,
-        hasRemoteStemArtifacts: hasRemoteArtifacts
-      };
+        return {
+          trackId: track.trackId,
+          hasLocalOutputMetadata: hasOutputMetadata,
+          hasRemoteStemArtifacts: hasRemoteArtifacts
+        };
+      } catch (error) {
+        console.warn(`[ktv420] Failed to refresh progress state for ${track.trackId}`, error);
+        return {
+          trackId: track.trackId,
+          hasLocalOutputMetadata: track.hasLocalOutputMetadata,
+          hasRemoteStemArtifacts: track.hasRemoteStemArtifacts
+        };
+      }
     })
   );
 

@@ -153,6 +153,10 @@ export async function hasRemoteOutputMetadata(trackId: string) {
 }
 
 export async function hasRemoteStemArtifacts(trackId: string) {
+  if (await hasRemoteOutputMetadata(trackId)) {
+    return true;
+  }
+
   return await hasObjectsWithPrefix(`stems/${trackId}/`);
 }
 
