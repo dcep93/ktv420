@@ -8,9 +8,11 @@ import {
   listPendingQueueTrackIds,
   readQueueHeadState,
   readRemoteOutputStatus,
+  readRemoteStemArtifactsStatus,
   requestUnpartitionedOpfsAccess,
   saveSpotifyContext,
-  type LocalDatabaseEntry
+  type LocalDatabaseEntry,
+  type RemoteStemArtifactsStatus
 } from "./iframeArtifacts";
 
 const IFRAME_MESSAGE_SOURCE = "ktv420-iframe";
@@ -65,6 +67,13 @@ type LocalDatabaseSource = {
   entries: LocalDatabaseEntry[];
   error?: string;
   loading?: boolean;
+};
+
+type TrackProgressRefreshState = {
+  trackId: string;
+  hasLocalOutputMetadata: boolean;
+  hasRemoteStemArtifacts: boolean;
+  remoteStemArtifactsStatus: RemoteStemArtifactsStatus | null;
 };
 
 type PendingAction = {
@@ -1145,23 +1154,25 @@ async function refreshTrackProgressStates(
   const states = await Promise.all(
     tracks.map(async (track) => {
       try {
-        const [hasOutputMetadata, hasRemoteArtifacts] = await Promise.all([
+        const [hasOutputMetadata, remoteArtifactsStatus] = await Promise.all([
           hasLocalOutputMetadata(track.trackId),
-          hasRemoteStemArtifacts(track.trackId)
+          readRemoteStemArtifactsStatus(track.trackId)
         ]);
 
         return {
           trackId: track.trackId,
           hasLocalOutputMetadata: hasOutputMetadata,
-          hasRemoteStemArtifacts: hasRemoteArtifacts
-        };
+          hasRemoteStemArtifacts: remoteArtifactsStatus.exists,
+          remoteStemArtifactsStatus: remoteArtifactsStatus
+        } satisfies TrackProgressRefreshState;
       } catch (error) {
         console.warn(`[ktv420] Failed to refresh progress state for ${track.trackId}`, error);
         return {
           trackId: track.trackId,
           hasLocalOutputMetadata: track.hasLocalOutputMetadata,
-          hasRemoteStemArtifacts: track.hasRemoteStemArtifacts
-        };
+          hasRemoteStemArtifacts: track.hasRemoteStemArtifacts,
+          remoteStemArtifactsStatus: null
+        } satisfies TrackProgressRefreshState;
       }
     })
   );

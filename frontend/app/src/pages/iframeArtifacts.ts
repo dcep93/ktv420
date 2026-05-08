@@ -32,6 +32,14 @@ export type RemoteOutputStatus =
   | { status: "completed" }
   | { status: "failed"; error: string };
 
+export type RemoteStemArtifactsStatus = {
+  exists: boolean;
+  source: "output_metadata" | "prefix" | "none";
+  metadataPath: string;
+  prefix: string;
+  matchedObjects: string[];
+};
+
 type StorageAccessDocument = Document & {
   hasStorageAccess?: () => Promise<boolean>;
   requestStorageAccess?: (types?: { getDirectory?: boolean }) => Promise<StorageAccessHandleLike>;
@@ -172,11 +180,30 @@ export async function hasRemoteOutputMetadata(trackId: string) {
 }
 
 export async function hasRemoteStemArtifacts(trackId: string) {
+  return (await readRemoteStemArtifactsStatus(trackId)).exists;
+}
+
+export async function readRemoteStemArtifactsStatus(trackId: string): Promise<RemoteStemArtifactsStatus> {
+  const metadataPath = `stems/${trackId}/output/_metadata.json`;
+  const prefix = `stems/${trackId}/`;
   if (await hasRemoteOutputMetadata(trackId)) {
-    return true;
+    return {
+      exists: true,
+      source: "output_metadata",
+      metadataPath,
+      prefix,
+      matchedObjects: [metadataPath]
+    };
   }
 
-  return await hasObjectsWithPrefix(`stems/${trackId}/`);
+  const matchedObjects = await listObjectsWithPrefixLimit(prefix, 1);
+  return {
+    exists: matchedObjects.length > 0,
+    source: matchedObjects.length > 0 ? "prefix" : "none",
+    metadataPath,
+    prefix,
+    matchedObjects: matchedObjects.map((object) => object.name)
+  };
 }
 
 export async function readRemoteOutputStatus(trackId: string): Promise<RemoteOutputStatus | null> {
@@ -348,10 +375,10 @@ function compareDownloadOrder(a: string, b: string, markerPath: string) {
   return a.localeCompare(b);
 }
 
-async function hasObjectsWithPrefix(prefix: string) {
+async function listObjectsWithPrefixLimit(prefix: string, maxResults: number) {
   const listUrl = bucketObjectsUrl();
   listUrl.searchParams.set("prefix", prefix);
-  listUrl.searchParams.set("maxResults", "1");
+  listUrl.searchParams.set("maxResults", String(maxResults));
 
   const response = await fetch(listUrl.toString(), { cache: "no-store" });
   const data = response.ok
@@ -370,7 +397,7 @@ async function hasObjectsWithPrefix(prefix: string) {
     throw new Error(`Failed to check ${prefix}: ${response.status} ${response.statusText}`);
   }
 
-  return (data?.items ?? []).length > 0;
+  return data?.items ?? [];
 }
 
 async function fetchObjectBlob(objectPath: string) {
