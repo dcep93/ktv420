@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState, type CSSProperties } from "react";
 
 import { buildObjectTree } from "../features/stems/lib/objectTree";
 import { type GcsObject, type ObjectTreeNode } from "../features/stems/lib/types";
-import { listBucketObjects } from "../features/stems/services/gcsClient";
+import { deleteObject, listBucketObjects } from "../features/stems/services/gcsClient";
+import { deleteFolderContents } from "../features/stems/services/storageWorkflows";
 import {
   deleteLocalOpfsEntry,
   listLocalOpfsEntries,
@@ -80,6 +81,22 @@ export default function SettingsPage() {
       await loadOpfsEntries();
     } catch (deleteError) {
       setOpfsError(deleteError instanceof Error ? deleteError.message : String(deleteError));
+    }
+  };
+
+  const deleteGcsEntry = async (entry: GcsTreeEntry) => {
+    setGcsError("");
+
+    try {
+      if (entry.kind === "directory") {
+        await deleteFolderContents(entry.path);
+      } else {
+        await deleteObject(entry.path);
+      }
+
+      await loadGcsEntries();
+    } catch (deleteError) {
+      setGcsError(deleteError instanceof Error ? deleteError.message : String(deleteError));
     }
   };
 
@@ -179,16 +196,21 @@ export default function SettingsPage() {
           <ol className="settings-list">
             {gcsTreeEntries.map((entry) => (
               <li key={entry.path}>
-                <div
-                  className="settings-row settings-row--readonly"
+                <button
+                  type="button"
+                  className="settings-row"
                   data-kind={entry.kind}
+                  aria-label={`Delete ${entry.kind} ${entry.path}`}
                   title={entry.tooltip}
                   style={entryDepthStyle(entry.depth)}
+                  onClick={() => {
+                    void deleteGcsEntry(entry);
+                  }}
                 >
                   <span className="settings-kind">{entry.kind === "directory" ? "dir" : "file"}</span>
                   <span className="settings-path">{entry.displayName}</span>
                   <span className="settings-size">{formatBytes(entry.totalSize)}</span>
-                </div>
+                </button>
               </li>
             ))}
           </ol>
