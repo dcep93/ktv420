@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 import time
 import traceback
 from dataclasses import dataclass, field
@@ -35,6 +36,22 @@ def _load_sha_metadata() -> Any:
 
 def init() -> None:
     state.sha = _load_sha_metadata()
+    _start_process_queue_on_startup()
+
+
+def _start_process_queue_on_startup() -> None:
+    thread = threading.Thread(target=_process_queue_on_startup, daemon=True)
+    thread.start()
+
+
+def _process_queue_on_startup() -> None:
+    logger.log("server.process_queue.startup.receive")
+    try:
+        response = run_job.process_queue()
+        logger.log(f"server.process_queue.startup.respond status={response.status}")
+    except Exception:
+        logger.log("server.process_queue.startup.error")
+        logger.log(traceback.format_exc())
 
 
 web_app = FastAPI()
