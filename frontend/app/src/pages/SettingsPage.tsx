@@ -2,11 +2,12 @@ import { useCallback, useEffect, useState, type CSSProperties } from "react";
 
 import { buildObjectTree } from "../features/stems/lib/objectTree";
 import { type GcsObject, type ObjectTreeNode } from "../features/stems/lib/types";
-import { deleteObject, listBucketObjects } from "../features/stems/services/gcsClient";
+import { deleteObject, fetchObjectContents, listBucketObjects } from "../features/stems/services/gcsClient";
 import { deleteFolderContents } from "../features/stems/services/storageWorkflows";
 import {
   deleteLocalOpfsEntry,
   listLocalOpfsEntries,
+  readLocalOpfsFileContents,
   type LocalDatabaseEntry,
   type SavedSpotifyContext
 } from "./iframeArtifacts";
@@ -100,6 +101,34 @@ export default function SettingsPage() {
     }
   };
 
+  const inspectOpfsFile = async (entry: OpfsTreeEntry) => {
+    setOpfsError("");
+
+    try {
+      const contents = await readLocalOpfsFileContents(entry.path);
+      console.log("[ktv420] OPFS file contents", {
+        path: entry.path,
+        contents: parseConsoleContents(contents)
+      });
+    } catch (inspectError) {
+      setOpfsError(inspectError instanceof Error ? inspectError.message : String(inspectError));
+    }
+  };
+
+  const inspectGcsFile = async (entry: GcsTreeEntry) => {
+    setGcsError("");
+
+    try {
+      const contents = await fetchObjectContents(entry.path);
+      console.log("[ktv420] GCS file contents", {
+        path: entry.path,
+        contents: parseConsoleContents(contents)
+      });
+    } catch (inspectError) {
+      setGcsError(inspectError instanceof Error ? inspectError.message : String(inspectError));
+    }
+  };
+
   const playlists = entries
     .map((entry) => toLocalPlaylist(entry))
     .filter((playlist: LocalPlaylist | null): playlist is LocalPlaylist => playlist !== null);
@@ -161,21 +190,58 @@ export default function SettingsPage() {
               <ol className="settings-list">
                 {opfsTreeEntries.map((entry) => (
                   <li key={entry.path}>
-                    <button
-                      type="button"
-                      className="settings-row"
-                      data-kind={entry.kind}
-                      aria-label={`Delete ${entry.kind} ${entry.path}`}
-                      title={entry.tooltip}
-                      style={entryDepthStyle(entry.depth)}
-                      onClick={() => {
-                        void deleteEntry(entry);
-                      }}
-                    >
-                      <span className="settings-kind">{entry.kind === "directory" ? "dir" : "file"}</span>
-                      <span className="settings-path">{entry.displayName}</span>
-                      <span className="settings-size">{formatBytes(entry.totalSize)}</span>
-                    </button>
+                    {entry.kind === "directory" ? (
+                      <button
+                        type="button"
+                        className="settings-row"
+                        data-kind={entry.kind}
+                        aria-label={`Delete ${entry.kind} ${entry.path}`}
+                        title={entry.tooltip}
+                        style={entryDepthStyle(entry.depth)}
+                        onClick={() => {
+                          void deleteEntry(entry);
+                        }}
+                      >
+                        <span className="settings-kind">dir</span>
+                        <span className="settings-path">{entry.displayName}</span>
+                        <span className="settings-size">{formatBytes(entry.totalSize)}</span>
+                      </button>
+                    ) : (
+                      <div
+                        className="settings-row"
+                        data-kind={entry.kind}
+                        title={entry.tooltip}
+                        style={entryDepthStyle(entry.depth)}
+                      >
+                        <span className="settings-kind">file</span>
+                        <span className="settings-path">{entry.displayName}</span>
+                        <span className="settings-size">{formatBytes(entry.totalSize)}</span>
+                        <span className="settings-row-actions">
+                          <button
+                            type="button"
+                            className="settings-emoji-button"
+                            aria-label={`Delete file ${entry.path}`}
+                            title="Delete file"
+                            onClick={() => {
+                              void deleteEntry(entry);
+                            }}
+                          >
+                            🗑️
+                          </button>
+                          <button
+                            type="button"
+                            className="settings-emoji-button"
+                            aria-label={`Log file contents for ${entry.path}`}
+                            title="Log file contents"
+                            onClick={() => {
+                              void inspectOpfsFile(entry);
+                            }}
+                          >
+                            🔎
+                          </button>
+                        </span>
+                      </div>
+                    )}
                   </li>
                 ))}
               </ol>
@@ -196,21 +262,58 @@ export default function SettingsPage() {
           <ol className="settings-list">
             {gcsTreeEntries.map((entry) => (
               <li key={entry.path}>
-                <button
-                  type="button"
-                  className="settings-row"
-                  data-kind={entry.kind}
-                  aria-label={`Delete ${entry.kind} ${entry.path}`}
-                  title={entry.tooltip}
-                  style={entryDepthStyle(entry.depth)}
-                  onClick={() => {
-                    void deleteGcsEntry(entry);
-                  }}
-                >
-                  <span className="settings-kind">{entry.kind === "directory" ? "dir" : "file"}</span>
-                  <span className="settings-path">{entry.displayName}</span>
-                  <span className="settings-size">{formatBytes(entry.totalSize)}</span>
-                </button>
+                {entry.kind === "directory" ? (
+                  <button
+                    type="button"
+                    className="settings-row"
+                    data-kind={entry.kind}
+                    aria-label={`Delete ${entry.kind} ${entry.path}`}
+                    title={entry.tooltip}
+                    style={entryDepthStyle(entry.depth)}
+                    onClick={() => {
+                      void deleteGcsEntry(entry);
+                    }}
+                  >
+                    <span className="settings-kind">dir</span>
+                    <span className="settings-path">{entry.displayName}</span>
+                    <span className="settings-size">{formatBytes(entry.totalSize)}</span>
+                  </button>
+                ) : (
+                  <div
+                    className="settings-row"
+                    data-kind={entry.kind}
+                    title={entry.tooltip}
+                    style={entryDepthStyle(entry.depth)}
+                  >
+                    <span className="settings-kind">file</span>
+                    <span className="settings-path">{entry.displayName}</span>
+                    <span className="settings-size">{formatBytes(entry.totalSize)}</span>
+                    <span className="settings-row-actions">
+                      <button
+                        type="button"
+                        className="settings-emoji-button"
+                        aria-label={`Delete file ${entry.path}`}
+                        title="Delete file"
+                        onClick={() => {
+                          void deleteGcsEntry(entry);
+                        }}
+                      >
+                        🗑️
+                      </button>
+                      <button
+                        type="button"
+                        className="settings-emoji-button"
+                        aria-label={`Log file contents for ${entry.path}`}
+                        title="Log file contents"
+                        onClick={() => {
+                          void inspectGcsFile(entry);
+                        }}
+                      >
+                        🔎
+                      </button>
+                    </span>
+                  </div>
+                )}
               </li>
             ))}
           </ol>
@@ -338,6 +441,14 @@ function formattedEntryTooltip(entry: LocalDatabaseEntry) {
     return JSON.stringify(JSON.parse(entry.text), null, 2);
   } catch {
     return entry.text;
+  }
+}
+
+function parseConsoleContents(text: string) {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
   }
 }
 

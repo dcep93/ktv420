@@ -516,7 +516,7 @@ button:disabled {
   color: inherit;
   display: grid;
   gap: 10px;
-  grid-template-columns: 44px minmax(0, 1fr) 84px;
+  grid-template-columns: 44px minmax(0, 1fr) 84px 76px;
   min-height: 30px;
   padding: 5px 0 0;
   text-align: left;
@@ -550,6 +550,33 @@ button:disabled {
   font-size: 12px;
   text-align: right;
   white-space: nowrap;
+}
+
+.iframe-settings-row-actions {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.iframe-settings-emoji-button {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  display: inline-flex;
+  font-size: 14px;
+  height: 24px;
+  justify-content: center;
+  padding: 0;
+  width: 28px;
+}
+
+.iframe-settings-emoji-button:hover,
+.iframe-settings-emoji-button:focus-visible {
+  background: var(--ktv-row-hover);
+  border-color: var(--ww-border-strong);
+  transform: none;
 }
 
 .iframe-settings-empty,
@@ -746,7 +773,7 @@ button:disabled {
   color: inherit;
   display: grid;
   gap: 10px;
-  grid-template-columns: 44px minmax(0, 1fr) 84px;
+  grid-template-columns: 44px minmax(0, 1fr) 84px 76px;
   min-height: 30px;
   padding: 5px 0 0 calc(2px + var(--settings-entry-indent, 0px));
   text-align: left;
@@ -807,6 +834,33 @@ button:disabled {
   font-size: 12px;
   text-align: right;
   white-space: nowrap;
+}
+
+.settings-row-actions {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.settings-emoji-button {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  display: inline-flex;
+  font-size: 14px;
+  height: 24px;
+  justify-content: center;
+  padding: 0;
+  width: 28px;
+}
+
+.settings-emoji-button:hover,
+.settings-emoji-button:focus-visible {
+  background: var(--ktv-row-hover);
+  border-color: var(--ww-border-strong);
+  transform: none;
 }
 
 .settings-empty,
@@ -922,13 +976,13 @@ button:disabled {
   width: 18px;
 }
 
-.iframe-track-state[data-state="hydrated"]::before {
+.iframe-track-state[data-state="in-progress"]::before {
   background: currentColor;
   clip-path: polygon(0 100%, 100% 0, 100% 100%);
   inset: 0;
 }
 
-.iframe-track-state[data-state="hydrated"]::after {
+.iframe-track-state[data-state="in-progress"]::after {
   display: none;
 }
 
@@ -995,6 +1049,11 @@ button:disabled {
     text-align: left;
   }
 
+  .iframe-settings-row-actions {
+    grid-column: 2;
+    justify-content: flex-start;
+  }
+
   .settings-row,
   .settings-playlist-row,
   .play-track-row {
@@ -1012,6 +1071,11 @@ button:disabled {
   .settings-size {
     grid-column: 2;
     text-align: left;
+  }
+
+  .settings-row-actions {
+    grid-column: 2;
+    justify-content: flex-start;
   }
 
   .play-track-status {

@@ -3,8 +3,8 @@ import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateA
 import {
   downloadArtifactsToOpfs,
   hasLocalOutputMetadata,
-  hasRemoteOutputMetadata,
   kickProcessQueue,
+  listPendingQueueTrackIds,
   readQueueHeadState,
   readRemoteOutputStatus,
   requestUnpartitionedOpfsAccess,
@@ -20,6 +20,7 @@ const TOGGLE_RUN_MESSAGE = "ktv420:toggle-run";
 const ENQUEUE_TRACK_MESSAGE = "ktv420:enqueue-track";
 const REQUEST_LOCAL_DATABASE_MESSAGE = "ktv420:request-local-database";
 const DELETE_LOCAL_DATABASE_ENTRY_MESSAGE = "ktv420:delete-local-database-entry";
+const INSPECT_LOCAL_DATABASE_ENTRY_MESSAGE = "ktv420:inspect-local-database-entry";
 const DELETE_TRACK_ARTIFACT_MESSAGE = "ktv420:delete-track-artifact";
 const LOCAL_DATABASE_MESSAGE = "ktv420:local-database";
 const TRACK_CAPTURED_MESSAGE = "ktv420:track-captured";
@@ -35,12 +36,14 @@ type IframeMessageType =
   | typeof ENQUEUE_TRACK_MESSAGE
   | typeof REQUEST_LOCAL_DATABASE_MESSAGE
   | typeof DELETE_LOCAL_DATABASE_ENTRY_MESSAGE
+  | typeof INSPECT_LOCAL_DATABASE_ENTRY_MESSAGE
   | typeof DELETE_TRACK_ARTIFACT_MESSAGE;
 type OpfsState = "missing" | "hydrated" | "broken";
 type MetadataRecord = Record<string, unknown>;
 type ViewMode = "tracks" | "settings";
 type JobResultMessageType = typeof ENQUEUE_TRACK_RESULT_MESSAGE;
 type TrackResolution = "completed" | "pending_remote" | "needs_capture";
+type TrackDisplayState = "missing" | "in-progress" | "broken" | "complete";
 
 type IframeTrack = {
   trackId: string;
@@ -50,6 +53,7 @@ type IframeTrack = {
   rowIndex: number;
   opfsState: OpfsState;
   hasLocalOutputMetadata: boolean;
+  isRemoteProcessing: boolean;
   metadata: MetadataRecord | null;
   error?: string;
 };
@@ -95,6 +99,7 @@ export default function IframePage() {
   const knownQueueIdsRef = useRef(new Set<string>());
   const tracksNeedingCaptureRef = useRef(new Set<string>());
   const pendingRemoteTrackIdsRef = useRef(new Set<string>());
+  const submittedRemoteTrackIdsRef = useRef<Set<string> | null>(null);
   const checkingRemoteTrackIdsRef = useRef(new Set<string>());
   const completedQueueIdsRef = useRef(new Set<string>());
   const expectedCaptureIdsRef = useRef<Set<string> | null>(null);
@@ -213,7 +218,9 @@ export default function IframePage() {
     );
     const nextTracks = currentTracks.map((track) => ({
       ...track,
-      hasLocalOutputMetadata: outputStateByTrackId.get(track.trackId) ?? track.hasLocalOutputMetadata
+      hasLocalOutputMetadata: outputStateByTrackId.get(track.trackId) ?? track.hasLocalOutputMetadata,
+      isRemoteProcessing: false,
+      error: undefined
     }));
 
     tracksRef.current = nextTracks;
@@ -261,6 +268,23 @@ export default function IframePage() {
     []
   );
 
+  const inspectDatabaseEntry = useCallback((source: LocalDatabaseSource, entry: LocalDatabaseEntry) => {
+    if (entry.kind !== "file") {
+      return;
+    }
+
+    if (source.sourceName === SPOTIFY_DATABASE_SOURCE_NAME) {
+      postParentMessage(INSPECT_LOCAL_DATABASE_ENTRY_MESSAGE, { path: entry.path });
+      return;
+    }
+
+    console.log("[ktv420] OPFS file contents", {
+      source: source.sourceName,
+      path: entry.path,
+      contents: parseConsoleContents(entry.text ?? "")
+    });
+  }, []);
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.repeat) {
@@ -288,6 +312,7 @@ export default function IframePage() {
     knownQueueIdsRef.current.clear();
     tracksNeedingCaptureRef.current.clear();
     pendingRemoteTrackIdsRef.current.clear();
+    submittedRemoteTrackIdsRef.current = null;
     checkingRemoteTrackIdsRef.current.clear();
     completedQueueIdsRef.current.clear();
     expectedCaptureIdsRef.current = null;
@@ -325,7 +350,8 @@ export default function IframePage() {
   async function enqueueCapturedTrack(value: MetadataRecord) {
     const trackId = readString(value.trackId) || readString((value.metadata as MetadataRecord | null)?.trackId);
 
-    if (!trackId || value.opfsState !== "hydrated" || readString(value.error)) {
+    const isRemoteProcessing = value.isRemoteProcessing === true;
+    if (!trackId || (!isRemoteProcessing && value.opfsState !== "hydrated") || readString(value.error)) {
       return;
     }
 
@@ -402,9 +428,19 @@ export default function IframePage() {
     }
 
     const metadata = metadataForTrack(track);
-    if (await hasRemoteOutputMetadata(track.trackId)) {
+    const remoteStatus = await readRemoteOutputStatus(track.trackId);
+    if (remoteStatus?.status === "completed") {
       await downloadTrackArtifacts(track.trackId, metadata);
       return "completed";
+    }
+    if (remoteStatus?.status === "failed") {
+      markTrackError(track.trackId, remoteStatus.error);
+      throw new Error(`Remote processing failed for ${trackNameForId(track.trackId)}. ${remoteStatus.error}`);
+    }
+
+    if (await hasPendingRemoteQueueItem(track.trackId)) {
+      await waitForRemoteTrack(track.trackId);
+      return "pending_remote";
     }
 
     if (track.opfsState !== "hydrated" || !track.metadata) {
@@ -421,9 +457,19 @@ export default function IframePage() {
       return;
     }
 
+    markTrackRemoteProcessing(trackId, true);
+    submittedRemoteTrackIdsRef.current?.add(trackId);
     pendingRemoteTrackIdsRef.current.add(trackId);
     void checkRemoteTrackOnce(trackId).catch(handleRemotePollError);
     startRemoteOutputPoll();
+  }
+
+  async function hasPendingRemoteQueueItem(trackId: string) {
+    if (!submittedRemoteTrackIdsRef.current) {
+      submittedRemoteTrackIdsRef.current = await listPendingQueueTrackIds();
+    }
+
+    return submittedRemoteTrackIdsRef.current.has(trackId);
   }
 
   function startRemoteOutputPoll() {
@@ -530,6 +576,8 @@ export default function IframePage() {
 
     if (status.status === "failed") {
       pendingRemoteTrackIdsRef.current.delete(trackId);
+      markTrackRemoteProcessing(trackId, false);
+      markTrackError(trackId, status.error);
       throw new Error(`Remote processing failed for ${trackNameForId(trackId)}. ${status.error}`);
     }
 
@@ -538,6 +586,7 @@ export default function IframePage() {
     pendingRemoteTrackIdsRef.current.delete(trackId);
     completedQueueIdsRef.current.add(trackId);
     tracksNeedingCaptureRef.current.delete(trackId);
+    markTrackRemoteProcessing(trackId, false);
   }
 
   async function downloadTrackArtifacts(trackId: string, metadata: MetadataRecord) {
@@ -582,6 +631,16 @@ export default function IframePage() {
 
   function markTrackComplete(trackId: string) {
     updateTracks((currentTracks) => markTrackLocalOutputMetadata(currentTracks, trackId, true));
+  }
+
+  function markTrackRemoteProcessing(trackId: string, isRemoteProcessing: boolean) {
+    updateTracks((currentTracks) =>
+      markTrackRemoteProcessingState(currentTracks, trackId, isRemoteProcessing)
+    );
+  }
+
+  function markTrackError(trackId: string, error: string) {
+    updateTracks((currentTracks) => markTrackErrorState(currentTracks, trackId, error));
   }
 
   function updateTracks(updater: (currentTracks: IframeTrack[] | null) => IframeTrack[] | null) {
@@ -739,19 +798,51 @@ export default function IframePage() {
                 <ol className="iframe-settings-list">
                   {source.entries.map((entry) => (
                     <li key={`${source.sourceName}-${entry.path}`}>
-                      <button
-                        type="button"
-                        className="iframe-settings-row"
-                        aria-label={`Delete ${entry.kind} ${entry.path} from ${source.sourceName}`}
-                        title={databaseEntryTitle(entry)}
-                        onClick={() => {
-                          void deleteDatabaseEntry(source, entry);
-                        }}
-                      >
-                        <span className="iframe-settings-kind">{entry.kind === "directory" ? "dir" : "file"}</span>
-                        <span className="iframe-settings-path">{entry.path}</span>
-                        <span className="iframe-settings-size">{formatBytes(entry.size)}</span>
-                      </button>
+                      {entry.kind === "directory" ? (
+                        <button
+                          type="button"
+                          className="iframe-settings-row"
+                          aria-label={`Delete ${entry.kind} ${entry.path} from ${source.sourceName}`}
+                          title={databaseEntryTitle(entry)}
+                          onClick={() => {
+                            void deleteDatabaseEntry(source, entry);
+                          }}
+                        >
+                          <span className="iframe-settings-kind">dir</span>
+                          <span className="iframe-settings-path">{entry.path}</span>
+                          <span className="iframe-settings-size">{formatBytes(entry.size)}</span>
+                        </button>
+                      ) : (
+                        <div className="iframe-settings-row" title={databaseEntryTitle(entry)}>
+                          <span className="iframe-settings-kind">file</span>
+                          <span className="iframe-settings-path">{entry.path}</span>
+                          <span className="iframe-settings-size">{formatBytes(entry.size)}</span>
+                          <span className="iframe-settings-row-actions">
+                            <button
+                              type="button"
+                              className="iframe-settings-emoji-button"
+                              aria-label={`Delete file ${entry.path} from ${source.sourceName}`}
+                              title="Delete file"
+                              onClick={() => {
+                                void deleteDatabaseEntry(source, entry);
+                              }}
+                            >
+                              🗑️
+                            </button>
+                            <button
+                              type="button"
+                              className="iframe-settings-emoji-button"
+                              aria-label={`Log file contents for ${entry.path} from ${source.sourceName}`}
+                              title="Log file contents"
+                              onClick={() => {
+                                inspectDatabaseEntry(source, entry);
+                              }}
+                            >
+                              🔎
+                            </button>
+                          </span>
+                        </div>
+                      )}
                     </li>
                   ))}
                 </ol>
@@ -816,6 +907,7 @@ function toIframeTrack(value: unknown): IframeTrack | null {
   const rowIndex = typeof track.rowIndex === "number" ? track.rowIndex : null;
   const opfsState = isOpfsState(track.opfsState) ? track.opfsState : null;
   const hasOutputMetadata = track.hasLocalOutputMetadata === true;
+  const isRemoteProcessing = track.isRemoteProcessing === true;
 
   if (!trackId || !trackName || rowIndex === null || !opfsState) {
     return null;
@@ -829,6 +921,7 @@ function toIframeTrack(value: unknown): IframeTrack | null {
     rowIndex,
     opfsState,
     hasLocalOutputMetadata: hasOutputMetadata,
+    isRemoteProcessing,
     metadata,
     error: readString(track.error) || undefined
   };
@@ -908,6 +1001,9 @@ function updateCapturedTrack(currentTracks: IframeTrack[] | null, value: Metadat
         readString(metadata?.trackArtworkSrc) ||
         track.trackArtworkSrc,
       opfsState: isOpfsState(value.opfsState) ? value.opfsState : track.opfsState,
+      isRemoteProcessing:
+        value.isRemoteProcessing === true ||
+        (track.isRemoteProcessing && value.isRemoteProcessing !== false),
       metadata,
       error: readString(value.error) || undefined
     };
@@ -947,7 +1043,11 @@ async function refreshLocalOutputMetadata(
       const hasOutputMetadata = stateByTrackId.get(track.trackId);
       return hasOutputMetadata === undefined
         ? track
-        : { ...track, hasLocalOutputMetadata: hasOutputMetadata };
+        : {
+            ...track,
+            hasLocalOutputMetadata: hasOutputMetadata,
+            isRemoteProcessing: hasOutputMetadata ? false : track.isRemoteProcessing
+          };
     });
   });
 }
@@ -977,7 +1077,47 @@ function markTrackLocalOutputMetadata(
 
   return currentTracks.map((track) =>
     track.trackId === trackId
-      ? { ...track, hasLocalOutputMetadata: hasOutputMetadata }
+      ? {
+          ...track,
+          hasLocalOutputMetadata: hasOutputMetadata,
+          isRemoteProcessing: hasOutputMetadata ? false : track.isRemoteProcessing
+        }
+      : track
+  );
+}
+
+function markTrackRemoteProcessingState(
+  currentTracks: IframeTrack[] | null,
+  trackId: string,
+  isRemoteProcessing: boolean
+) {
+  if (!currentTracks) {
+    return currentTracks;
+  }
+
+  return currentTracks.map((track) =>
+    track.trackId === trackId
+      ? {
+          ...track,
+          isRemoteProcessing,
+          error: isRemoteProcessing ? undefined : track.error
+        }
+      : track
+  );
+}
+
+function markTrackErrorState(currentTracks: IframeTrack[] | null, trackId: string, error: string) {
+  if (!currentTracks) {
+    return currentTracks;
+  }
+
+  return currentTracks.map((track) =>
+    track.trackId === trackId
+      ? {
+          ...track,
+          isRemoteProcessing: false,
+          error
+        }
       : track
   );
 }
@@ -1012,6 +1152,14 @@ function databaseSummary(source: LocalDatabaseSource) {
 
 function databaseEntryTitle(entry: LocalDatabaseEntry) {
   return entry.text;
+}
+
+function parseConsoleContents(text: string) {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
+  }
 }
 
 function formatBytes(value: number | undefined) {
@@ -1064,7 +1212,7 @@ function isOpfsState(value: unknown): value is OpfsState {
   return value === "missing" || value === "hydrated" || value === "broken";
 }
 
-function stateKind(track: IframeTrack) {
+function stateKind(track: IframeTrack): TrackDisplayState {
   if (track.hasLocalOutputMetadata) {
     return "complete";
   }
@@ -1073,8 +1221,8 @@ function stateKind(track: IframeTrack) {
     return "broken";
   }
 
-  if (track.opfsState === "hydrated") {
-    return "hydrated";
+  if (track.isRemoteProcessing || track.opfsState === "hydrated") {
+    return "in-progress";
   }
 
   if (track.opfsState === "broken") {
@@ -1093,8 +1241,8 @@ function stateLabel(track: IframeTrack) {
     return track.error;
   }
 
-  if (track.opfsState === "hydrated") {
-    return "Fully hydrated";
+  if (track.isRemoteProcessing || track.opfsState === "hydrated") {
+    return "In progress";
   }
 
   if (track.opfsState === "broken") {

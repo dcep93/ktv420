@@ -7,6 +7,10 @@ type GcsObject = {
   name: string;
 };
 
+type QueueItem = {
+  track_id: string;
+};
+
 export type QueueHeadState = {
   revision: string;
   head_object: string | null;
@@ -175,6 +179,24 @@ export async function readQueueHeadState() {
   return value;
 }
 
+export async function listPendingQueueTrackIds() {
+  const objects = await listObjectsWithPrefix("queue/pending/");
+  const pendingTrackIds = new Set<string>();
+
+  await Promise.all(
+    objects
+      .filter((object) => /\/[0-9]+\.json$/.test(object.name))
+      .map(async (object) => {
+        const value = await fetchObjectJsonOrNull(object.name);
+        if (isQueueItem(value)) {
+          pendingTrackIds.add(value.track_id);
+        }
+      })
+  );
+
+  return pendingTrackIds;
+}
+
 export async function kickProcessQueue() {
   const response = await fetch(`${STEM_API_BASE_URL}/process_queue`, { method: "POST" });
   const responseText = await response.text();
@@ -195,6 +217,15 @@ export async function listLocalOpfsEntries() {
 
 export async function deleteLocalOpfsEntry(path: string) {
   await removeOpfsEntry(path);
+}
+
+export async function readLocalOpfsFileContents(path: string) {
+  const text = await readOpfsText(path);
+  if (text === null) {
+    throw new Error(`No OPFS file found at ${path}.`);
+  }
+
+  return text;
 }
 
 export async function saveSpotifyContext(record: SavedSpotifyContext) {
@@ -658,6 +689,14 @@ function isQueueHeadState(value: unknown): value is QueueHeadState {
           record.changed_track_ids.every((trackId) => typeof trackId === "string")
         )
       )
+  );
+}
+
+function isQueueItem(value: unknown): value is QueueItem {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof (value as QueueItem).track_id === "string"
   );
 }
 

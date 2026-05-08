@@ -18,6 +18,7 @@ const TOGGLE_RUN_MESSAGE = "ktv420:toggle-run";
 const ENQUEUE_TRACK_MESSAGE = "ktv420:enqueue-track";
 const REQUEST_LOCAL_DATABASE_MESSAGE = "ktv420:request-local-database";
 const DELETE_LOCAL_DATABASE_ENTRY_MESSAGE = "ktv420:delete-local-database-entry";
+const INSPECT_LOCAL_DATABASE_ENTRY_MESSAGE = "ktv420:inspect-local-database-entry";
 const DELETE_TRACK_ARTIFACT_MESSAGE = "ktv420:delete-track-artifact";
 const LOCAL_DATABASE_MESSAGE = "ktv420:local-database";
 const TRACK_CAPTURED_MESSAGE = "ktv420:track-captured";
@@ -126,6 +127,11 @@ export function mountButton({ isRunActive, onToggleRun }) {
       return;
     }
 
+    if (message.type === INSPECT_LOCAL_DATABASE_ENTRY_MESSAGE && typeof message.path === "string") {
+      await inspectLocalDatabaseEntry(message.path);
+      return;
+    }
+
     if (message.type === DELETE_TRACK_ARTIFACT_MESSAGE && typeof message.trackId === "string") {
       await deleteTrackArtifactAndNotify(message.trackId, iframe, iframeOrigin);
     }
@@ -142,13 +148,15 @@ export function mountButton({ isRunActive, onToggleRun }) {
       }
 
       let queueError = "";
+      let isRemoteProcessing = false;
       try {
         await enqueueTrackForProcessing(trackId);
+        isRemoteProcessing = true;
       } catch (error) {
         queueError = error?.message || String(error);
         console.warn(`[ktv420] Failed to enqueue captured track ${trackId}`, error);
       }
-      await postTrackCapturedToIframe(iframe, iframeOrigin, trackId, metadata, queueError);
+      await postTrackCapturedToIframe(iframe, iframeOrigin, trackId, metadata, queueError, isRemoteProcessing);
     },
     notifyCaptureComplete: async (trackIds) => {
       const iframe = document.getElementById(IFRAME_ID);
@@ -352,7 +360,7 @@ async function deleteTrackArtifactAndNotify(trackId, iframe, origin) {
   await postTrackCapturedToIframe(iframe, origin, trackId, null);
 }
 
-async function postTrackCapturedToIframe(iframe, origin, trackId, metadata, queueError = "") {
+async function postTrackCapturedToIframe(iframe, origin, trackId, metadata, queueError = "", isRemoteProcessing = false) {
   if (typeof trackId !== "string" || !trackId) {
     return;
   }
@@ -379,6 +387,7 @@ async function postTrackCapturedToIframe(iframe, origin, trackId, metadata, queu
         trackArtworkSrc: row?.trackArtworkSrc || artifactMetadata?.trackArtworkSrc || "",
         rowIndex: row?.rowIndex ?? -1,
         opfsState: artifact.opfsState,
+        isRemoteProcessing,
         metadata: artifactMetadata,
         ...(artifact.error || queueError ? { error: artifact.error || queueError } : {})
       }
@@ -593,6 +602,37 @@ async function deleteLocalDatabaseEntry(path) {
   }
 
   await directory.removeEntry(entryName, { recursive: true });
+}
+
+async function inspectLocalDatabaseEntry(path) {
+  try {
+    const contents = await readLocalDatabaseEntry(path);
+    console.log("[ktv420] OPFS file contents", {
+      path,
+      contents: parseJsonSafely(contents)
+    });
+  } catch (error) {
+    console.warn(`[ktv420] Failed to inspect local database entry ${path}`, error);
+  }
+}
+
+async function readLocalDatabaseEntry(path) {
+  const root = await navigator.storage.getDirectory();
+  const parts = path.split("/").filter(Boolean);
+  const fileName = parts.pop();
+
+  if (!fileName) {
+    throw new Error("OPFS path must include a file name.");
+  }
+
+  let directory = root;
+  for (const part of parts) {
+    directory = await directory.getDirectoryHandle(part, { create: false });
+  }
+
+  const handle = await directory.getFileHandle(fileName, { create: false });
+  const file = await handle.getFile();
+  return await file.text();
 }
 
 async function collectOpfsDirectoryEntries(directory, prefix, entries) {
