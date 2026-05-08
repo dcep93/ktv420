@@ -38,12 +38,51 @@ set -euo pipefail
 SA_KEY="$1"
 
 REGION="us-east1"
+SERVICE_NAME="stem420"
 
 export GOOGLE_APPLICATION_CREDENTIALS="gac.json"
 echo "$SA_KEY" >"$GOOGLE_APPLICATION_CREDENTIALS"
 npm install google-auth-library
 gcloud auth activate-service-account --key-file="$GOOGLE_APPLICATION_CREDENTIALS"
 GOOGLE_CLOUD_PROJECT="$(jq -r .project_id < "$GOOGLE_APPLICATION_CREDENTIALS")"
+IMG_PATH=us.gcr.io/"${GOOGLE_CLOUD_PROJECT}"/stem420/backend
+
+DEPLOYED_IMG_URL="$(
+  gcloud run services describe "$SERVICE_NAME" \
+    --project "${GOOGLE_CLOUD_PROJECT}" \
+    --region "${REGION}" \
+    --platform managed \
+    --format='value(spec.template.spec.containers[0].image)' \
+    2>/dev/null || true
+)"
+
+if [[ -z "$DEPLOYED_IMG_URL" ]]; then
+  echo "No existing Cloud Run service image found; deploying backend."
+else
+  DEPLOYED_SHA="${DEPLOYED_IMG_URL##*:}"
+
+  if [[ "$DEPLOYED_IMG_URL" != "$IMG_PATH":* || ! "$DEPLOYED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "Existing Cloud Run image '$DEPLOYED_IMG_URL' does not match expected tagged backend image; deploying backend."
+  else
+    if ! git cat-file -e "$DEPLOYED_SHA^{commit}" 2>/dev/null; then
+      echo "Fetching deployed commit $DEPLOYED_SHA for backend diff check."
+      if [[ "$(git rev-parse --is-shallow-repository)" == "true" ]]; then
+        git fetch --unshallow origin || true
+      else
+        git fetch origin "$DEPLOYED_SHA" || true
+      fi
+    fi
+
+    if ! git cat-file -e "$DEPLOYED_SHA^{commit}" 2>/dev/null; then
+      echo "Could not find deployed commit $DEPLOYED_SHA locally; deploying backend."
+    elif git diff --quiet "$DEPLOYED_SHA" HEAD -- backend; then
+      echo "No committed backend changes since deployed commit $DEPLOYED_SHA; skipping Cloud Run deploy."
+      exit 0
+    else
+      echo "Committed backend changes found since deployed commit $DEPLOYED_SHA; deploying backend."
+    fi
+  fi
+fi
 
 cd backend
 
@@ -58,13 +97,12 @@ echo 'ENTRYPOINT [ "make", "server" ]' >>Dockerfile
 
 gcloud config set builds/use_kaniko True
 gcloud config set builds/kaniko_cache_ttl 24
-IMG_PATH=us.gcr.io/"${GOOGLE_CLOUD_PROJECT}"/stem420/backend
 IMG_URL="$IMG_PATH":"$(git log -1 --format=format:%H)"
 gcloud builds submit --project "${GOOGLE_CLOUD_PROJECT}" --tag "${IMG_URL}"
 
 echo deploy_to_cloud_run $GOOGLE_CLOUD_PROJECT
 
-gcloud beta run deploy "stem420" \
+gcloud beta run deploy "$SERVICE_NAME" \
   --project "${GOOGLE_CLOUD_PROJECT}" \
   --region "${REGION}" \
   --image "${IMG_URL}" \
