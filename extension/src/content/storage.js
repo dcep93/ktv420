@@ -118,6 +118,18 @@ export async function writeTrackArtifact(trackId, pcmBase64, metadata) {
   await writeTextFile(trackDirectory, ARTIFACT_FILES.metadata, JSON.stringify(metadata, null, 2));
 }
 
+export async function deleteTrackArtifact(trackId) {
+  const root = await navigator.storage.getDirectory();
+
+  try {
+    await root.removeEntry(trackId, { recursive: true });
+  } catch (error) {
+    if (!isNotFoundError(error)) {
+      throw error;
+    }
+  }
+}
+
 export function isValidMetadata(metadata, trackId) {
   return Boolean(
     metadata &&

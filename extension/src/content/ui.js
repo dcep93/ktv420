@@ -1,6 +1,6 @@
 import { SELECTORS } from "./constants.js";
 import { collectTrackRows, isSupportedRoute } from "./dom.js";
-import { inspectTrackArtifact, readTrackArtifact } from "./storage.js";
+import { deleteTrackArtifact, inspectTrackArtifact, readTrackArtifact } from "./storage.js";
 
 const BUTTON_ID = "ktv420-spotify-capture-button";
 const IFRAME_ID = "ktv420-prepared-iframe";
@@ -430,12 +430,21 @@ async function enqueueTrackForProcessingOnce(trackId) {
   const artifact = await readTrackArtifact(trackId);
   const pcmPath = await uploadPreparedPcm(trackId, artifact);
   const queuePath = await uploadQueueItem(trackId, artifact, pcmPath);
+  await deleteUploadedTrackArtifact(trackId);
   const processQueueResult = await postJson(`${STEM_API_BASE_URL}/process_queue`, undefined, "process_queue");
 
   return {
     queuePath,
     processQueueResult
   };
+}
+
+async function deleteUploadedTrackArtifact(trackId) {
+  try {
+    await deleteTrackArtifact(trackId);
+  } catch (error) {
+    console.warn(`[ktv420] Failed to delete uploaded local capture artifact for ${trackId}`, error);
+  }
 }
 
 async function uploadPreparedPcm(trackId, artifact) {
