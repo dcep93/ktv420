@@ -594,15 +594,19 @@ export default function Player({
         .map((track) => {
           const value = trackMuteStatesRef.current[track.id] ?? false;
           const defaultValue = track.isInput;
+          const payload = getStemRecordingPayload(track.id);
 
           return {
-            ...getStemRecordingPayload(track.id),
+            payload,
             value,
-            isDefault: value === defaultValue,
+            defaultValue,
           };
         })
-        .filter((state) => !state.isDefault)
-        .map(({ isDefault, ...state }) => state);
+        .filter((state) => state.value !== state.defaultValue)
+        .map((state) => ({
+          ...state.payload,
+          value: state.value,
+        }));
 
       if (nonDefaultMuteStates.length > 0) {
         payload.muteStates = nonDefaultMuteStates;

@@ -78,17 +78,14 @@ export async function requestUnpartitionedOpfsAccess() {
 export async function downloadArtifactsToOpfs(trackId: string, metadata: Record<string, unknown>) {
   const inputPrefix = `stems/${trackId}/input/`;
   const outputPrefix = `stems/${trackId}/output/`;
+  const outputMetadataPath = `${outputPrefix}_metadata.json`;
   const [inputObjects, outputObjects] = await Promise.all([
     listObjectsWithPrefix(inputPrefix),
     listObjectsWithPrefix(outputPrefix)
   ]);
 
-  if (outputObjects.length === 0) {
-    throw new Error(`No output files found under ${outputPrefix}.`);
-  }
-
-  if (inputObjects.length === 0) {
-    throw new Error(`No input MP3 found under ${inputPrefix}.`);
+  if (!outputObjects.some((object) => object.name === outputMetadataPath)) {
+    throw new Error(`No output metadata found at ${outputMetadataPath}.`);
   }
 
   await removeOpfsEntry(`stems/${trackId}`);
