@@ -1090,6 +1090,7 @@ function updateCapturedTrack(currentTracks: IframeTrack[] | null, value: Metadat
       opfsState: isOpfsState(value.opfsState) ? value.opfsState : track.opfsState,
       hasRemoteStemArtifacts:
         value.hasRemoteStemArtifacts === true ||
+        value.isRemoteProcessing === true ||
         (track.hasRemoteStemArtifacts && value.hasRemoteStemArtifacts !== false),
       isRemoteProcessing:
         value.isRemoteProcessing === true ||
@@ -1208,6 +1209,7 @@ function markTrackRemoteProcessingState(
     track.trackId === trackId
       ? {
           ...track,
+          hasRemoteStemArtifacts: isRemoteProcessing ? true : track.hasRemoteStemArtifacts,
           isRemoteProcessing,
           error: isRemoteProcessing ? undefined : track.error
         }
@@ -1349,7 +1351,7 @@ function stateKind(track: IframeTrack): TrackDisplayState {
     return "broken";
   }
 
-  if (track.isRemoteProcessing || track.opfsState === "hydrated" || track.hasRemoteStemArtifacts) {
+  if (track.opfsState === "hydrated" || track.hasRemoteStemArtifacts) {
     return "in-progress";
   }
 
@@ -1369,7 +1371,7 @@ function stateLabel(track: IframeTrack) {
     return track.error;
   }
 
-  if (track.isRemoteProcessing || track.opfsState === "hydrated" || track.hasRemoteStemArtifacts) {
+  if (track.opfsState === "hydrated" || track.hasRemoteStemArtifacts) {
     return "In progress";
   }
 
