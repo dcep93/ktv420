@@ -162,7 +162,7 @@ export async function hasLocalOutputMetadata(trackId: string) {
 
 export async function hasRemoteOutputMetadata(trackId: string) {
   const metadataPath = `stems/${trackId}/output/_metadata.json`;
-  return await objectExists(metadataPath);
+  return await objectMediaExists(metadataPath);
 }
 
 export async function hasRemoteStemArtifacts(trackId: string) {
@@ -174,8 +174,7 @@ export async function hasRemoteStemArtifacts(trackId: string) {
 }
 
 export async function readRemoteOutputStatus(trackId: string): Promise<RemoteOutputStatus | null> {
-  const metadataPath = `stems/${trackId}/output/_metadata.json`;
-  if (await objectExists(metadataPath)) {
+  if (await hasRemoteOutputMetadata(trackId)) {
     return { status: "completed" };
   }
 
@@ -371,6 +370,21 @@ async function fetchObjectBlob(objectPath: string) {
   return await response.blob();
 }
 
+async function objectMediaExists(objectPath: string) {
+  const response = await fetch(objectUrl(objectPath, { media: true }));
+
+  if (response.status === 404) {
+    return false;
+  }
+
+  if (!response.ok) {
+    throw new Error(`Failed to check ${objectPath}: ${response.status} ${response.statusText}`);
+  }
+
+  await response.body?.cancel();
+  return true;
+}
+
 async function fetchObjectJsonOrNull(objectPath: string) {
   const response = await fetch(objectUrl(objectPath, { media: true }));
 
@@ -383,20 +397,6 @@ async function fetchObjectJsonOrNull(objectPath: string) {
   }
 
   return await response.json() as unknown;
-}
-
-async function objectExists(objectPath: string) {
-  const response = await fetch(objectUrl(objectPath));
-
-  if (response.status === 404) {
-    return false;
-  }
-
-  if (!response.ok) {
-    throw new Error(`Failed to check ${objectPath}: ${response.status} ${response.statusText}`);
-  }
-
-  return true;
 }
 
 async function deleteObjectsWithPrefix(prefix: string) {
