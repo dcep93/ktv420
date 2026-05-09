@@ -35,6 +35,7 @@ async function getOrchestrator() {
 
 const ui = mountButton({
   isRunActive: () => Boolean(orchestrator?.isActive()),
+  loadSpotifyTracks: () => loadSpotifyPlaylistTracks(),
   onToggleRun: async (options = {}) => {
     try {
       const runner = await getOrchestrator();
@@ -45,3 +46,18 @@ const ui = mountButton({
     }
   }
 });
+
+async function loadSpotifyPlaylistTracks() {
+  const playlistUri = currentSpotifyPlaylistUri();
+  if (!playlistUri) {
+    return [];
+  }
+
+  const result = await bridge.command("playlist-tracks", { playlistUri }, 15000);
+  return result?.ok && Array.isArray(result.tracks) ? result.tracks : [];
+}
+
+function currentSpotifyPlaylistUri() {
+  const match = window.location.pathname.match(/^\/playlist\/([A-Za-z0-9]+)/);
+  return match ? `spotify:playlist:${match[1]}` : "";
+}

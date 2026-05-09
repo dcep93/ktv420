@@ -125,6 +125,42 @@ export function resolveTrackRow(track) {
   return null;
 }
 
+export function scrollTracklistToStart() {
+  const root = findTracklistRoot();
+  const scroller = root ? findScrollableAncestor(root) : document.scrollingElement;
+
+  if (!scroller) {
+    window.scrollTo({ top: 0, behavior: "auto" });
+    return;
+  }
+
+  if (scroller === document.scrollingElement || scroller === document.documentElement || scroller === document.body) {
+    window.scrollTo({ top: 0, behavior: "auto" });
+    return;
+  }
+
+  scroller.scrollTop = 0;
+}
+
+function findScrollableAncestor(element) {
+  let current = element;
+
+  while (current && current !== document.body) {
+    const style = window.getComputedStyle(current);
+    const canScroll =
+      /(auto|scroll)/.test(`${style.overflowY} ${style.overflow}`) &&
+      current.scrollHeight > current.clientHeight + 1;
+
+    if (canScroll) {
+      return current;
+    }
+
+    current = current.parentElement;
+  }
+
+  return document.scrollingElement;
+}
+
 export function findVisibleEnabledButton(selector) {
   const button = document.querySelector(selector);
   if (!(button instanceof HTMLButtonElement) || button.disabled) {

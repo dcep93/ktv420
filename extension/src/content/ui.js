@@ -27,12 +27,12 @@ const ENQUEUE_TRACK_RESULT_MESSAGE = "ktv420:enqueue-track-result";
 
 const queuedTrackPromises = new Map();
 
-export function mountButton({ isRunActive, onToggleRun }) {
+export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks = async () => [] }) {
   injectStyle();
 
   const iframeSrc = getIframeSrc();
   const iframeOrigin = new URL(iframeSrc).origin;
-  const button = createButton(() => showIframeOverlayWithTracks(iframeSrc, iframeOrigin));
+  const button = createButton(() => showIframeOverlayWithTracks(iframeSrc, iframeOrigin, loadSpotifyTracks));
   let scheduled = false;
 
   const place = () => {
@@ -199,9 +199,9 @@ function createButton(onClick) {
   return button;
 }
 
-async function showIframeOverlayWithTracks(src, origin) {
+async function showIframeOverlayWithTracks(src, origin, loadSpotifyTracks) {
   const iframe = showIframeOverlay(src);
-  const tracks = await collectIframeTracks();
+  const tracks = await collectIframeTracks(loadSpotifyTracks);
   await postTracksToIframe(iframe, origin, tracks);
 }
 
@@ -255,8 +255,12 @@ function ensurePreparedIframe(src) {
   return iframe;
 }
 
-async function collectIframeTracks() {
-  const rows = collectTrackRows();
+async function collectIframeTracks(loadSpotifyTracks) {
+  const spotifyTracks = await loadSpotifyTracks().catch((error) => {
+    console.warn("[ktv420] Failed to load Spotify playlist tracks from page API", error);
+    return [];
+  });
+  const rows = spotifyTracks.length > 0 ? spotifyTracks : collectTrackRows();
   const tracks = [];
 
   for (const row of rows) {

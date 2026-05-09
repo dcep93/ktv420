@@ -6,7 +6,8 @@ import {
   dispatchSyntheticDoubleClick,
   isSupportedRoute,
   pausePlaybackCleanly,
-  resolveTrackRow
+  resolveTrackRow,
+  scrollTracklistToStart
 } from "./dom.js";
 import { resolveCurrentPlaybackTrack } from "./playbackState.js";
 import { readCachedTrack, writeTrackArtifact } from "./storage.js";
@@ -92,6 +93,11 @@ export class CaptureOrchestrator extends EventTarget {
       }
 
       await this.bridge.inject();
+
+      if (!queue[0].row) {
+        scrollTracklistToStart();
+        await delay(150);
+      }
 
       const firstRow = resolveTrackRow(queue[0]);
       if (!firstRow) {
@@ -183,7 +189,8 @@ export class CaptureOrchestrator extends EventTarget {
   }
 
   async preflightQueue(debug, trackIds = null) {
-    const rows = collectTrackRows();
+    const spotifyTracks = await this.loadSpotifyTracks();
+    const rows = spotifyTracks.length > 0 ? spotifyTracks : collectTrackRows();
     const queue = [];
     const requestedTrackIds = new Set(Array.isArray(trackIds) ? trackIds : []);
     const shouldFilterTracks = requestedTrackIds.size > 0;
@@ -211,6 +218,21 @@ export class CaptureOrchestrator extends EventTarget {
     });
 
     return queue;
+  }
+
+  async loadSpotifyTracks() {
+    const playlistUri = currentSpotifyPlaylistUri();
+    if (!playlistUri) {
+      return [];
+    }
+
+    try {
+      const result = await this.bridge.command("playlist-tracks", { playlistUri }, 15000);
+      return result?.ok && Array.isArray(result.tracks) ? result.tracks : [];
+    } catch (error) {
+      console.warn("[ktv420] Failed to load Spotify playlist tracks from page API", error);
+      return [];
+    }
   }
 
   dispatchTrackStored(trackId, metadata) {
@@ -479,6 +501,11 @@ function safeCurrentTime(element) {
 
 function safeDuration(element) {
   return Number.isFinite(element?.duration) ? Math.max(0, element.duration) : Number.NaN;
+}
+
+function currentSpotifyPlaylistUri() {
+  const match = window.location.pathname.match(/^\/playlist\/([A-Za-z0-9]+)/);
+  return match ? `spotify:playlist:${match[1]}` : "";
 }
 
 function mediaSessionMatchesItem(mediaSession, item) {

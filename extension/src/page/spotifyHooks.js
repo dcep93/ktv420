@@ -2,11 +2,14 @@
   const INSTALL_MARKER = "__ktv420_page_hooks_installed__";
   const SOURCE = "ktv420_page_hooks";
   const WORKLET_URL = document.currentScript?.dataset?.ktv420WorkletUrl || "";
+  const PLAYLIST_CONTENTS_OPERATION = "fetchPlaylistContents";
 
   if (window[INSTALL_MARKER]) {
     return;
   }
   window[INSTALL_MARKER] = true;
+
+  let lastPlaylistContentsRequest = null;
 
   const post = (event, payload, transfer = []) => {
     window.postMessage({ source: SOURCE, event, payload }, window.location.origin, transfer);
@@ -29,8 +32,11 @@
     ].some((needle) => text.includes(needle));
   };
 
-  const inspectJsonResponse = async ({ source, url, status, response }) => {
-    if (!(status >= 200 && status < 300) || !isSpotifyStateUrl(url)) {
+  const isPlaylistPathfinderUrl = (url) =>
+    /api-partner\.spotify\.com\/pathfinder\/v\d\/query/i.test(String(url || ""));
+
+  const inspectJsonResponse = async ({ source, url, status, response, method = "GET", requestHeaders = null, requestBody = null }) => {
+    if (!(status >= 200 && status < 300) || (!isSpotifyStateUrl(url) && !isPlaylistPathfinderUrl(url))) {
       return;
     }
 
@@ -41,15 +47,27 @@
       }
 
       const json = JSON.parse(text);
-      const candidates = extractTrackCandidates(json).slice(0, 80);
-      if (candidates.length > 0) {
-        post("playback-state", {
-          source,
+      if (isSpotifyStateUrl(url)) {
+        const candidates = extractTrackCandidates(json).slice(0, 80);
+        if (candidates.length > 0) {
+          post("playback-state", {
+            source,
+            url,
+            status,
+            candidates,
+            capturedAt: Date.now()
+          });
+        }
+      }
+
+      const parsedRequestBody = parseJson(requestBody);
+      if (isPlaylistContentsRequest(url, parsedRequestBody)) {
+        lastPlaylistContentsRequest = {
           url,
-          status,
-          candidates,
-          capturedAt: Date.now()
-        });
+          method,
+          headers: serializeHeaders(requestHeaders),
+          body: parsedRequestBody
+        };
       }
     } catch {
       // Spotify returns several non-JSON state-adjacent responses. They are ignored.
@@ -64,7 +82,10 @@
       source: "fetch",
       url,
       status: response.status,
-      response: response.clone()
+      response: response.clone(),
+      method: init?.method || input?.method || "GET",
+      requestHeaders: init?.headers || input?.headers || null,
+      requestBody: init?.body || null
     });
     return response;
   };
@@ -73,14 +94,16 @@
   const nativeSend = XMLHttpRequest.prototype.send;
 
   XMLHttpRequest.prototype.open = function ktv420XhrOpen(method, url) {
+    this.__ktv420Method = method;
     this.__ktv420Url = url;
     return nativeOpen.apply(this, arguments);
   };
 
   XMLHttpRequest.prototype.send = function ktv420XhrSend() {
+    this.__ktv420Body = arguments[0];
     this.addEventListener("loadend", () => {
       const url = this.responseURL || this.__ktv420Url || "";
-      if (!(this.status >= 200 && this.status < 300) || !isSpotifyStateUrl(url)) {
+      if (!(this.status >= 200 && this.status < 300) || (!isSpotifyStateUrl(url) && !isPlaylistPathfinderUrl(url))) {
         return;
       }
 
@@ -100,7 +123,9 @@
           source: "xhr",
           url,
           status: this.status,
-          response: new Response(body)
+          response: new Response(body),
+          method: this.__ktv420Method || "GET",
+          requestBody: this.__ktv420Body || null
         });
       } catch {
         // Some XHR response types cannot be inspected safely.
@@ -138,6 +163,8 @@
           result = controller.finish();
         } else if (command === "capture-abort") {
           result = controller.abort();
+        } else if (command === "playlist-tracks") {
+          result = await fetchPlaylistTracks(payload || {});
         } else {
           throw new Error(`Unknown ktv420 page command: ${command}`);
         }
@@ -535,6 +562,214 @@
     }, 250);
 
     emit();
+  }
+
+  async function fetchPlaylistTracks({ playlistUri = "", maxPages = 10 } = {}) {
+    if (!lastPlaylistContentsRequest) {
+      return {
+        ok: false,
+        reason: "No Spotify playlist contents request has been observed yet.",
+        tracks: []
+      };
+    }
+
+    const request = lastPlaylistContentsRequest;
+    const variables = request.body?.variables || {};
+    const uri = playlistUri || variables.uri || "";
+    if (!uri) {
+      return {
+        ok: false,
+        reason: "No playlist URI is available.",
+        tracks: []
+      };
+    }
+
+    const limit = Math.min(100, Math.max(1, Number(variables.limit) || 50));
+    const tracks = [];
+    let offset = 0;
+    let expectedTotal = Number.NaN;
+
+    for (let page = 0; page < maxPages; page += 1) {
+      const body = JSON.stringify({
+        ...request.body,
+        variables: {
+          ...variables,
+          uri,
+          offset,
+          limit
+        }
+      });
+
+      const response = await nativeFetch(request.url, {
+        method: request.method || "POST",
+        headers: request.headers,
+        body
+      });
+
+      if (!(response.status >= 200 && response.status < 300)) {
+        return {
+          ok: false,
+          reason: `Spotify playlist contents request failed with ${response.status}.`,
+          tracks: dedupePlaylistTracks(tracks)
+        };
+      }
+
+      const json = await response.json();
+      const pageTracks = extractPlaylistTracks(json);
+      const total = extractPlaylistTotal(json);
+      if (Number.isFinite(total)) {
+        expectedTotal = total;
+      }
+
+      if (pageTracks.length === 0) {
+        break;
+      }
+
+      tracks.push(...pageTracks);
+      offset += pageTracks.length;
+
+      if (Number.isFinite(expectedTotal) && offset >= expectedTotal) {
+        break;
+      }
+    }
+
+    return {
+      ok: tracks.length > 0,
+      playlistUri: uri,
+      total: Number.isFinite(expectedTotal) ? expectedTotal : null,
+      tracks: dedupePlaylistTracks(tracks)
+    };
+  }
+
+  function isPlaylistContentsRequest(url, body) {
+    return isPlaylistPathfinderUrl(url) &&
+      body?.operationName === PLAYLIST_CONTENTS_OPERATION &&
+      typeof body?.variables?.uri === "string";
+  }
+
+  function parseJson(value) {
+    if (typeof value !== "string" || !value.trim()) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+
+  function serializeHeaders(headers) {
+    const serialized = {};
+
+    try {
+      new Headers(headers || {}).forEach((value, key) => {
+        serialized[key] = value;
+      });
+    } catch {
+      return serialized;
+    }
+
+    return serialized;
+  }
+
+  function extractPlaylistTracks(json) {
+    const items = json?.data?.playlistV2?.content?.items;
+    if (!Array.isArray(items)) {
+      return [];
+    }
+
+    return items
+      .map((item, index) => playlistItemToTrack(item, index))
+      .filter(Boolean);
+  }
+
+  function extractPlaylistTotal(json) {
+    const content = json?.data?.playlistV2?.content;
+    const candidates = [
+      content?.totalCount,
+      content?.total,
+      content?.pagingInfo?.totalCount,
+      content?.pagingInfo?.total
+    ];
+
+    for (const candidate of candidates) {
+      const value = Number(candidate);
+      if (Number.isFinite(value) && value >= 0) {
+        return value;
+      }
+    }
+
+    return Number.NaN;
+  }
+
+  function playlistItemToTrack(item, index) {
+    const data = item?.itemV2?.data || item?.item?.data || item?.track || item;
+    const trackId = extractTrackId(firstString(data?.id, data?.uri, data?.sharingInfo?.shareUrl));
+    if (!trackId) {
+      return null;
+    }
+
+    const artists = extractPlaylistArtists(data);
+    const albumImages = extractPlaylistAlbumImages(data);
+
+    return {
+      rowIndex: index,
+      trackId,
+      trackName: firstString(data?.name, data?.title),
+      trackArtist: artists.join(", "),
+      trackArtworkSrc: albumImages[0]?.url || "",
+      uri: firstString(data?.uri) || `spotify:track:${trackId}`,
+      albumName: firstString(data?.albumOfTrack?.name, data?.album?.name),
+      albumImages
+    };
+  }
+
+  function extractPlaylistArtists(data) {
+    const artistItems = Array.isArray(data?.artists?.items)
+      ? data.artists.items
+      : Array.isArray(data?.artists)
+        ? data.artists
+        : [];
+
+    return artistItems
+      .map((artist) => firstString(artist?.profile?.name, artist?.name, artist?.title))
+      .filter(Boolean);
+  }
+
+  function extractPlaylistAlbumImages(data) {
+    const sources =
+      data?.albumOfTrack?.coverArt?.sources ||
+      data?.album?.coverArt?.sources ||
+      data?.album?.images ||
+      [];
+
+    if (!Array.isArray(sources)) {
+      return [];
+    }
+
+    return sources
+      .map((source) => ({
+        url: firstString(source?.url, source?.uri),
+        width: Number.isFinite(source?.width) ? source.width : null,
+        height: Number.isFinite(source?.height) ? source.height : null
+      }))
+      .filter((source) => source.url);
+  }
+
+  function dedupePlaylistTracks(tracks) {
+    const byId = new Map();
+
+    for (const track of tracks) {
+      if (!byId.has(track.trackId)) {
+        byId.set(track.trackId, {
+          ...track,
+          rowIndex: byId.size
+        });
+      }
+    }
+
+    return Array.from(byId.values());
   }
 
   function extractTrackCandidates(json) {
