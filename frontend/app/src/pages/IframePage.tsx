@@ -239,7 +239,7 @@ export default function IframePage() {
       currentTracks.map((track) => track.trackId)
     );
     sparseTrackStatesRef.current = outputStateByTrackId;
-    const nextTracks = currentTracks.map((track) => ({
+    const nextTracks = currentTracks.map((track) => {
       const state = outputStateByTrackId.get(track.trackId);
       return state
         ? applyTrackProgressState(track, state, { clearExistingError: true })
@@ -963,6 +963,8 @@ function toIframeTrack(value: unknown): IframeTrack | null {
   const opfsState = isOpfsState(track.opfsState) ? track.opfsState : null;
   const hasOutputMetadata = track.hasLocalOutputMetadata === true;
   const hasRemoteArtifacts = track.hasRemoteStemArtifacts === true;
+  const hasPendingRemoteQueueItem = track.hasPendingRemoteQueueItem === true;
+  const remoteOutputStatus = toRemoteOutputStatus(track.remoteOutputStatus);
   const isRemoteProcessing = track.isRemoteProcessing === true;
 
   if (!trackId || !trackName || rowIndex === null || !opfsState) {
@@ -978,10 +980,31 @@ function toIframeTrack(value: unknown): IframeTrack | null {
     opfsState,
     hasLocalOutputMetadata: hasOutputMetadata,
     hasRemoteStemArtifacts: hasRemoteArtifacts,
+    hasPendingRemoteQueueItem,
+    remoteOutputStatus,
     isRemoteProcessing,
     metadata,
     error: readString(track.error) || undefined
   };
+}
+
+function toRemoteOutputStatus(value: unknown): RemoteOutputStatus | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  if (value.status === "completed") {
+    return { status: "completed" };
+  }
+
+  if (value.status === "failed") {
+    return {
+      status: "failed",
+      error: readString(value.error) || "Remote processing failed."
+    };
+  }
+
+  return null;
 }
 
 function toLocalDatabaseSource(value: unknown): LocalDatabaseSource | null {
@@ -1113,6 +1136,10 @@ function updateCapturedTrack(currentTracks: IframeTrack[] | null, value: Metadat
         value.hasRemoteStemArtifacts === true ||
         value.isRemoteProcessing === true ||
         (track.hasRemoteStemArtifacts && value.hasRemoteStemArtifacts !== false),
+      hasPendingRemoteQueueItem:
+        value.isRemoteProcessing === true ||
+        (track.hasPendingRemoteQueueItem && value.isRemoteProcessing !== false),
+      remoteOutputStatus: track.remoteOutputStatus,
       isRemoteProcessing:
         value.isRemoteProcessing === true ||
         (track.isRemoteProcessing && value.isRemoteProcessing !== false),
@@ -1136,53 +1163,66 @@ async function refreshTrackProgressStates(
   tracks: IframeTrack[],
   updateTracks: (updater: (currentTracks: IframeTrack[] | null) => IframeTrack[] | null) => void
 ) {
-  const states = await Promise.all(
-    tracks.map(async (track) => {
-      try {
-        const [hasOutputMetadata, remoteArtifactsStatus] = await Promise.all([
-          hasLocalOutputMetadata(track.trackId),
-          readRemoteStemArtifactsStatus(track.trackId)
-        ]);
-
-        return {
-          trackId: track.trackId,
-          hasLocalOutputMetadata: hasOutputMetadata,
-          hasRemoteStemArtifacts: remoteArtifactsStatus.exists,
-          remoteStemArtifactsStatus: remoteArtifactsStatus
-        } satisfies TrackProgressRefreshState;
-      } catch (error) {
-        console.warn(`[ktv420] Failed to refresh progress state for ${track.trackId}`, error);
-        return {
+  let stateByTrackId: Map<string, TrackProgressRefreshState>;
+  try {
+    stateByTrackId = await readSparseRemoteTrackStates(tracks.map((track) => track.trackId));
+  } catch (error) {
+    console.warn("[ktv420] Failed to refresh sparse remote progress state", error);
+    stateByTrackId = new Map(
+      tracks.map((track) => [
+        track.trackId,
+        {
           trackId: track.trackId,
           hasLocalOutputMetadata: track.hasLocalOutputMetadata,
           hasRemoteStemArtifacts: track.hasRemoteStemArtifacts,
-          remoteStemArtifactsStatus: null
-        } satisfies TrackProgressRefreshState;
-      }
-    })
-  );
+          hasPendingRemoteQueueItem: track.hasPendingRemoteQueueItem,
+          remoteOutputStatus: track.remoteOutputStatus
+        }
+      ])
+    );
+  }
+
   updateTracks((currentTracks) => {
     if (!currentTracks) {
       return currentTracks;
     }
 
-    const stateByTrackId = new Map(states.map((state) => [state.trackId, state]));
-    const nextTracks = currentTracks.map((track) => {
+    return currentTracks.map((track) => {
       const state = stateByTrackId.get(track.trackId);
-      return state === undefined
-        ? track
-        : {
-            ...track,
-            hasLocalOutputMetadata: state.hasLocalOutputMetadata,
-            hasRemoteStemArtifacts: state.hasRemoteStemArtifacts,
-            isRemoteProcessing:
-              state.hasLocalOutputMetadata || !state.hasRemoteStemArtifacts
-                ? false
-                : track.isRemoteProcessing
-          };
+      return state === undefined ? track : applyTrackProgressState(track, state);
     });
-    return nextTracks;
   });
+
+  return stateByTrackId;
+}
+
+function applyTrackProgressState(
+  track: IframeTrack,
+  state: TrackProgressRefreshState,
+  { clearExistingError = false } = {}
+) {
+  const failedError = state.remoteOutputStatus?.status === "failed"
+    ? state.remoteOutputStatus.error
+    : "";
+  const isRemoteProcessing =
+    !state.hasLocalOutputMetadata &&
+    (
+      state.hasPendingRemoteQueueItem ||
+      (
+        state.hasRemoteStemArtifacts &&
+        state.remoteOutputStatus?.status !== "failed"
+      )
+    );
+
+  return {
+    ...track,
+    hasLocalOutputMetadata: state.hasLocalOutputMetadata,
+    hasRemoteStemArtifacts: state.hasRemoteStemArtifacts,
+    hasPendingRemoteQueueItem: state.hasPendingRemoteQueueItem,
+    remoteOutputStatus: state.remoteOutputStatus,
+    isRemoteProcessing,
+    error: failedError || (clearExistingError ? undefined : track.error)
+  };
 }
 
 async function refreshLocalOutputMetadataForTrack(
@@ -1213,6 +1253,7 @@ function markTrackLocalOutputMetadata(
       ? {
           ...track,
           hasLocalOutputMetadata: hasOutputMetadata,
+          hasPendingRemoteQueueItem: hasOutputMetadata ? false : track.hasPendingRemoteQueueItem,
           isRemoteProcessing: hasOutputMetadata ? false : track.isRemoteProcessing
         }
       : track
@@ -1233,6 +1274,7 @@ function markTrackRemoteProcessingState(
       ? {
           ...track,
           hasRemoteStemArtifacts: isRemoteProcessing ? true : track.hasRemoteStemArtifacts,
+          hasPendingRemoteQueueItem: isRemoteProcessing ? track.hasPendingRemoteQueueItem : false,
           isRemoteProcessing,
           error: isRemoteProcessing ? undefined : track.error
         }
@@ -1268,6 +1310,8 @@ function markTrackErrorState(currentTracks: IframeTrack[] | null, trackId: strin
     track.trackId === trackId
       ? {
           ...track,
+          hasPendingRemoteQueueItem: false,
+          remoteOutputStatus: { status: "failed" as const, error },
           isRemoteProcessing: false,
           error
         }
@@ -1374,7 +1418,12 @@ function stateKind(track: IframeTrack): TrackDisplayState {
     return "broken";
   }
 
-  if (track.opfsState === "hydrated" || track.hasRemoteStemArtifacts) {
+  if (
+    track.opfsState === "hydrated" ||
+    track.hasRemoteStemArtifacts ||
+    track.hasPendingRemoteQueueItem ||
+    track.isRemoteProcessing
+  ) {
     return "in-progress";
   }
 
@@ -1394,7 +1443,12 @@ function stateLabel(track: IframeTrack) {
     return track.error;
   }
 
-  if (track.opfsState === "hydrated" || track.hasRemoteStemArtifacts) {
+  if (
+    track.opfsState === "hydrated" ||
+    track.hasRemoteStemArtifacts ||
+    track.hasPendingRemoteQueueItem ||
+    track.isRemoteProcessing
+  ) {
     return "In progress";
   }
 
