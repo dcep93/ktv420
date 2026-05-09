@@ -112,6 +112,7 @@ export default function IframePage() {
   const knownQueueIdsRef = useRef(new Set<string>());
   const tracksNeedingCaptureRef = useRef(new Set<string>());
   const pendingRemoteTrackIdsRef = useRef(new Set<string>());
+  const downloadingRemoteTrackIdsRef = useRef(new Set<string>());
   const sparseTrackStatesRef = useRef(new Map<string, SparseRemoteTrackState>());
   const checkingRemoteTrackIdsRef = useRef(new Set<string>());
   const completedQueueIdsRef = useRef(new Set<string>());
@@ -254,6 +255,7 @@ export default function IframePage() {
     setTracks(nextTracks);
 
     expectedCaptureIdsRef.current = new Set(nextTracks.map((track) => track.trackId));
+    requestSpotifyCaptureFromSnapshot(nextTracks, outputStateByTrackId);
     for (const track of nextTracks) {
       enqueueTrack(track);
     }
@@ -339,6 +341,7 @@ export default function IframePage() {
     knownQueueIdsRef.current.clear();
     tracksNeedingCaptureRef.current.clear();
     pendingRemoteTrackIdsRef.current.clear();
+    downloadingRemoteTrackIdsRef.current.clear();
     sparseTrackStatesRef.current.clear();
     checkingRemoteTrackIdsRef.current.clear();
     completedQueueIdsRef.current.clear();
@@ -458,8 +461,8 @@ export default function IframePage() {
     const sparseTrackState = await sparseStateForTrack(track.trackId);
     const remoteStatus = sparseTrackState.remoteOutputStatus;
     if (remoteStatus?.status === "completed") {
-      await downloadTrackArtifacts(track.trackId, metadata);
-      return "completed";
+      startRemoteArtifactDownload(track.trackId, metadata);
+      return "pending_remote";
     }
     if (remoteStatus?.status === "failed") {
       markTrackError(track.trackId, remoteStatus.error);
@@ -484,6 +487,20 @@ export default function IframePage() {
     await sendAction(ENQUEUE_TRACK_MESSAGE, ENQUEUE_TRACK_RESULT_MESSAGE, track.trackId);
     await waitForRemoteTrack(track.trackId);
     return "pending_remote";
+  }
+
+  function requestSpotifyCaptureFromSnapshot(
+    tracks: IframeTrack[],
+    stateByTrackId: Map<string, SparseRemoteTrackState>
+  ) {
+    for (const track of tracks) {
+      const state = stateByTrackId.get(track.trackId);
+      if (trackNeedsSpotifyCapture(track, state)) {
+        tracksNeedingCaptureRef.current.add(track.trackId);
+      }
+    }
+
+    requestSpotifyCaptureIfNeeded();
   }
 
   async function sparseStateForTrack(trackId: string) {
@@ -631,11 +648,38 @@ export default function IframePage() {
     }
 
     const track = findTrack(trackId);
-    await downloadTrackArtifacts(trackId, track ? metadataForTrack(track) : { trackId });
-    pendingRemoteTrackIdsRef.current.delete(trackId);
-    completedQueueIdsRef.current.add(trackId);
-    tracksNeedingCaptureRef.current.delete(trackId);
-    markTrackRemoteProcessing(trackId, false);
+    startRemoteArtifactDownload(trackId, track ? metadataForTrack(track) : { trackId });
+  }
+
+  function startRemoteArtifactDownload(trackId: string, metadata: MetadataRecord) {
+    if (
+      !trackId ||
+      completedQueueIdsRef.current.has(trackId) ||
+      downloadingRemoteTrackIdsRef.current.has(trackId)
+    ) {
+      return;
+    }
+
+    downloadingRemoteTrackIdsRef.current.add(trackId);
+    markTrackRemoteProcessing(trackId, true);
+    void downloadRemoteArtifactToLocalOutput(trackId, metadata);
+  }
+
+  async function downloadRemoteArtifactToLocalOutput(trackId: string, metadata: MetadataRecord) {
+    try {
+      const hasOutputMetadata = await downloadTrackArtifacts(trackId, metadata);
+      if (hasOutputMetadata) {
+        completedQueueIdsRef.current.add(trackId);
+        tracksNeedingCaptureRef.current.delete(trackId);
+      }
+    } catch (error) {
+      handleRemotePollError(error);
+    } finally {
+      downloadingRemoteTrackIdsRef.current.delete(trackId);
+      pendingRemoteTrackIdsRef.current.delete(trackId);
+      markTrackRemoteProcessing(trackId, false);
+      maybeAlertCaptureSuccess();
+    }
   }
 
   async function downloadTrackArtifacts(trackId: string, metadata: MetadataRecord) {
@@ -1157,6 +1201,24 @@ function metadataForTrack(track: IframeTrack): MetadataRecord {
     trackArtist: readString(track.metadata?.trackArtist) || track.trackArtist,
     trackArtworkSrc: readString(track.metadata?.trackArtworkSrc) || track.trackArtworkSrc
   };
+}
+
+function trackNeedsSpotifyCapture(track: IframeTrack, state?: SparseRemoteTrackState) {
+  const hasLocalOutputMetadata = state?.hasLocalOutputMetadata ?? track.hasLocalOutputMetadata;
+  const hasRemoteStemArtifacts = state?.hasRemoteStemArtifacts ?? track.hasRemoteStemArtifacts;
+  const hasPendingRemoteQueueItem = state?.hasPendingRemoteQueueItem ?? track.hasPendingRemoteQueueItem;
+  const remoteOutputStatus = state?.remoteOutputStatus ?? track.remoteOutputStatus;
+
+  if (
+    hasLocalOutputMetadata ||
+    remoteOutputStatus ||
+    hasRemoteStemArtifacts ||
+    hasPendingRemoteQueueItem
+  ) {
+    return false;
+  }
+
+  return track.opfsState !== "hydrated" || !track.metadata;
 }
 
 async function refreshTrackProgressStates(
