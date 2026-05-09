@@ -38,6 +38,14 @@ export type RemoteOutputStatus =
   | { status: "completed" }
   | { status: "failed"; error: string };
 
+export type SparseRemoteTrackState = {
+  trackId: string;
+  hasLocalOutputMetadata: boolean;
+  hasRemoteStemArtifacts: boolean;
+  hasPendingRemoteQueueItem: boolean;
+  remoteOutputStatus: RemoteOutputStatus | null;
+};
+
 export type RemoteStemArtifactsStatus = {
   exists: boolean;
   source: "output_metadata" | "prefix" | "none";
@@ -223,6 +231,49 @@ export async function readRemoteOutputStatus(trackId: string): Promise<RemoteOut
   return null;
 }
 
+export async function readSparseRemoteTrackStates(trackIds: string[]) {
+  const uniqueTrackIds = [...new Set(trackIds.filter(Boolean))];
+  const states = new Map<string, SparseRemoteTrackState>();
+  const [localOutputStates, remoteStemTrackIds, pendingQueueTrackIds] = await Promise.all([
+    Promise.all(
+      uniqueTrackIds.map(async (trackId) => ({
+        trackId,
+        hasLocalOutputMetadata: await hasLocalOutputMetadata(trackId)
+      }))
+    ),
+    listStemTrackIds(),
+    listPendingQueueTrackIds()
+  ]);
+  const localOutputByTrackId = new Map(
+    localOutputStates.map((state) => [state.trackId, state.hasLocalOutputMetadata])
+  );
+  const sparseRemoteTrackIds = uniqueTrackIds.filter((trackId) => remoteStemTrackIds.has(trackId));
+  const remoteOutputStatuses = await Promise.all(
+    sparseRemoteTrackIds.map(async (trackId) => ({
+      trackId,
+      remoteOutputStatus: await readRemoteOutputStatus(trackId)
+    }))
+  );
+  const remoteOutputStatusByTrackId = new Map(
+    remoteOutputStatuses.map((state) => [state.trackId, state.remoteOutputStatus])
+  );
+
+  for (const trackId of uniqueTrackIds) {
+    const hasRemoteStemArtifacts = remoteStemTrackIds.has(trackId);
+    states.set(trackId, {
+      trackId,
+      hasLocalOutputMetadata: localOutputByTrackId.get(trackId) ?? false,
+      hasRemoteStemArtifacts,
+      hasPendingRemoteQueueItem: pendingQueueTrackIds.has(trackId),
+      remoteOutputStatus: hasRemoteStemArtifacts
+        ? remoteOutputStatusByTrackId.get(trackId) ?? null
+        : null
+    });
+  }
+
+  return states;
+}
+
 export async function readQueueHeadState() {
   const value = await fetchObjectJsonOrNull(QUEUE_HEAD_STATE_PATH);
   if (!isQueueHeadState(value)) {
@@ -361,6 +412,48 @@ async function listObjectsWithPrefix(prefix: string): Promise<GcsObject[]> {
   } while (pageToken);
 
   return objects;
+}
+
+async function listStemTrackIds() {
+  const trackIds = new Set<string>();
+  let pageToken: string | undefined;
+
+  do {
+    const listUrl = bucketObjectsUrl();
+    listUrl.searchParams.set("prefix", "stems/");
+    listUrl.searchParams.set("delimiter", "/");
+
+    if (pageToken) {
+      listUrl.searchParams.set("pageToken", pageToken);
+    }
+
+    const response = await fetch(cacheBustedUrl(listUrl), { cache: "no-store" });
+
+    if (!response.ok) {
+      throw new Error(`Failed to list stems folders: ${response.status} ${response.statusText}`);
+    }
+
+    const data = (await response.json()) as {
+      prefixes?: string[];
+      nextPageToken?: string;
+    };
+
+    for (const prefix of data.prefixes ?? []) {
+      const trackId = parseStemTrackIdPrefix(prefix);
+      if (trackId) {
+        trackIds.add(trackId);
+      }
+    }
+
+    pageToken = data.nextPageToken;
+  } while (pageToken);
+
+  return trackIds;
+}
+
+function parseStemTrackIdPrefix(prefix: string) {
+  const match = prefix.match(/^stems\/([^/]+)\/$/);
+  return match?.[1] ?? "";
 }
 
 function compareDownloadOrder(a: string, b: string, markerPath: string) {

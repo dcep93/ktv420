@@ -3,16 +3,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   downloadArtifactsToOpfs,
   hasLocalOutputMetadata,
-  hasRemoteStemArtifacts,
   kickProcessQueue,
-  listPendingQueueTrackIds,
   readQueueHeadState,
   readRemoteOutputStatus,
-  readRemoteStemArtifactsStatus,
+  readSparseRemoteTrackStates,
   requestUnpartitionedOpfsAccess,
   saveSpotifyContext,
   type LocalDatabaseEntry,
-  type RemoteStemArtifactsStatus
+  type RemoteOutputStatus,
+  type SparseRemoteTrackState
 } from "./iframeArtifacts";
 
 const IFRAME_MESSAGE_SOURCE = "ktv420-iframe";
@@ -57,6 +56,8 @@ type IframeTrack = {
   opfsState: OpfsState;
   hasLocalOutputMetadata: boolean;
   hasRemoteStemArtifacts: boolean;
+  hasPendingRemoteQueueItem: boolean;
+  remoteOutputStatus: RemoteOutputStatus | null;
   isRemoteProcessing: boolean;
   metadata: MetadataRecord | null;
   error?: string;
@@ -73,7 +74,8 @@ type TrackProgressRefreshState = {
   trackId: string;
   hasLocalOutputMetadata: boolean;
   hasRemoteStemArtifacts: boolean;
-  remoteStemArtifactsStatus: RemoteStemArtifactsStatus | null;
+  hasPendingRemoteQueueItem: boolean;
+  remoteOutputStatus: RemoteOutputStatus | null;
 };
 
 type PendingAction = {
@@ -110,7 +112,7 @@ export default function IframePage() {
   const knownQueueIdsRef = useRef(new Set<string>());
   const tracksNeedingCaptureRef = useRef(new Set<string>());
   const pendingRemoteTrackIdsRef = useRef(new Set<string>());
-  const submittedRemoteTrackIdsRef = useRef<Set<string> | null>(null);
+  const sparseTrackStatesRef = useRef(new Map<string, SparseRemoteTrackState>());
   const checkingRemoteTrackIdsRef = useRef(new Set<string>());
   const completedQueueIdsRef = useRef(new Set<string>());
   const expectedCaptureIdsRef = useRef<Set<string> | null>(null);
@@ -159,6 +161,8 @@ export default function IframePage() {
             tracksRef.current = refreshedTracks;
             return refreshedTracks;
           });
+        }).then((stateByTrackId) => {
+          sparseTrackStatesRef.current = stateByTrackId;
         });
         return;
       }
@@ -231,30 +235,20 @@ export default function IframePage() {
 
     resetQueueState();
     const currentTracks = tracksRef.current ?? [];
-    const outputStates = await Promise.all(
-      currentTracks.map(async (track) => {
-        const [hasOutputMetadata, hasRemoteArtifacts] = await Promise.all([
-          hasLocalOutputMetadata(track.trackId),
-          hasRemoteStemArtifacts(track.trackId)
-        ]);
-
-        return {
-          trackId: track.trackId,
-          hasLocalOutputMetadata: hasOutputMetadata,
-          hasRemoteStemArtifacts: hasRemoteArtifacts
-        };
-      })
+    const outputStateByTrackId = await readSparseRemoteTrackStates(
+      currentTracks.map((track) => track.trackId)
     );
-    const outputStateByTrackId = new Map(outputStates.map((state) => [state.trackId, state]));
+    sparseTrackStatesRef.current = outputStateByTrackId;
     const nextTracks = currentTracks.map((track) => ({
-      ...track,
-      hasLocalOutputMetadata:
-        outputStateByTrackId.get(track.trackId)?.hasLocalOutputMetadata ?? track.hasLocalOutputMetadata,
-      hasRemoteStemArtifacts:
-        outputStateByTrackId.get(track.trackId)?.hasRemoteStemArtifacts ?? track.hasRemoteStemArtifacts,
-      isRemoteProcessing: false,
-      error: undefined
-    }));
+      const state = outputStateByTrackId.get(track.trackId);
+      return state
+        ? applyTrackProgressState(track, state, { clearExistingError: true })
+        : {
+            ...track,
+            isRemoteProcessing: false,
+            error: undefined
+          };
+    });
 
     tracksRef.current = nextTracks;
     setTracks(nextTracks);
@@ -345,7 +339,7 @@ export default function IframePage() {
     knownQueueIdsRef.current.clear();
     tracksNeedingCaptureRef.current.clear();
     pendingRemoteTrackIdsRef.current.clear();
-    submittedRemoteTrackIdsRef.current = null;
+    sparseTrackStatesRef.current.clear();
     checkingRemoteTrackIdsRef.current.clear();
     completedQueueIdsRef.current.clear();
     expectedCaptureIdsRef.current = null;
@@ -461,7 +455,8 @@ export default function IframePage() {
     }
 
     const metadata = metadataForTrack(track);
-    const remoteStatus = await readRemoteOutputStatus(track.trackId);
+    const sparseTrackState = await sparseStateForTrack(track.trackId);
+    const remoteStatus = sparseTrackState.remoteOutputStatus;
     if (remoteStatus?.status === "completed") {
       await downloadTrackArtifacts(track.trackId, metadata);
       return "completed";
@@ -471,12 +466,12 @@ export default function IframePage() {
       throw new Error(`Remote processing failed for ${trackNameForId(track.trackId)}. ${remoteStatus.error}`);
     }
 
-    if (await hasPendingRemoteQueueItem(track.trackId)) {
+    if (sparseTrackState.hasPendingRemoteQueueItem) {
       await waitForRemoteTrack(track.trackId);
       return "pending_remote";
     }
 
-    if (await hasRemoteStemArtifacts(track.trackId)) {
+    if (sparseTrackState.hasRemoteStemArtifacts) {
       markTrackRemoteStemArtifacts(track.trackId, true);
       await waitForRemoteTrack(track.trackId);
       return "pending_remote";
@@ -491,24 +486,39 @@ export default function IframePage() {
     return "pending_remote";
   }
 
+  async function sparseStateForTrack(trackId: string) {
+    const cachedState = sparseTrackStatesRef.current.get(trackId);
+    if (cachedState) {
+      return cachedState;
+    }
+
+    const stateByTrackId = await readSparseRemoteTrackStates([trackId]);
+    for (const [nextTrackId, state] of stateByTrackId) {
+      sparseTrackStatesRef.current.set(nextTrackId, state);
+    }
+    const state = stateByTrackId.get(trackId);
+    if (!state) {
+      return {
+        trackId,
+        hasLocalOutputMetadata: false,
+        hasRemoteStemArtifacts: false,
+        hasPendingRemoteQueueItem: false,
+        remoteOutputStatus: null
+      } satisfies SparseRemoteTrackState;
+    }
+
+    return state;
+  }
+
   async function waitForRemoteTrack(trackId: string) {
     if (!trackId || completedQueueIdsRef.current.has(trackId)) {
       return;
     }
 
     markTrackRemoteProcessing(trackId, true);
-    submittedRemoteTrackIdsRef.current?.add(trackId);
     pendingRemoteTrackIdsRef.current.add(trackId);
     void checkRemoteTrackOnce(trackId).catch(handleRemotePollError);
     startRemoteOutputPoll();
-  }
-
-  async function hasPendingRemoteQueueItem(trackId: string) {
-    if (!submittedRemoteTrackIdsRef.current) {
-      submittedRemoteTrackIdsRef.current = await listPendingQueueTrackIds();
-    }
-
-    return submittedRemoteTrackIdsRef.current.has(trackId);
   }
 
   function startRemoteOutputPoll() {
