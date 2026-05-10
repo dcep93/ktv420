@@ -78,6 +78,21 @@ type TrackProgressRefreshState = {
   remoteOutputStatus: RemoteOutputStatus | null;
 };
 
+type TimingEvent = {
+  name: string;
+  atMs: number;
+  deltaFromClickMs: number;
+  details?: MetadataRecord;
+};
+
+type TimingTrace = {
+  id: string;
+  source: "ktv420_iframe_logo";
+  startedAt: string;
+  startWallMs: number;
+  events: TimingEvent[];
+};
+
 type PendingAction = {
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
@@ -128,6 +143,7 @@ export default function IframePage() {
   const deleteRefreshWaitersRef = useRef(new Map<string, () => void>());
   const tracksRef = useRef<IframeTrack[] | null>(null);
   const spotifyPathRef = useRef("");
+  const timingTraceRef = useRef<TimingTrace | null>(null);
   const isReady = tracks !== null;
 
   useEffect(() => {
@@ -227,18 +243,31 @@ export default function IframePage() {
       return;
     }
 
+    const clickTracks = tracksRef.current ?? [];
+    startTimingTrace({
+      spotifyPath: spotifyPathRef.current,
+      trackCount: clickTracks.length
+    });
+
     try {
+      markTiming("opfs_access_request_start");
       await requestUnpartitionedOpfsAccess();
+      markTiming("opfs_access_request_end");
     } catch (error) {
+      markTiming("opfs_access_request_error", { error: formatErrorMessage(error) });
       window.alert(error instanceof Error ? error.message : String(error));
       return;
     }
 
     resetQueueState();
     const currentTracks = tracksRef.current ?? [];
+    markTiming("remote_sparse_state_read_start", { trackCount: currentTracks.length });
     const outputStateByTrackId = await readSparseRemoteTrackStates(
       currentTracks.map((track) => track.trackId)
     );
+    markTiming("remote_sparse_state_read_end", {
+      stateCount: outputStateByTrackId.size
+    });
     sparseTrackStatesRef.current = outputStateByTrackId;
     const nextTracks = currentTracks.map((track) => {
       const state = outputStateByTrackId.get(track.trackId);
@@ -253,14 +282,20 @@ export default function IframePage() {
 
     tracksRef.current = nextTracks;
     setTracks(nextTracks);
+    markTiming("iframe_tracks_state_updated", { trackCount: nextTracks.length });
 
     expectedCaptureIdsRef.current = new Set(nextTracks.map((track) => track.trackId));
     requestSpotifyCaptureFromSnapshot(nextTracks, outputStateByTrackId);
     for (const track of nextTracks) {
       enqueueTrack(track);
     }
+    markTiming("iframe_tracks_enqueued", {
+      queueCount: queueRef.current.length,
+      needsSpotifyCaptureCount: tracksNeedingCaptureRef.current.size
+    });
 
     void processQueue();
+    markTiming("iframe_process_queue_started");
     maybeAlertCaptureSuccess();
   }
 
@@ -719,7 +754,8 @@ export default function IframePage() {
 
     const trackIds = Array.from(tracksNeedingCaptureRef.current);
     captureStartedRef.current = true;
-    postParentMessage(TOGGLE_RUN_MESSAGE, { trackIds });
+    markTiming("iframe_toggle_run_posted", { trackCount: trackIds.length });
+    postParentMessage(TOGGLE_RUN_MESSAGE, { trackIds, timingTrace: timingSnapshot() });
   }
 
   function markTrackComplete(trackId: string) {
@@ -815,14 +851,56 @@ export default function IframePage() {
       throw new Error("Missing Spotify playlist or album path.");
     }
 
+    markTiming("play_route_save_context_start", { trackCount: currentTracks.length });
     await saveSpotifyContext({
       id: currentSpotifyPath,
       tracks: currentTracks.map((track) => track.trackId)
     });
+    markTiming("play_route_save_context_end");
 
     const playUrl = new URL("/play", window.location.origin);
     playUrl.hash = currentSpotifyPath;
+    markTiming("play_route_window_open", { url: playUrl.toString() });
     window.open(playUrl.toString(), "_blank", "noopener,noreferrer");
+  }
+
+  function startTimingTrace(details: MetadataRecord = {}) {
+    const startWallMs = Date.now();
+    timingTraceRef.current = {
+      id: `${startWallMs}-${Math.random().toString(36).slice(2, 10)}`,
+      source: "ktv420_iframe_logo",
+      startedAt: new Date(startWallMs).toISOString(),
+      startWallMs,
+      events: []
+    };
+    markTiming("iframe_logo_click", details);
+  }
+
+  function markTiming(name: string, details?: MetadataRecord) {
+    const trace = timingTraceRef.current;
+    if (!trace) {
+      return;
+    }
+
+    const atMs = Date.now();
+    trace.events.push({
+      name,
+      atMs,
+      deltaFromClickMs: atMs - trace.startWallMs,
+      ...(details ? { details: sanitizeTimingDetails(details) } : {})
+    });
+  }
+
+  function timingSnapshot() {
+    const trace = timingTraceRef.current;
+    if (!trace) {
+      return null;
+    }
+
+    return {
+      ...trace,
+      events: trace.events.map((event) => ({ ...event }))
+    };
   }
 
   function waitForDeleteRefresh(trackId: string) {
@@ -1419,6 +1497,31 @@ function parseConsoleContents(text: string) {
   } catch {
     return text;
   }
+}
+
+function sanitizeTimingDetails(details: MetadataRecord) {
+  const cleanDetails: MetadataRecord = {};
+
+  for (const [key, value] of Object.entries(details)) {
+    if (
+      value === null ||
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    ) {
+      cleanDetails[key] = value;
+    } else if (Array.isArray(value)) {
+      cleanDetails[key] = value
+        .filter((item) => typeof item === "string" || typeof item === "number")
+        .slice(0, 20);
+    }
+  }
+
+  return cleanDetails;
+}
+
+function formatErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function formatBytes(value: number | undefined) {

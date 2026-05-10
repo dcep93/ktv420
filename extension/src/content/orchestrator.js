@@ -11,6 +11,7 @@ import {
 } from "./dom.js";
 import { resolveCurrentPlaybackTrack } from "./playbackState.js";
 import { readCachedTrack, writeTrackArtifact } from "./storage.js";
+import { logTimingReport, markTiming, normalizeTimingTrace } from "./timing.js";
 import { formatSeconds, looselyMatches } from "./text.js";
 import { md5Hex } from "./md5.js";
 
@@ -44,10 +45,15 @@ export class CaptureOrchestrator extends EventTarget {
     pausePlaybackCleanly();
   }
 
-  async run({ trackIds = null } = {}) {
+  async run({ trackIds = null, timingTrace = null } = {}) {
     if (this.active) {
       return;
     }
+
+    const runTimingTrace = normalizeTimingTrace(timingTrace);
+    markTiming(runTimingTrace, "orchestrator_run_start", {
+      requestedTrackCount: Array.isArray(trackIds) ? trackIds.length : null
+    });
 
     this.active = true;
     this.stopRequested = false;
@@ -58,18 +64,25 @@ export class CaptureOrchestrator extends EventTarget {
       startedAt: new Date().toISOString(),
       route: window.location.href,
       storageVersion: STORAGE_VERSION,
+      timingTrace: runTimingTrace,
       events: []
     };
 
     const summary = [];
     const queuedTrackIds = [];
+    let hasLoggedFirstStartTiming = false;
 
     try {
       if (!isSupportedRoute()) {
         throw new Error("ktv420 runs only on Spotify album and playlist routes.");
       }
 
+      markTiming(runTimingTrace, "orchestrator_preflight_start");
       const queue = await this.preflightQueue(debug, trackIds);
+      markTiming(runTimingTrace, "orchestrator_preflight_end", {
+        queueCount: queue.length,
+        cachedCount: queue.filter((item) => item.cached).length
+      });
       if (queue.length === 0) {
         throw new Error(trackIds
           ? "No requested Spotify track rows need PCM capture on this page."
@@ -88,15 +101,22 @@ export class CaptureOrchestrator extends EventTarget {
 
         debug.events.push({ type: "all-cached", trackCount: queue.length, at: Date.now() });
         this.dispatchCaptureComplete(queuedTrackIds);
+        logTimingReport(runTimingTrace, "spotify_capture_all_cached", {
+          trackCount: queue.length
+        });
         console.log("[ktv420] Capture run complete", summary);
         return;
       }
 
+      markTiming(runTimingTrace, "page_hooks_inject_start");
       await this.bridge.inject();
+      markTiming(runTimingTrace, "page_hooks_inject_end");
 
       if (!queue[0].row) {
+        markTiming(runTimingTrace, "tracklist_scroll_to_start_start");
         scrollTracklistToStart();
         await delay(150);
+        markTiming(runTimingTrace, "tracklist_scroll_to_start_end");
       }
 
       const firstRow = resolveTrackRow(queue[0]);
@@ -105,7 +125,14 @@ export class CaptureOrchestrator extends EventTarget {
       }
 
       debug.events.push({ type: "start-first-row", trackId: queue[0].trackId, at: Date.now() });
+      markTiming(runTimingTrace, "spotify_first_row_resolved", {
+        trackId: queue[0].trackId,
+        cached: Boolean(queue[0].cached)
+      });
       dispatchSyntheticDoubleClick(firstRow);
+      markTiming(runTimingTrace, "spotify_first_row_doubleclick_dispatched", {
+        trackId: queue[0].trackId
+      });
 
       let startInfo = null;
       for (let index = 0; index < queue.length; index += 1) {
@@ -114,7 +141,10 @@ export class CaptureOrchestrator extends EventTarget {
         const nextItem = queue[index + 1] || null;
 
         if (!startInfo) {
-          startInfo = await this.beginAndAcceptItem(item, debug);
+          startInfo = await this.beginAndAcceptItem(item, debug, {
+            logFirstStartTiming: !hasLoggedFirstStartTiming
+          });
+          hasLoggedFirstStartTiming = true;
         }
 
         let pendingCapture = null;
@@ -136,11 +166,18 @@ export class CaptureOrchestrator extends EventTarget {
           if (item.cached) {
             clickSkipForward();
             debug.events.push({ type: "skip-forward", fromTrackId: item.trackId, at: Date.now() });
-            startInfo = await this.beginAndAcceptItem(nextItem, debug);
+            startInfo = await this.beginAndAcceptItem(nextItem, debug, {
+              logFirstStartTiming: !hasLoggedFirstStartTiming
+            });
+            hasLoggedFirstStartTiming = true;
           } else {
             const { finished } = await this.finishAndBeginNextCapture();
             pendingCapture.capture = finished;
-            startInfo = await this.beginAndAcceptItem(nextItem, debug, { captureAlreadyBegun: true });
+            startInfo = await this.beginAndAcceptItem(nextItem, debug, {
+              captureAlreadyBegun: true,
+              logFirstStartTiming: !hasLoggedFirstStartTiming
+            });
+            hasLoggedFirstStartTiming = true;
           }
         } else if (pendingCapture) {
           pendingCapture.capture = await this.finishPageCapture();

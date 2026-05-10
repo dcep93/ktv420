@@ -1,6 +1,7 @@
 import { SELECTORS } from "./constants.js";
 import { collectTrackRows, isSupportedRoute } from "./dom.js";
 import { deleteTrackArtifact, inspectTrackArtifact, readTrackArtifact } from "./storage.js";
+import { markTiming, normalizeTimingTrace } from "./timing.js";
 
 const BUTTON_ID = "ktv420-spotify-capture-button";
 const IFRAME_ID = "ktv420-prepared-iframe";
@@ -103,10 +104,16 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks = asyn
     }
 
     if (message.type === TOGGLE_RUN_MESSAGE) {
+      const timingTrace = normalizeTimingTrace(message.timingTrace);
+      const trackIds = Array.isArray(message.trackIds)
+        ? message.trackIds.filter((trackId) => typeof trackId === "string" && trackId)
+        : null;
+      markTiming(timingTrace, "content_toggle_run_message_received", {
+        trackCount: trackIds?.length ?? null
+      });
       await onToggleRun({
-        trackIds: Array.isArray(message.trackIds)
-          ? message.trackIds.filter((trackId) => typeof trackId === "string" && trackId)
-          : null
+        trackIds,
+        timingTrace
       });
       schedulePlace();
       return;
