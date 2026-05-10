@@ -236,14 +236,23 @@
         return discoverUsableTargets(mediaTracker).map(describeMediaElement);
       },
       async begin({ timeoutMs = 1000 } = {}) {
+        const startedAt = Date.now();
+        const timing = [];
+        markTiming(timing, "wait_for_capture_target_start", startedAt);
         const element = await waitForSingleCaptureTarget(mediaTracker, timeoutMs);
+        markTiming(timing, "wait_for_capture_target_end", startedAt);
         currentCapture?.abort();
+        markTiming(timing, "pcm_capture_create_start", startedAt);
         currentCapture = await PagePcmCapture.create(element);
+        markTiming(timing, "pcm_capture_create_end", startedAt);
+        markTiming(timing, "pcm_capture_begin_start", startedAt);
         await currentCapture.begin();
+        markTiming(timing, "pcm_capture_begin_end", startedAt);
         return {
           target: describeMediaElement(element),
           sampleRate: currentCapture.sampleRate,
-          channelCount: currentCapture.channelCount
+          channelCount: currentCapture.channelCount,
+          timing
         };
       },
       async finishAndBegin({ timeoutMs = 1000 } = {}) {
@@ -533,6 +542,15 @@
 
   function delay(ms) {
     return new Promise((resolve) => window.setTimeout(resolve, ms));
+  }
+
+  function markTiming(events, name, startWallMs) {
+    const atMs = Date.now();
+    events.push({
+      name,
+      atMs,
+      deltaMs: atMs - startWallMs
+    });
   }
 
   function installMediaSessionProbe() {

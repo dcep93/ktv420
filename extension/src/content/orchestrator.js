@@ -10,7 +10,7 @@ import {
   scrollTracklistToStart
 } from "./dom.js";
 import { resolveCurrentPlaybackTrack } from "./playbackState.js";
-import { readCachedTrack, writeTrackArtifact } from "./storage.js";
+import { readCachedTracks, writeTrackArtifact } from "./storage.js";
 import { logTimingReport, markTiming, normalizeTimingTrace } from "./timing.js";
 import { formatSeconds, looselyMatches } from "./text.js";
 import { md5Hex } from "./md5.js";
@@ -234,18 +234,28 @@ export class CaptureOrchestrator extends EventTarget {
   }
 
   async preflightQueue(debug, trackIds = null) {
+    markTiming(debug.timingTrace, "preflight_spotify_tracks_load_start");
     const spotifyTracks = await this.loadSpotifyTracks();
+    markTiming(debug.timingTrace, "preflight_spotify_tracks_load_end", {
+      trackCount: spotifyTracks.length
+    });
     const rows = spotifyTracks.length > 0 ? spotifyTracks : collectTrackRows();
     const queue = [];
     const requestedTrackIds = new Set(Array.isArray(trackIds) ? trackIds : []);
     const shouldFilterTracks = requestedTrackIds.size > 0;
+    const candidateRows = rows.filter((row) => !shouldFilterTracks || requestedTrackIds.has(row.trackId));
+    const candidateTrackIds = candidateRows.map((row) => row.trackId);
 
-    for (const row of rows) {
-      if (shouldFilterTracks && !requestedTrackIds.has(row.trackId)) {
-        continue;
-      }
+    markTiming(debug.timingTrace, "preflight_local_cache_scan_start", {
+      trackCount: candidateTrackIds.length
+    });
+    const cachedTracks = await readCachedTracks(candidateTrackIds);
+    markTiming(debug.timingTrace, "preflight_local_cache_scan_end", {
+      cachedCount: cachedTracks.size
+    });
 
-      const cachedMetadata = await readCachedTrack(row.trackId);
+    for (const row of candidateRows) {
+      const cachedMetadata = cachedTracks.get(row.trackId) ?? null;
       queue.push({
         ...row,
         cached: Boolean(cachedMetadata),
@@ -310,9 +320,10 @@ export class CaptureOrchestrator extends EventTarget {
       markTiming(debug.timingTrace, "page_capture_begin_command_start", {
         trackId: item.trackId
       });
-      await this.bridge.command("capture-begin", { timeoutMs: START_TIMEOUT_MS }, START_TIMEOUT_MS + 1000);
+      const beginResult = await this.bridge.command("capture-begin", { timeoutMs: START_TIMEOUT_MS }, START_TIMEOUT_MS + 1000);
       markTiming(debug.timingTrace, "page_capture_begin_command_end", {
-        trackId: item.trackId
+        trackId: item.trackId,
+        pageTiming: summarizePageTiming(beginResult?.timing)
       });
     } else {
       markTiming(debug.timingTrace, "page_capture_already_begun", {
@@ -603,6 +614,17 @@ function hasTimingOutcome(trace) {
       event.name === "spotify_first_track_start_failed"
     )
   );
+}
+
+function summarizePageTiming(events) {
+  if (!Array.isArray(events)) {
+    return "";
+  }
+
+  return events
+    .filter((event) => event && typeof event.name === "string" && Number.isFinite(event.deltaMs))
+    .map((event) => `${event.name}:${event.deltaMs}`)
+    .join(",");
 }
 
 function mediaSessionMatchesItem(mediaSession, item) {

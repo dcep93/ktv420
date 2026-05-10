@@ -5,18 +5,34 @@ export async function readCachedTrack(trackId) {
 
   try {
     const trackDirectory = await root.getDirectoryHandle(trackId, { create: false });
-    const metadataHandle = await trackDirectory.getFileHandle(ARTIFACT_FILES.metadata, { create: false });
-    const metadataFile = await metadataHandle.getFile();
-    const metadata = JSON.parse(await metadataFile.text());
-
-    if (isValidMetadata(metadata, trackId)) {
-      return metadata;
-    }
+    return await readCachedTrackFromDirectory(trackDirectory, trackId);
   } catch {
     return null;
   }
+}
 
-  return null;
+export async function readCachedTracks(trackIds) {
+  const requestedTrackIds = new Set(Array.isArray(trackIds) ? trackIds.filter(Boolean) : []);
+  const cachedTracks = new Map();
+
+  if (requestedTrackIds.size === 0) {
+    return cachedTracks;
+  }
+
+  const root = await navigator.storage.getDirectory();
+
+  for await (const [name, handle] of root.entries()) {
+    if (!requestedTrackIds.has(name) || handle.kind !== "directory") {
+      continue;
+    }
+
+    const metadata = await readCachedTrackFromDirectory(handle, name);
+    if (metadata) {
+      cachedTracks.set(name, metadata);
+    }
+  }
+
+  return cachedTracks;
 }
 
 export async function inspectTrackArtifact(trackId) {
@@ -159,6 +175,18 @@ async function readJsonArtifact(directory, filename) {
       value: null,
       error: error?.message || String(error)
     };
+  }
+}
+
+async function readCachedTrackFromDirectory(trackDirectory, trackId) {
+  try {
+    const metadataHandle = await trackDirectory.getFileHandle(ARTIFACT_FILES.metadata, { create: false });
+    const metadataFile = await metadataHandle.getFile();
+    const metadata = JSON.parse(await metadataFile.text());
+
+    return isValidMetadata(metadata, trackId) ? metadata : null;
+  } catch {
+    return null;
   }
 }
 
