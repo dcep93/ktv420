@@ -113,6 +113,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks = asyn
       });
       await onToggleRun({
         trackIds,
+        trackSnapshot: sanitizeTrackSnapshot(message.trackSnapshot),
         timingTrace
       });
       schedulePlace();
@@ -204,6 +205,32 @@ function createButton(onClick) {
     });
   });
   return button;
+}
+
+function sanitizeTrackSnapshot(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((track) => {
+      if (!track || typeof track !== "object") {
+        return null;
+      }
+
+      return {
+        trackId: readString(track.trackId),
+        trackName: readString(track.trackName),
+        trackArtist: readString(track.trackArtist),
+        trackArtworkSrc: readString(track.trackArtworkSrc),
+        rowIndex: Number.isFinite(track.rowIndex) ? track.rowIndex : 0
+      };
+    })
+    .filter((track) => track?.trackId && track.trackName);
+}
+
+function readString(value) {
+  return typeof value === "string" ? value : "";
 }
 
 async function showIframeOverlayWithTracks(src, origin, loadSpotifyTracks) {

@@ -755,7 +755,11 @@ export default function IframePage() {
     const trackIds = Array.from(tracksNeedingCaptureRef.current);
     captureStartedRef.current = true;
     markTiming("iframe_toggle_run_posted", { trackCount: trackIds.length });
-    postParentMessage(TOGGLE_RUN_MESSAGE, { trackIds, timingTrace: timingSnapshot() });
+    postParentMessage(TOGGLE_RUN_MESSAGE, {
+      trackIds,
+      trackSnapshot: trackSnapshotForIds(trackIds),
+      timingTrace: timingSnapshot()
+    });
   }
 
   function markTrackComplete(trackId: string) {
@@ -901,6 +905,16 @@ export default function IframePage() {
       ...trace,
       events: trace.events.map((event) => ({ ...event }))
     };
+  }
+
+  function trackSnapshotForIds(trackIds: string[]) {
+    const requestedTrackIds = new Set(trackIds);
+    return (tracksRef.current ?? [])
+      .filter((track) => requestedTrackIds.has(track.trackId))
+      .map((track) => ({
+        ...metadataForTrack(track),
+        rowIndex: track.rowIndex
+      }));
   }
 
   function waitForDeleteRefresh(trackId: string) {

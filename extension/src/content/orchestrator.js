@@ -45,7 +45,7 @@ export class CaptureOrchestrator extends EventTarget {
     pausePlaybackCleanly();
   }
 
-  async run({ trackIds = null, timingTrace = null } = {}) {
+  async run({ trackIds = null, trackSnapshot = null, timingTrace = null } = {}) {
     if (this.active) {
       return;
     }
@@ -78,7 +78,7 @@ export class CaptureOrchestrator extends EventTarget {
       }
 
       markTiming(runTimingTrace, "orchestrator_preflight_start");
-      const queue = await this.preflightQueue(debug, trackIds);
+      const queue = await this.preflightQueue(debug, trackIds, trackSnapshot);
       markTiming(runTimingTrace, "orchestrator_preflight_end", {
         queueCount: queue.length,
         cachedCount: queue.filter((item) => item.cached).length
@@ -233,16 +233,26 @@ export class CaptureOrchestrator extends EventTarget {
     }
   }
 
-  async preflightQueue(debug, trackIds = null) {
-    markTiming(debug.timingTrace, "preflight_spotify_tracks_load_start");
-    const spotifyTracks = await this.loadSpotifyTracks();
-    markTiming(debug.timingTrace, "preflight_spotify_tracks_load_end", {
-      trackCount: spotifyTracks.length
-    });
-    const rows = spotifyTracks.length > 0 ? spotifyTracks : collectTrackRows();
-    const queue = [];
+  async preflightQueue(debug, trackIds = null, trackSnapshot = null) {
     const requestedTrackIds = new Set(Array.isArray(trackIds) ? trackIds : []);
     const shouldFilterTracks = requestedTrackIds.size > 0;
+    let rows = normalizeTrackSnapshot(trackSnapshot);
+
+    if (rows.length > 0) {
+      markTiming(debug.timingTrace, "preflight_spotify_tracks_load_skipped", {
+        trackCount: rows.length,
+        source: "iframe_snapshot"
+      });
+    } else {
+      markTiming(debug.timingTrace, "preflight_spotify_tracks_load_start");
+      const spotifyTracks = await this.loadSpotifyTracks();
+      markTiming(debug.timingTrace, "preflight_spotify_tracks_load_end", {
+        trackCount: spotifyTracks.length
+      });
+      rows = spotifyTracks.length > 0 ? spotifyTracks : collectTrackRows();
+    }
+
+    const queue = [];
     const candidateRows = rows.filter((row) => !shouldFilterTracks || requestedTrackIds.has(row.trackId));
     const candidateTrackIds = candidateRows.map((row) => row.trackId);
 
@@ -604,6 +614,38 @@ function safeDuration(element) {
 function currentSpotifyPlaylistUri() {
   const match = window.location.pathname.match(/^\/playlist\/([A-Za-z0-9]+)/);
   return match ? `spotify:playlist:${match[1]}` : "";
+}
+
+function normalizeTrackSnapshot(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((track) => {
+      if (!track || typeof track !== "object") {
+        return null;
+      }
+
+      const trackId = readString(track.trackId);
+      const trackName = readString(track.trackName);
+      if (!trackId || !trackName) {
+        return null;
+      }
+
+      return {
+        trackId,
+        trackName,
+        trackArtist: readString(track.trackArtist),
+        trackArtworkSrc: readString(track.trackArtworkSrc),
+        rowIndex: Number.isFinite(track.rowIndex) ? track.rowIndex : 0
+      };
+    })
+    .filter(Boolean);
+}
+
+function readString(value) {
+  return typeof value === "string" ? value : "";
 }
 
 function hasTimingOutcome(trace) {
