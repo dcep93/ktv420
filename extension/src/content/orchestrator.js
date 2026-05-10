@@ -206,6 +206,9 @@ export class CaptureOrchestrator extends EventTarget {
     } catch (error) {
       pausePlaybackCleanly();
       await this.bridge.command("capture-abort").catch(() => {});
+      markTiming(runTimingTrace, "orchestrator_run_error", {
+        error: error?.message || String(error)
+      });
 
       const report = {
         ...debug,
@@ -215,6 +218,11 @@ export class CaptureOrchestrator extends EventTarget {
         routePathname: window.location.pathname
       };
 
+      if (!hasTimingOutcome(runTimingTrace)) {
+        logTimingReport(runTimingTrace, "spotify_first_track_start_failed", {
+          error: error?.message || String(error)
+        });
+      }
       console.log("[ktv420] Capture run failed", report);
       alert("ktv420 capture failed. See the console for the debug report.");
     } finally {
@@ -293,15 +301,51 @@ export class CaptureOrchestrator extends EventTarget {
     );
   }
 
-  async beginAndAcceptItem(item, debug, { captureAlreadyBegun = false } = {}) {
+  async beginAndAcceptItem(
+    item,
+    debug,
+    { captureAlreadyBegun = false, logFirstStartTiming = false } = {}
+  ) {
     if (!captureAlreadyBegun) {
+      markTiming(debug.timingTrace, "page_capture_begin_command_start", {
+        trackId: item.trackId
+      });
       await this.bridge.command("capture-begin", { timeoutMs: START_TIMEOUT_MS }, START_TIMEOUT_MS + 1000);
+      markTiming(debug.timingTrace, "page_capture_begin_command_end", {
+        trackId: item.trackId
+      });
+    } else {
+      markTiming(debug.timingTrace, "page_capture_already_begun", {
+        trackId: item.trackId
+      });
     }
 
     try {
+      markTiming(debug.timingTrace, "spotify_expected_track_wait_start", {
+        trackId: item.trackId
+      });
       const startInfo = await this.waitForExpectedTrackStart(item, debug);
+      markTiming(debug.timingTrace, "spotify_expected_track_wait_end", {
+        trackId: item.trackId,
+        currentTime: startInfo.currentTime,
+        source: startInfo.source
+      });
+      if (logFirstStartTiming) {
+        logTimingReport(debug.timingTrace, "spotify_first_track_started", {
+          trackId: item.trackId,
+          trackName: item.trackName,
+          currentTime: startInfo.currentTime,
+          source: startInfo.source
+        });
+      }
       if (!item.cached) {
+        markTiming(debug.timingTrace, "page_capture_mark_start_command_start", {
+          trackId: item.trackId
+        });
         await this.bridge.command("capture-mark-start");
+        markTiming(debug.timingTrace, "page_capture_mark_start_command_end", {
+          trackId: item.trackId
+        });
       } else {
         await this.bridge.command("capture-abort");
       }
@@ -340,6 +384,12 @@ export class CaptureOrchestrator extends EventTarget {
           currentTime,
           source: current.source,
           at: Date.now()
+        });
+
+        markTiming(debug.timingTrace, "spotify_expected_track_accepted", {
+          trackId: item.trackId,
+          currentTime,
+          source: current.source
         });
 
         return {
@@ -543,6 +593,16 @@ function safeDuration(element) {
 function currentSpotifyPlaylistUri() {
   const match = window.location.pathname.match(/^\/playlist\/([A-Za-z0-9]+)/);
   return match ? `spotify:playlist:${match[1]}` : "";
+}
+
+function hasTimingOutcome(trace) {
+  return Boolean(
+    trace?.events?.some((event) =>
+      event.name === "spotify_first_track_started" ||
+      event.name === "spotify_capture_all_cached" ||
+      event.name === "spotify_first_track_start_failed"
+    )
+  );
 }
 
 function mediaSessionMatchesItem(mediaSession, item) {
