@@ -120,7 +120,6 @@ gcloud beta run deploy "$SERVICE_NAME" \
 gcloud container images list-tags "$IMG_PATH" \
   --sort-by=TIMESTAMP \
   --format='get(digest)' \
-| head -n -1 \
 | xargs -r -I{} \
   gcloud container images delete \
     "$IMG_PATH@{}" \
