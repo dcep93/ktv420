@@ -11,7 +11,7 @@ import {
 } from "./dom.js";
 import { resolveCurrentPlaybackTrack } from "./playbackState.js";
 import { readCachedTracks, writeTrackArtifact } from "./storage.js";
-import { logTimingReport, markTiming, normalizeTimingTrace } from "./timing.js";
+import { markTiming, normalizeTimingTrace } from "./timing.js";
 import { formatSeconds, looselyMatches } from "./text.js";
 import { md5Hex } from "./md5.js";
 
@@ -101,7 +101,7 @@ export class CaptureOrchestrator extends EventTarget {
 
         debug.events.push({ type: "all-cached", trackCount: queue.length, at: Date.now() });
         this.dispatchCaptureComplete(queuedTrackIds);
-        logTimingReport(runTimingTrace, "spotify_capture_all_cached", {
+        markTiming(runTimingTrace, "spotify_capture_all_cached", {
           trackCount: queue.length
         });
         console.log("[ktv420] Capture run complete", summary);
@@ -112,14 +112,14 @@ export class CaptureOrchestrator extends EventTarget {
       await this.bridge.inject();
       markTiming(runTimingTrace, "page_hooks_inject_end");
 
-      if (!queue[0].row) {
+      let firstRow = resolveTrackRow(queue[0]);
+      if (!firstRow) {
         markTiming(runTimingTrace, "tracklist_scroll_to_start_start");
         scrollTracklistToStart();
-        await delay(150);
+        firstRow = await waitForTrackRow(queue[0], 150);
         markTiming(runTimingTrace, "tracklist_scroll_to_start_end");
       }
 
-      const firstRow = resolveTrackRow(queue[0]);
       if (!firstRow) {
         throw new Error("Could not resolve the first queued track row.");
       }
@@ -219,7 +219,7 @@ export class CaptureOrchestrator extends EventTarget {
       };
 
       if (!hasTimingOutcome(runTimingTrace)) {
-        logTimingReport(runTimingTrace, "spotify_first_track_start_failed", {
+        markTiming(runTimingTrace, "spotify_first_track_start_failed", {
           error: error?.message || String(error)
         });
       }
@@ -352,7 +352,7 @@ export class CaptureOrchestrator extends EventTarget {
         source: startInfo.source
       });
       if (logFirstStartTiming) {
-        logTimingReport(debug.timingTrace, "spotify_first_track_started", {
+        markTiming(debug.timingTrace, "spotify_first_track_started", {
           trackId: item.trackId,
           trackName: item.trackName,
           currentTime: startInfo.currentTime,
@@ -614,6 +614,22 @@ function safeDuration(element) {
 function currentSpotifyPlaylistUri() {
   const match = window.location.pathname.match(/^\/playlist\/([A-Za-z0-9]+)/);
   return match ? `spotify:playlist:${match[1]}` : "";
+}
+
+async function waitForTrackRow(track, timeoutMs) {
+  const deadline = performance.now() + timeoutMs;
+  let row = resolveTrackRow(track);
+
+  while (!row && performance.now() < deadline) {
+    await nextAnimationFrame();
+    row = resolveTrackRow(track);
+  }
+
+  return row;
+}
+
+function nextAnimationFrame() {
+  return new Promise((resolve) => requestAnimationFrame(resolve));
 }
 
 function normalizeTrackSnapshot(value) {

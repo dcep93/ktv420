@@ -36,51 +36,6 @@ export function markTiming(trace, name, details = null) {
   });
 }
 
-export function logTimingReport(trace, outcome, details = null) {
-  if (!trace) {
-    return;
-  }
-
-  markTiming(trace, outcome, details);
-
-  const report = {
-    type: "ktv420_timing",
-    outcome,
-    traceId: trace.id,
-    source: trace.source,
-    startedAt: trace.startedAt,
-    totalFromClickMs: Date.now() - trace.startWallMs,
-    durationsMs: summarizeDurations(trace.events),
-    events: trace.events
-  };
-
-  console.log(JSON.stringify(report));
-}
-
-function summarizeDurations(events) {
-  const starts = new Map();
-  const durations = {};
-
-  for (const event of events) {
-    if (event.name.endsWith("_start")) {
-      starts.set(event.name.slice(0, -"start".length), event.atMs);
-      continue;
-    }
-
-    if (!event.name.endsWith("_end")) {
-      continue;
-    }
-
-    const key = event.name.slice(0, -"end".length);
-    const startAt = starts.get(key);
-    if (typeof startAt === "number") {
-      durations[key.replace(/_$/, "")] = event.atMs - startAt;
-    }
-  }
-
-  return durations;
-}
-
 function sanitizeTimingDetails(details) {
   const clean = {};
 
