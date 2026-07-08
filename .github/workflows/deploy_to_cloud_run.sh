@@ -117,6 +117,16 @@ gcloud beta run deploy "$SERVICE_NAME" \
   --liveness-probe httpGet.path=/health
 
 
+for MIGRATED_GCR_IMG_PATH in \
+  "us-docker.pkg.dev/${GOOGLE_CLOUD_PROJECT}/us.gcr.io/stem420" \
+  "us-docker.pkg.dev/${GOOGLE_CLOUD_PROJECT}/us.gcr.io/stem420/backend"; do
+  gcloud artifacts docker images delete "$MIGRATED_GCR_IMG_PATH" \
+    --project "${GOOGLE_CLOUD_PROJECT}" \
+    --delete-tags \
+    --quiet \
+  || echo "No migrated GCR image found at $MIGRATED_GCR_IMG_PATH"
+done
+
 gcloud container images list-tags "$IMG_PATH" \
   --sort-by=TIMESTAMP \
   --format='get(digest)' \
