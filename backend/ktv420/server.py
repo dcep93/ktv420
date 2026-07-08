@@ -14,7 +14,7 @@ from . import logger
 from . import run_job
 
 
-BACKEND_VERSION = 2
+BACKEND_VERSION = 3
 
 
 @dataclass
