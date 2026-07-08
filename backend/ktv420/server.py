@@ -14,6 +14,9 @@ from . import logger
 from . import run_job
 
 
+BACKEND_VERSION = 2
+
+
 @dataclass
 class ServerState:
     start_time: float = field(default_factory=time.time)
@@ -78,6 +81,7 @@ def get_root() -> JSONResponse:
         "alive_age_s": uptime_seconds,
         "alive_age_h": uptime_seconds / 3600,
         "status_code": status_code,
+        "backend_version": BACKEND_VERSION,
         "sha": state.sha,
         "run_job": run_job.get_state(),
     }
