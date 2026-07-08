@@ -118,10 +118,17 @@ gcloud beta run deploy "$SERVICE_NAME" \
 
 
 MIGRATED_GCR_IMG_PATH="us-docker.pkg.dev/${GOOGLE_CLOUD_PROJECT}/us.gcr.io/stem420/backend"
+KANIKO_CACHE_PACKAGE="stem420/backend/cache"
 
 gcloud artifacts docker images delete "$MIGRATED_GCR_IMG_PATH" \
   --project "${GOOGLE_CLOUD_PROJECT}" \
   --delete-tags \
+  --quiet
+
+gcloud artifacts packages delete "$KANIKO_CACHE_PACKAGE" \
+  --project "${GOOGLE_CLOUD_PROJECT}" \
+  --location us \
+  --repository us.gcr.io \
   --quiet
 
 gcloud container images list-tags "$IMG_PATH" \
