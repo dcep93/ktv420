@@ -27,14 +27,25 @@ jobs:
           gcloud run services list --project="$PROJECT" --format='json(metadata.name,metadata.labels,status.url)'
           gcloud storage buckets list --project="$PROJECT" --format='json(name,location,soft_delete_policy)'
           gcloud artifacts repositories list --project="$PROJECT" --location=all --format='json(name,format)'
-          gcloud app describe --project="$PROJECT" --format='json(id,servingStatus)' || true
-      - name: Retire dedicated audio project
+          gcloud app services list --project="$PROJECT" --format='json(id)'
+          gcloud artifacts packages list --project="$PROJECT" --location=us --repository=us.gcr.io --format='value(name)'
+          gcloud projects list --filter='projectId:stem420' --format='json(projectId,name,projectNumber)'
+      - name: Retire only audio resources in the shared project
         if: inputs.operation == 'retire'
         env:
           PROJECT: '${{ steps.auth.outputs.project_id }}'
         run: |
           set -euo pipefail
-          # Only the previously deployed, dedicated audio project is eligible.
-          test "$PROJECT" = 'stem420'
+          test "$PROJECT" = 'proxy420'
           test "$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')" = '854199998954'
-          gcloud projects delete "$PROJECT" --quiet
+          gcloud run services delete stem420 --project="$PROJECT" --region=us-east1 --quiet
+          gcloud storage buckets update gs://stem420-bucket --clear-soft-delete
+          gcloud storage rm --recursive --all-versions gs://stem420-bucket
+          while IFS= read -r package; do
+            case "$package" in
+              stem420/*|stem420%2F*)
+                gcloud artifacts packages delete "$package" --project="$PROJECT" --location=us --repository=us.gcr.io --quiet ;;
+            esac
+          done < <(gcloud artifacts packages list --project="$PROJECT" --location=us --repository=us.gcr.io --format='value(name.basename())')
+          gcloud run services list --project="$PROJECT" --format='value(metadata.name)'
+          gcloud storage buckets list --project="$PROJECT" --format='value(name)'
