@@ -1,4 +1,6 @@
 /extension.zip
+/extension/build/
+/extension/THIRD_PARTY_NOTICES.md
 __pycache__/
 *.py[cod]
 

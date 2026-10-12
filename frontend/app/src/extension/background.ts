@@ -5,7 +5,7 @@ let opening: Promise<void> | undefined;
 async function openLibrary() {
   if (opening) return opening;
   opening = (async () => {
-    const url = chrome.runtime.getURL('index.html');
+    const url = chrome.runtime.getURL('build/index.html');
     const contexts = await chrome.runtime.getContexts({ contextTypes: [chrome.runtime.ContextType.TAB], documentUrls: [url] });
     if (contexts[0]?.tabId !== undefined && contexts[0].tabId >= 0) {
       await chrome.tabs.update(contexts[0].tabId, { active: true });

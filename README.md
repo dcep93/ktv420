@@ -18,7 +18,7 @@ cd ../..
 node scripts/build-extension.mjs
 ```
 
-Load `dist/extension` at `chrome://extensions` using **Developer mode → Load unpacked**. Click the toolbar icon. Reload Spotify after installing. Rebuild and use the extension's Reload button to update, keeping the same path and installation to preserve its library. `npm run dev` in `frontend/app` supports UI development; that localhost library is separate from the extension library.
+Load `extension` at `chrome://extensions` using **Developer mode → Load unpacked**. Builds update this same folder; if already installed from it, use the extension's Reload button. Click the toolbar icon and reload Spotify after installing. Keep the same path and installation to preserve its library. Generated player files live in `extension/build`; `dist/ktv420-extension.zip` is the downloadable package. `npm run dev` in `frontend/app` supports UI development; that localhost library is separate from the extension library.
 
 ## Audio contract
 

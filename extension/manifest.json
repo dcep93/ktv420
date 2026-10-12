@@ -8,7 +8,7 @@
   "permissions": ["storage", "unlimitedStorage"],
   "host_permissions": ["https://open.spotify.com/*", "https://huggingface.co/*", "https://*.hf.co/*"],
   "action": {"default_title": "Open ktv420 library"},
-  "background": {"service_worker":"background.js","type":"module"},
+  "background": {"service_worker":"build/background.js","type":"module"},
   "content_security_policy": {"extension_pages":"script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self'; connect-src 'self' https://huggingface.co https://*.hf.co; img-src 'self' data: blob:;"},
   "cross_origin_embedder_policy": {"value":"require-corp"},
   "cross_origin_opener_policy": {"value":"same-origin"},
