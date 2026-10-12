@@ -23,13 +23,15 @@ export default function LibraryPage() {
   const [modelCached, setModelCached] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState('');
   const [recording, setRecording] = useState(false);
+  const [autoPlay, setAutoPlay] = useState(false);
   const separator = useRef<LocalSeparator | null>(null);
   const importingRef = useRef(false);
   const running = useRef(false); const cancelled = useRef(false);
   const mix = useRef<PlaybackRecording | null>(null);
   const flush = useRef<(() => void) | null>(null);
   const input = useRef<HTMLInputElement>(null);
-  const activeTrack = tracks.find(track => track.id === selected);
+  const selectedIndex = tracks.findIndex(track => track.id === selected);
+  const activeTrack = tracks[selectedIndex];
   const refresh = useCallback(async () => { setTracks(await listTracks()); setModelCached(await getModelCacheStatus()); }, []);
   useEffect(() => {
     const update = () => { void refresh().catch(reason => setError(errorText(reason))); };
@@ -100,6 +102,11 @@ export default function LibraryPage() {
     downloadBlob(new Blob([JSON.stringify(mix.current, null, 2)], {type:'application/json'}), `${mix.current.name}.json`);
     mix.current = null; setRecording(false);
   }, []);
+  const navigateTrack = (offset: number) => {
+    const next = tracks[selectedIndex + offset];
+    if (!next || recording) return;
+    loadedRevision.current = ''; setRecord(null); setSelected(next.id); setAutoPlay(true);
+  };
   const visible = tracks.filter(track => `${track.title} ${track.artist}`.toLowerCase().includes(search.toLowerCase()));
   return <main className="local-app" onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); void acceptFiles([...event.dataTransfer.files]); }}>
     <header className="library-header"><div><p className="eyebrow">ALL LOCAL · FOUR STEMS · YOUR MIX</p><h1>ktv420<span className="accent">.</span></h1><p>Pull apart a track. Find a different way to hear it.</p></div>
@@ -117,7 +124,7 @@ export default function LibraryPage() {
     <div className="library-layout"><section className="track-library" aria-label="Tracks"><label className="search-label">Your library<input type="search" placeholder="Search tracks or artists" value={search} onChange={event => setSearch(event.target.value)} /></label>
       {!tracks.length && <div className="empty-library"><h2>Start with a track.</h2><p>Add a local audio file, or capture a playlist using the ktv420 controls on Spotify.</p><p>WAV samples retain their original precision. Compressed imports decode at 44.1 kHz; their source files are also kept.</p><p>Float32 audio uses about 424 MB for a four-minute original plus four stems.</p></div>}
       {visible.map(track => <article className={`library-track ${selected === track.id ? 'selected' : ''}`} key={track.id}>
-        <button className="track-select" disabled={recording && selected !== track.id} onClick={() => { if (selected !== track.id) { loadedRevision.current = ''; setRecord(null); setSelected(track.id); } }}><strong>{track.title}</strong><span>{track.artist || (track.source === 'spotify' ? 'Spotify capture' : 'Local file')}</span></button>
+        <button className="track-select" disabled={recording && selected !== track.id} onClick={() => { if (selected !== track.id) { loadedRevision.current = ''; setRecord(null); setSelected(track.id); setAutoPlay(false); } }}><strong>{track.title}</strong><span>{track.artist || (track.source === 'spotify' ? 'Spotify capture' : 'Local file')}</span></button>
         <div className="track-facts"><span className={`status ${track.status}`}>{track.status === 'captured' ? 'Ready to separate' : track.status === 'processing' && active !== track.id ? 'Interrupted / other tab' : track.status}</span><span>{Math.floor(track.frames/track.sampleRate/60)}:{String(Math.floor(track.frames/track.sampleRate)%60).padStart(2,'0')} · {size(track.bytes)}</span></div>
         {track.error && <p className="track-error">{track.error}</p>}
         <div className="track-actions">{track.status !== 'ready' && <button disabled={!!active} onClick={() => void processTracks([track.id])}>{track.status === 'error' ? 'Retry separation' : 'Separate'}</button>}
@@ -127,7 +134,10 @@ export default function LibraryPage() {
       <details className="storage-details"><summary>Local storage</summary><p>Stored in this Chrome profile. Uninstalling the extension removes its library. Export files you want to keep.</p><button disabled={!!active} onClick={() => void clearModelCache().then(refresh).catch(reason => setError(errorText(reason)))}>Remove downloaded model</button></details>
     </section><section className="listening-room" aria-label="Player">
       {activeTrack && record && record.md5 === selected ? <><div className="now-playing"><p className="eyebrow">{activeTrack.status === 'ready' ? 'READY TO REMIX' : 'ORIGINAL AUDIO'}</p><h2>{activeTrack.title}</h2><p>{activeTrack.artist}</p></div>
-        <Player record={record} title={activeTrack.title} trackMetadata={activeTrack.metadata} isRecording={recording} onStartRecording={startRecording} onStopRecording={stopRecording} onRecordingEvent={recordEvent} onRegisterRecordingFlush={callback => { flush.current = callback; }} />
+        <Player record={record} title={activeTrack.title}
+          hasPreviousTrack={!recording && selectedIndex > 0} hasNextTrack={!recording && selectedIndex < tracks.length - 1}
+          onPreviousTrack={() => navigateTrack(-1)} onNextTrack={() => navigateTrack(1)} onTrackEnd={() => navigateTrack(1)}
+          autoPlayOnReady={autoPlay} onAutoPlayOnReadyHandled={() => setAutoPlay(false)} trackMetadata={activeTrack.metadata} isRecording={recording} onStartRecording={startRecording} onStopRecording={stopRecording} onRecordingEvent={recordEvent} onRegisterRecordingFlush={callback => { flush.current = callback; }} />
         <div className="exports"><strong>Export WAV</strong>{record.files.map(file => <button key={file.path} onClick={() => downloadBlob(file.blob, `${activeTrack.title}-${file.name}`)}>{file.name.replace('.wav','')}</button>)}
           {activeTrack.metadata?.decodedAt44100 === true && <button onClick={() => void getPlaybackRecord(selected).then(all => {const original=all.files.find(file => file.name==='source'); if(original) downloadBlob(original.blob,String(activeTrack.metadata?.originalName || 'source'));})}>Original source file</button>}</div>
         {recording && <p className="muted">Recording mixer actions locally. Stop recording to export the action log as JSON.</p>}
