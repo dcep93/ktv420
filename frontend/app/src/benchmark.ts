@@ -20,7 +20,7 @@ run.addEventListener('click', async () => {
     }));
     let parity;
     if (frames === 44100) {
-      const response = await fetch('/benchmark-reference.f32');
+      const response = await fetch(new URL('../tests/fixtures/demucs-reference.f32', import.meta.url));
       if (!response.ok) throw new Error('Reference fixture unavailable');
       const reference = new Float32Array(await response.arrayBuffer());
       let offset=0, maxError=0, squaredError=0;
