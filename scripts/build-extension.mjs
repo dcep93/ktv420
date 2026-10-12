@@ -1,0 +1,17 @@
+import { cp, mkdir, rm, readFile, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+const root = new URL('../', import.meta.url);
+const output = new URL('dist/extension/', root);
+await rm(output, {recursive:true,force:true});
+await mkdir(output, {recursive:true});
+await cp(new URL('frontend/app/dist/',root), output,{recursive:true});
+await rm(new URL('benchmark-reference.f32', output), {force:true});
+for (const path of ['manifest.json','src','assets']) await cp(new URL(`extension/${path}`,root),new URL(path,output),{recursive:true});
+await cp(new URL('THIRD_PARTY_NOTICES.md', root), new URL('THIRD_PARTY_NOTICES.md', output));
+const zip = new URL('dist/ktv420-extension.zip',root);
+await rm(zip,{force:true});
+execFileSync('zip',['-qr',zip.pathname,'.'],{cwd:output});
+const hash = createHash('sha256').update(await readFile(zip)).digest('hex');
+await writeFile(new URL('dist/ktv420-extension.zip.sha256',root),`${hash}  ktv420-extension.zip\n`);
+console.log(`Built ${zip.pathname}\nSHA256 ${hash}`);

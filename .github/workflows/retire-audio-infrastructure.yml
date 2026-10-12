@@ -1,0 +1,40 @@
+name: Retire audio infrastructure
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        type: choice
+        options: [inventory, retire]
+        default: inventory
+        required: true
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: google-github-actions/auth@v2
+        id: auth
+        with:
+          credentials_json: '${{ secrets.SA_KEY_BILLING }}'
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Inventory ownership and resources
+        env:
+          PROJECT: '${{ steps.auth.outputs.project_id }}'
+        run: |
+          set -euo pipefail
+          gcloud projects describe "$PROJECT" --format='json(projectId,projectNumber,name,lifecycleState)'
+          gcloud run services list --project="$PROJECT" --format='json(metadata.name,metadata.labels,status.url)'
+          gcloud storage buckets list --project="$PROJECT" --format='json(name,location,soft_delete_policy)'
+          gcloud artifacts repositories list --project="$PROJECT" --location=all --format='json(name,format)'
+          gcloud app describe --project="$PROJECT" --format='json(id,servingStatus)' || true
+      - name: Retire dedicated audio project
+        if: inputs.operation == 'retire'
+        env:
+          PROJECT: '${{ steps.auth.outputs.project_id }}'
+        run: |
+          set -euo pipefail
+          # Only the previously deployed, dedicated audio project is eligible.
+          test "$PROJECT" = 'stem420'
+          test "$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')" = '854199998954'
+          gcloud projects delete "$PROJECT" --quiet

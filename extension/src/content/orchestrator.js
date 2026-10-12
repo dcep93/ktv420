@@ -1,5 +1,4 @@
 import { STORAGE_VERSION } from "./constants.js";
-import { bytesToBase64 } from "./capture.js";
 import {
   clickSkipForward,
   collectTrackRows,
@@ -224,7 +223,7 @@ export class CaptureOrchestrator extends EventTarget {
         });
       }
       console.log("[ktv420] Capture run failed", report);
-      alert("ktv420 capture failed. See the console for the debug report.");
+      throw error;
     } finally {
       await this.bridge.command("capture-abort").catch(() => {});
       this.active = false;
@@ -566,8 +565,7 @@ export class CaptureOrchestrator extends EventTarget {
       md5: md5Hex(capture.bytes)
     };
     const metadata = buildMetadata(item, captureWithHash, captureEnd);
-    const pcmBase64 = bytesToBase64(capture.bytes);
-    await writeTrackArtifact(item.trackId, pcmBase64, metadata);
+    await writeTrackArtifact(item.trackId, capture.bytes, metadata);
     return metadata;
   }
 
@@ -592,7 +590,7 @@ function buildMetadata(item, capture, captureEnd) {
     audioSampleRate: capture.sampleRate,
     audioChannelCount: capture.channelCount,
     audioChannelLayout: "interleaved",
-    audioSampleFormat: "PCM_S16LE",
+    audioSampleFormat: "PCM_F32LE",
     audioByteLength: capture.byteLength,
     crop: `${formatSeconds(startTrim)}-${formatSeconds(endTrim)}`,
     md5: capture.md5

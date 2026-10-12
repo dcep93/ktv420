@@ -1,3 +1,9 @@
 /extension.zip
 __pycache__/
 *.py[cod]
+
+/dist/
+/frontend/app/public/ort/
+
+/frontend/app/public/benchmark-reference.f32
+/site/ktv420-extension.zip*

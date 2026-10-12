@@ -14,8 +14,7 @@ const KALEIDOSCOPE_ENERGY_CAP = 0.45;
 const KALEIDOSCOPE_BASE_AREA = 900 * 102;
 const KALEIDOSCOPE_MAX_MOTION_SCALE = 3;
 const KALEIDOSCOPE_MIN_SPOTLIGHT_ENERGY = 0.05;
-const KALEIDOSCOPE_IMAGE_SRC =
-  "https://images.unsplash.com/photo-1473951574080-01fe45ec8643?q=80&w=2104&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D";
+const KALEIDOSCOPE_IMAGE_SRC = new URL('../../../assets/kaleidoscope.svg', import.meta.url).href;
 let kaleidoscopeImage: HTMLImageElement | null = null;
 const highwayStateMap = new WeakMap<
   HTMLCanvasElement,

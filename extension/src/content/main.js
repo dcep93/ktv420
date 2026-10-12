@@ -17,13 +17,13 @@ async function getOrchestrator() {
       orchestrator.addEventListener("trackstored", (event) => {
         const detail = event.detail || {};
         ui.notifyTrackCaptured(detail.trackId, detail.metadata).catch((error) => {
-          console.warn("[ktv420] Failed to notify iframe about captured track", error);
+          console.warn("[ktv420] Failed to report about captured track", error);
         });
       });
       orchestrator.addEventListener("capturecomplete", (event) => {
         const detail = event.detail || {};
         ui.notifyCaptureComplete(detail.trackIds).catch((error) => {
-          console.warn("[ktv420] Failed to notify iframe about capture completion", error);
+          console.warn("[ktv420] Failed to report about capture completion", error);
         });
       });
       return orchestrator;
@@ -43,6 +43,7 @@ const ui = mountButton({
       ui.refresh();
     } catch (error) {
       console.log("[ktv420] Failed to run capture", error);
+      throw error;
     }
   }
 });

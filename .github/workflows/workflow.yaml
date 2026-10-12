@@ -1,52 +1,36 @@
+name: Build and publish ktv420
 on:
   push:
-    branches:
-      - main
-
+    branches: [main]
+  workflow_dispatch:
 concurrency:
-  group: ktv420-deploy-main
+  group: ktv420-publish
   cancel-in-progress: false
-
+permissions:
+  contents: read
 jobs:
-  clean_cache:
+  publish:
     runs-on: ubuntu-latest
-    needs: workflow
-    permissions:
-      actions: write
-      contents: read
     steps:
-      - name: clean_cache
-        run: |
-          set -euo pipefail
-          for id in $(gh cache list --json id --jq '.[].id' | tail -n +2); do
-            gh cache delete "$id"
-          done
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-
-  workflow:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: buildx
-        uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          driver: docker-container
-
-      - name: checkout
-        uses: actions/checkout@v4
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/app/package-lock.json
+      - run: npm ci
+        working-directory: frontend/app
+      - run: npm test && npm run lint && npm run build
+        working-directory: frontend/app
+      - run: node scripts/build-extension.mjs
+      - uses: actions/upload-artifact@v4
         with:
-          fetch-depth: 2
-
-      - name: cache
-        uses: actions/cache@v4
+          name: ktv420-extension
+          path: |
+            dist/ktv420-extension.zip
+            dist/ktv420-extension.zip.sha256
+      - run: cp dist/ktv420-extension.zip dist/ktv420-extension.zip.sha256 site/
+      - uses: google-github-actions/auth@v2
         with:
-          path: /tmp/github-cache
-          key: ${{ runner.os }}-${{ github.run_id }}
-          restore-keys: |
-            ${{ runner.os }}
-
-      - run: bash .github/workflows/record_sha.sh
-      - run: bash .github/workflows/deploy_to_firebase.sh '${{ secrets.SA_KEY }}'
-      - run: bash .github/workflows/deploy_to_cloud_run.sh '${{ secrets.SA_KEY_BILLING }}'
+          credentials_json: '${{ secrets.SA_KEY }}'
+      - run: npx --yes firebase-tools@14.27.0 deploy --only hosting --project ktv420 --non-interactive

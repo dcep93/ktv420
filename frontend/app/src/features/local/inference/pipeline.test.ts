@@ -1,0 +1,49 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { separateWithRunner } from './pipeline.ts'
+import { STEM_NAMES } from './types.ts'
+
+test('overlap-add preserves endpoints, seams, stereo order and arbitrary tail length', async () => {
+  for (const length of [1, 7, 23, 24, 31, 32, 33, 48, 65, 97]) {
+    const left = Float32Array.from({ length }, (_, i) => i % 3 === 0 ? 2.125 : -0.375)
+    const right = Float32Array.from({ length }, (_, i) => i % 5 === 0 ? -3.25 : 0.625)
+    const progress: number[] = []
+    let calls = 0
+    const output = await separateWithRunner({ left, right, sampleRate: 44100 }, async (packed, frames) => {
+      calls++
+      const stems = new Float32Array(frames * 8)
+      for (let stem = 0; stem < 4; stem++) {
+        for (let i = 0; i < packed.length; i++) stems[stem * packed.length + i] = packed[i] * (stem + 1)
+      }
+      return stems
+    }, value => { if (value.phase === 'separating') progress.push(value.fraction) }, 32, false)
+    assert.equal(calls, Math.ceil(length / 24))
+    assert.equal(progress.at(-1), 1)
+    STEM_NAMES.forEach((name, stem) => {
+      assert.equal(output[name].left.length, length)
+      assert.equal(output[name].sampleRate, 44100)
+      for (let i = 0; i < length; i++) {
+        assert.equal(output[name].left[i], left[i] * (stem + 1), `${name} left sample ${i}`)
+        assert.equal(output[name].right[i], right[i] * (stem + 1), `${name} right sample ${i}`)
+      }
+    })
+  }
+})
+
+test('pipeline validates model output and unequal channel lengths', async () => {
+  const audio = { left: new Float32Array(1), right: new Float32Array(1), sampleRate: 44100 }
+  await assert.rejects(separateWithRunner(audio, async () => new Float32Array(1), undefined, 32), /unexpected/)
+  await assert.rejects(separateWithRunner(audio, async () => new Float32Array(256).fill(NaN), undefined, 32), /non-finite/)
+  await assert.rejects(separateWithRunner({ ...audio, right: new Float32Array(2) }, async () => new Float32Array(256), undefined, 32), /lengths/)
+})
+
+test('finite input whose conditioning overflows is rejected before calling the model', async () => {
+  const tiny = new Float32Array(new Uint32Array([2]).buffer)[0]
+  let calls = 0
+  const audio = { left: new Float32Array([1, -1, 0]), right: new Float32Array([-1, 1, tiny]), sampleRate: 44100 }
+  await assert.rejects(separateWithRunner(audio, async () => {
+    calls++
+    return new Float32Array(256)
+  }, undefined, 32), /non-finite/)
+  assert.equal(calls, 0)
+})

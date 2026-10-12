@@ -117,6 +117,7 @@ export function TrackRow({
         >
           <input
             type="range"
+            aria-label={`${label} volume`}
             min={0}
             max={2}
             step={0.01}
@@ -159,6 +160,7 @@ export function TrackRow({
               Effect
             </span>
             <select
+              aria-label={`${label} effect`}
               value={effectType}
               onChange={(event) =>
                 onEffectTypeChange(track.id, event.target.value as AudioEffectType)
@@ -179,6 +181,7 @@ export function TrackRow({
             </select>
             <input
               type="range"
+              aria-label={`${label} effect amount`}
               min={0}
               max={1}
               step={0.01}

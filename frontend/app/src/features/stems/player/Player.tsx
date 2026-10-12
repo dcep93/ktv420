@@ -695,7 +695,7 @@ export default function Player({
 
     for (const track of tracks) {
       initialVolumes[track.id] = 1;
-      initialMuteStates[track.id] = track.isInput;
+      initialMuteStates[track.id] = track.isInput && tracks.some(candidate => !candidate.isInput);
       initialDeafenStates[track.id] = false;
       initialEffectValues[track.id] = getDefaultEffectValue("wah");
       initialEffectTypes[track.id] = "wah";
@@ -1106,15 +1106,15 @@ export default function Player({
 
   const handleHarmonicAnalyze = useCallback(async () => {
     if (!inputTrackId) {
-      setChordStatus("No input MP3 available for analysis");
-      setCurrentChord("No input MP3 available");
+      setChordStatus("No original audio available for analysis");
+      setCurrentChord("No original audio available");
       return;
     }
 
     const audioBuffer = buffersRef.current[inputTrackId];
 
     if (!audioBuffer) {
-      setChordStatus("Input MP3 still loading...");
+      setChordStatus("Original audio still loading...");
       setCurrentChord("Please wait");
       return;
     }
@@ -1140,7 +1140,7 @@ export default function Player({
         console.warn("Failed to load cached chord timeline", cacheError);
       }
 
-      setChordStatus("Analyzing harmony from input MP3...");
+      setChordStatus("Analyzing harmony from original audio...");
 
       try {
         const timeline = await analyzeChordTimeline(audioBuffer, {
@@ -1365,6 +1365,10 @@ export default function Player({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey ||
+          (target instanceof Element && target.closest('input,textarea,select,button,a,[contenteditable="true"],[role="slider"]'))) return;
+      if (event.repeat) return;
       if (event.code === "Space" || event.key === " ") {
         event.preventDefault();
         void handlePlayPause();
@@ -1617,9 +1621,9 @@ export default function Player({
     setChordStatus(
       inputTrackId
         ? "Harmonic analyzer standing by"
-        : "No input MP3 available for analysis"
+        : "No original audio available for analysis"
     );
-    setCurrentChord(inputTrackId ? "Press Analyze" : "No input MP3 available");
+    setCurrentChord(inputTrackId ? "Press Analyze" : "No original audio available");
     setIsHarmonicAnalysisRunning(false);
   }, [inputTrackId]);
 

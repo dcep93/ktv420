@@ -1,5 +1,5 @@
 export const EXTENSION_NAME = "ktv420";
-export const STORAGE_VERSION = 2;
+export const STORAGE_VERSION = 3;
 
 export const SUPPORTED_ROUTE_RE = /^\/(album|playlist)\/[A-Za-z0-9]+(?:\/|$)/;
 
@@ -14,8 +14,3 @@ export const SELECTORS = {
 };
 
 export const PAGE_EVENT_SOURCE = "ktv420_page_hooks";
-
-export const ARTIFACT_FILES = {
-  metadata: "metadata.json",
-  pcmBase64: "pcm_s16le.b64"
-};
