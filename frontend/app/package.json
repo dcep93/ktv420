@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "tsx --test src/features/local/**/*.test.ts src/features/local/*.test.ts src/extension/*.test.ts",
+    "test": "node --test ../../extension/tests/*.test.mjs && tsx --test src/features/local/**/*.test.ts src/features/local/*.test.ts src/extension/*.test.ts",
     "predev": "node ../../scripts/prepare-runtime.mjs",
     "prebuild": "node ../../scripts/prepare-runtime.mjs"
   },

@@ -17,7 +17,12 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks }) {
   overlay.id = IFRAME_ID; overlay.setAttribute('aria-label', 'ktv420 Spotify overlay'); overlay.setAttribute('aria-hidden', 'true');
   let iframe; let tracks = []; let notice = ''; let error = ''; let starting = false; let route = ''; let refreshing = false;
   function post() {
-    iframe?.contentWindow?.postMessage({ source: PARENT, type: 'state', tracks,
+    // DOM fallback tracks retain their HTML rows for capture. Only metadata can
+    // cross the iframe's structured-clone boundary.
+    const trackData = tracks.map(({ trackId, trackName, trackArtist, trackArtworkSrc, rowIndex }) => ({
+      trackId, trackName, trackArtist, trackArtworkSrc, rowIndex,
+    }));
+    iframe?.contentWindow?.postMessage({ source: PARENT, type: 'state', tracks: trackData,
       active: isRunActive(), starting, notice, error, supported: isSupportedRoute() }, origin);
   }
   async function updateTracks() {
