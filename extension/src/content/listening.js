@@ -99,8 +99,9 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       const playlist = [...new Set(getTrackIds())];
       const scope = playlist.includes(dom.trackId) ? playlist : [dom.trackId];
       const captured = scope.filter(id => catalog.has(id)).length;
+      const saving = scope.filter(id => !catalog.has(id) && storing.has(id)).length * .99;
       const partial = recording?.complete && !catalog.has(dom.trackId) && dom.duration > 0 ? Math.min(.99, dom.position / dom.duration) : 0;
-      const overallCaptureFraction = recording && scope.length ? (captured + partial) / scope.length : null;
+      const overallCaptureFraction = recording && scope.length ? (captured + saving + partial) / scope.length : null;
       emit({ ...dom, overallCaptureFraction, generation, position: local ? media.currentTime : dom.position, observedAt: Date.now(),
         playing: playing && connected, local: owner && local, output, volume, error,
         capability: 1, capturing: !!recording || !!batch,
