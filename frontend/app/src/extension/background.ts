@@ -60,7 +60,7 @@ chrome.runtime.onMessageExternal.addListener((message: unknown, sender, respond)
   try { url = new URL(sender.url || ''); } catch { return false; }
   if (url.origin !== 'https://ktv420.web.app' || url.pathname.replace(/\/$/,'') !== '/replay' || (sender.frameId !== undefined && sender.frameId !== 0) ||
     !message || typeof message !== 'object' || !('type' in message)) return false;
-  if (message.type === 'ktv420:replay-ping') { respond({ok:true,version:'6.3.0'}); return false; }
+  if (message.type === 'ktv420:replay-ping') { respond({ok:true,version:'6.3.1'}); return false; }
   if (message.type !== 'ktv420:open-replay' || !('recording' in message)) return false;
   void (async () => {
     const recording = parseRecording(message.recording);

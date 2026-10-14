@@ -64,6 +64,18 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
     overlay.dataset.open = 'true'; overlay.setAttribute('aria-hidden', 'false'); onOpenChange?.(true);
     await updateTracks(); post();
   }
+  function close() {
+    if (overlay.dataset.open !== 'true') return;
+    overlay.dataset.open = 'false'; overlay.setAttribute('aria-hidden', 'true'); onOpenChange?.(false);
+    // Stop Spotify even when the hosted player has not finished loading.
+    void Promise.resolve(onTransport?.({ action: 'pause' })).catch(reason => { error = reason?.message || String(reason); post(); });
+    if (frameReady) iframe.contentWindow.postMessage({ source: PARENT, version: 2, type: 'closed' }, origin);
+    button.focus?.();
+  }
+  const keydown = event => {
+    if (event.key !== 'Escape' || overlay.dataset.open !== 'true') return;
+    event.preventDefault(); event.stopPropagation(); close();
+  };
   button.onclick = () => { void show(); };
   function refresh() {
     if (isRunActive()) starting = false;
@@ -82,7 +94,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
   const handleMessage = async event => {
     if (!iframe || event.source !== iframe.contentWindow || event.origin !== origin || event.data?.source !== FRAME) return;
     if (hostedBridge && event.data.version !== 2) return;
-    if (event.data.type === 'close') { overlay.dataset.open = 'false'; overlay.setAttribute('aria-hidden', 'true'); onOpenChange?.(false); return; }
+    if (event.data.type === 'close') { close(); return; }
     if (event.data.type === 'dismiss-replay') {
       replay = null; onReplay?.(false);
       chrome.runtime.sendMessage({type:'ktv420:clear-replay'}, () => { void chrome.runtime.lastError; });
@@ -108,6 +120,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
     finally { starting = false; refresh(); }
   };
   window.addEventListener('message', handleMessage);
+  window.addEventListener('keydown', keydown, true);
   const toolbar = (message, _sender, respond) => {
     if (message?.type !== 'ktv420:show-overlay') return false;
     void show().then(() => respond({ ok: true }), reason => respond({ ok: false, error: String(reason) }));
@@ -117,7 +130,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
   const timer = setInterval(refresh, 1000);
   refresh();
   window.addEventListener('pagehide', () => {
-    clearInterval(timer); window.removeEventListener('message', handleMessage); chrome.runtime.onMessage.removeListener(toolbar);
+    clearInterval(timer); window.removeEventListener('message', handleMessage); window.removeEventListener('keydown', keydown, true); chrome.runtime.onMessage.removeListener(toolbar);
   }, { once: true });
   return { refresh, prepare, getTrackIds: () => tracks.map(track => track.trackId),
     notifyListening(state) { listening = state; post(); },

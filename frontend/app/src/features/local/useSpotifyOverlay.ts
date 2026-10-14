@@ -1,6 +1,6 @@
 import { parseRecording, spotifyContext, type PerformanceRecording } from './recording';
 import { parseListeningState, type ListeningState, type TransportCommand } from './listeningProtocol';
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { brokerOrigin } from './libraryClient';
 
 export type SpotifyTrack = { trackId: string; trackName: string; trackArtist: string; trackArtworkSrc: string; rowIndex: number };
@@ -12,7 +12,9 @@ const parentOrigin = embedded ? brokerOrigin() : '';
 function send(type: string, command?: TransportCommand) {
   if (embedded) window.parent.postMessage({ source: 'ktv420-overlay', version: 2, type, command }, parentOrigin);
 }
-export function useSpotifyOverlay() {
+export function useSpotifyOverlay(onClose?: () => void) {
+  const closeRef = useRef(onClose);
+  useLayoutEffect(() => { closeRef.current = onClose; }, [onClose]);
   const [state, setState] = useState(initial);
   const [replay,setReplay] = useState<PerformanceRecording | null>(null);
   useEffect(() => {
@@ -23,6 +25,9 @@ export function useSpotifyOverlay() {
         if (event.data.version !== 2) setState(previous => ({ ...previous, error: 'Update the ktv420 extension to use this player.' }));
         else send('ready');
         return;
+      }
+      if (event.data?.source === 'ktv420-parent' && event.data.version === 2 && event.data.type === 'closed') {
+        closeRef.current?.(); return;
       }
       if (event.data?.source === 'ktv420-parent' && event.data.version === 2 && event.data.type === 'replay') {
         if(event.data.recording===null) {setReplay(null);return;}

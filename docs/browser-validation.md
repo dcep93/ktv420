@@ -94,3 +94,10 @@ The built, minified engine was separately served under the exact Firebase player
 The real recorder/replay fixture passed eleven assertions including tempo/pitch snapshots, two-song replay, fades, pause/resume, seeks, silent Spotify and final pause. Routing/capture passed eighteen assertions including restored 1× on heartbeat loss, normal-speed next-song capture, original PCM amplitude/duration despite muted monitoring, rejected partial capture and an explicit pause when Spotify resets the requested tempo. Tempo commands are bounded, track-scoped and coalesced during slider drags. V3 files retain both settings; V2 loads with neutral defaults. The install page detects an older extension before sending a V3 recording.
 
 82 automated tests, lint and builds are part of the release checks. Development fixtures are excluded from deployment. Actual Spotify accepting playbackRate and remote-device behavior still require installed-extension validation; a rejected/reset rate pauses playback explicitly. The new extension is required for tempo synchronization; no permissions were added. Website and extension versions must be updated together.
+
+
+### Escape closes and pauses (6.3.1)
+
+Escape and Close stop local playback, cancel pending replay actions, pause Spotify through the existing DOM transport, and hide the overlay. Escape also works when focus remains on Spotify or the bridge loading/error screen; it is ignored by the content script while the overlay is closed. Separation is left running. An active performance recording is saved when closing.
+
+Validated with the synthetic DOM/browser fixture: all 13 record/replay assertions passed, including closing during playback and during replay preparation, with a two-second check for unwanted restart. Unit coverage checks the parent Escape handler, Close parity, trusted bridge forwarding, and ignoring Escape outside the overlay. This does not replace a real Spotify check after reloading the extension.

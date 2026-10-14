@@ -30,7 +30,11 @@ export function useReplay(options: Options) {
     }
     if (current.cancelled) throw new Error('Replay stopped.');
   }
+  function checkRunning(current: Run) {
+    if (current.cancelled) throw new Error('Replay stopped.');
+  }
   async function command(current: Run, value: TransportCommand, condition: () => boolean) {
+    checkRunning(current);
     current.guard=Date.now()+1500; latest.current.transport(value);
     // Require a fresh observation so old playback state cannot acknowledge a new command.
     const observed = latest.current.listening?.observedAt || 0;
@@ -38,6 +42,7 @@ export function useReplay(options: Options) {
     current.guard=Date.now()+100;
   }
   async function applySnapshot(current: Run, snapshot: import('./recording').MixerSnapshot) {
+    checkRunning(current);
     const rate = snapshot.tempo ?? 1;
     const changeRate=rate !== (latest.current.listening?.playbackRate ?? 1);
     if (changeRate && !latest.current.listening?.tempoSupported) throw new Error('Update ktv420 to 6.3 or later, then reload Spotify to replay tempo changes.');
@@ -51,7 +56,7 @@ export function useReplay(options: Options) {
     if (!current || current.busy || current.paused) return;
     current.busy=true;
     try {
-      while (current.cursor<current.recording.events.length && current.recording.events[current.cursor].at<=current.clock.seconds) {
+      while (!current.cancelled && current.cursor<current.recording.events.length && current.recording.events[current.cursor].at<=current.clock.seconds) {
         const event=current.recording.events[current.cursor++];
         if (event.type==='mix') await applySnapshot(current,event.snapshot!);
         else {
@@ -67,12 +72,13 @@ export function useReplay(options: Options) {
             await actions.current.command(current,{action:'seek',trackId:event.trackId,position:event.position},() => Math.abs((listening()?.position ?? -10)-event.position)<.6);
             await applySnapshot(current,event.snapshot!);
             await controller()!.seek(Math.max(0,event.position-latest.current.offset(event.trackId)));
-            setStatus('playing');
+            checkRunning(current); setStatus('playing');
           } else if (event.type==='play') {
             await actions.current.command(current,{action:'play'},() => listening()?.playing===true);
             // The recorded song position is authoritative for the audible performance.
             await controller()!.seek(Math.max(0,event.position-latest.current.offset(event.trackId)));
-            await controller()!.play();current.audio=true;
+            checkRunning(current);
+            await controller()!.play(); checkRunning(current); current.audio=true;
           } else if (event.type==='pause') {
             controller()?.pause();current.audio=false;
             await actions.current.command(current,{action:'pause'},() => listening()?.playing===false);
@@ -80,6 +86,7 @@ export function useReplay(options: Options) {
             controller()?.pause();
             await actions.current.command(current,{action:'seek',trackId:event.trackId,position:event.position},() => Math.abs((listening()?.position ?? -10)-event.position)<.6);
             await controller()!.seek(Math.max(0,event.position-latest.current.offset(event.trackId)));
+            checkRunning(current);
             if (current.audio) await controller()!.play();
           } else { actions.current.stop(true); return; }
           if (!current.cancelled && !current.paused) current.clock.start();
@@ -107,7 +114,7 @@ export function useReplay(options: Options) {
     if(current.paused) {
       current.busy=true;current.clock.pause();latest.current.control()?.pause();setStatus('paused');
       try { await command(current,{action:'pause'},() => latest.current.listening?.playing===false); }
-      catch(e) { stop();setError(e instanceof Error ? e.message : String(e)); }
+      catch(e) { if (!current.cancelled) { stop();setError(e instanceof Error ? e.message : String(e)); } }
       finally {current.busy=false;}
     }
     else {
@@ -117,8 +124,8 @@ export function useReplay(options: Options) {
           await command(current,{action:'play'},() => latest.current.listening?.playing===true);
           await latest.current.control()?.play();
         }
-        current.clock.start();setStatus('playing');
-      } catch(e) { stop();setError(e instanceof Error ? e.message : String(e)); }
+        checkRunning(current); current.clock.start();setStatus('playing');
+      } catch(e) { if (!current.cancelled) { stop();setError(e instanceof Error ? e.message : String(e)); } }
       finally { current.busy=false; }
     }
   }

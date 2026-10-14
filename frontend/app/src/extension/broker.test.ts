@@ -118,3 +118,20 @@ test('replay handoff waits for the hosted peer, survives reload, and rejects unt
   await bridge.receive({source:parent,origin:'https://open.spotify.com',data:{...data,recording:null}});assert.equal(messages.at(-1)?.recording,null);
   await bridge.dispose();
 });
+
+
+test('close notification reaches only the ready hosted player from the trusted Spotify parent', async () => {
+  const messages: unknown[] = [];
+  const parent = { postMessage() {} } as unknown as Window;
+  const player = { postMessage: (data: unknown) => messages.push(data) } as unknown as Window;
+  const bridge = createBrokerBridge({ parent, player, parentOrigin:'https://open.spotify.com', playerOrigin:'https://ktv420.web.app', showError() {},
+    createSession: () => ({dispose:async () => {},handle:async () => ({source:'ktv420-library',version:2,id:'close-test',ok:true})}) as ReturnType<typeof createLibraryBrokerSession> });
+  const closed={source:'ktv420-parent',version:2,type:'closed'};
+  const send=(data=closed,source=parent,origin='https://open.spotify.com')=>bridge.receive({data,source,origin});
+  await send(); assert.equal(messages.length,0);
+  await bridge.receive({source:player,origin:'https://ktv420.web.app',data:{source:'ktv420-overlay',version:2,type:'ready'}});
+  await send(closed,player); await send(closed,parent,'https://evil.example'); await send({...closed,version:1});
+  assert.equal(messages.length,0);
+  await send(); assert.deepEqual(messages,[closed]);
+  await bridge.dispose();
+});

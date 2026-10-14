@@ -45,6 +45,10 @@ export function createBrokerBridge(options: BridgeOptions) {
         catch { options.showError('Invalid recording. Import it again from ktv420.web.app/replay.'); }
         return;
       }
+      if (data.source === 'ktv420-parent' && data.version === LIBRARY_PROTOCOL_VERSION && data.type === 'closed') {
+        if (ready) options.player.postMessage({ source: 'ktv420-parent', version: LIBRARY_PROTOCOL_VERSION, type: 'closed' }, options.playerOrigin);
+        return;
+      }
       if (validState(data)) {
         state = { source: 'ktv420-parent', version: LIBRARY_PROTOCOL_VERSION, type: 'state', active: data.active, starting: data.starting, supported: data.supported,
           spotifyPath: spotifyContext(data.spotifyPath) ? data.spotifyPath : '', notice: data.notice, error: data.error, tracks: (data.tracks as Record<string, unknown>[]).map(track => ({
@@ -132,6 +136,12 @@ function mountBroker() {
     showError, onReady: () => { clearTimeout(timer); status.hidden = true; },
   });
   window.addEventListener('message', event => { void bridge.receive(event); });
+  // Keep Escape usable when focus is on the bridge's loading/error screen.
+  window.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    window.parent.postMessage({ source: 'ktv420-overlay', version: LIBRARY_PROTOCOL_VERSION, type: 'close' }, parentOrigin);
+  });
   player.addEventListener('load', () => { startTimeout(); void bridge.reload(); });
   player.addEventListener('error', () => showError('The hosted player could not load. Check your connection and retry.'));
   retry.addEventListener('click', () => { status.hidden = true; startTimeout(); player.src = playerUrl.href; });

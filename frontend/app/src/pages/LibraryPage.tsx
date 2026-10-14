@@ -27,7 +27,8 @@ export default function LibraryPage() {
   const viewScroll = useRef({ tracks: 0, settings: 0, player: 0 });
   useLayoutEffect(() => { if (content.current) content.current.scrollTop = viewScroll.current[viewMode]; }, [viewMode]);
   const [error, setError] = useState('');
-  const spotify = useSpotifyOverlay();
+  const closeRef = useRef<() => void>(() => {});
+  const spotify = useSpotifyOverlay(() => closeRef.current());
   const listening = spotify.listening;
   const transportCommand = spotify.transport;
   useEffect(() => {
@@ -288,7 +289,13 @@ export default function LibraryPage() {
       status: 'missing', source: 'spotify', bytes: 0, frames: 0, sampleRate: 44100, metadata: { trackArtworkSrc: item.trackArtworkSrc },
     }) : savedSpotifyTracks;
   const displayTracks = spotify.replay ? required.map(item => allDisplayTracks.find(t => `spotify-${item.id}`===t.id) || tracks.find(t => `spotify-${item.id}`===t.id) || {id:`spotify-${item.id}`,title:item.title,artist:'',createdAt:0,status:'missing' as const,source:'spotify' as const,bytes:0,frames:0,sampleRate:44100,metadata:undefined,error:undefined}) : allDisplayTracks;
-  const close = useCallback(() => { setViewMode('tracks'); spotify.close(); }, [spotify]);
+  // Cancel replay's pending async actions before hiding/unmounting its player.
+  closeRef.current = () => {
+    replay.stop();
+    if (mix.current) void stopRecording({type:'record_stop',trackTimeSeconds:mixer.current?.position() || 0});
+    setAutoPlay(false); setViewMode('tracks');
+  };
+  const close = useCallback(() => { closeRef.current(); spotify.close(); }, [spotify]);
   const canCapture = !replay.active && !recording && spotify.embedded && !spotify.starting && !deletingAudio && (spotify.active || (spotify.supported && spotify.tracks.length > 0));
   const audioBusy = replay.active || !!active || recording || spotify.active || spotify.starting || deletingAudio;
   useEffect(() => {
