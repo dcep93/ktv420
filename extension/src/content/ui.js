@@ -1,39 +1,89 @@
-import { isSupportedRoute } from './dom.js';
-import { sendLocalMessage } from './storage.js';
+import { collectTrackRows, isSupportedRoute } from './dom.js';
+import { SELECTORS } from './constants.js';
+
+const PARENT = 'ktv420-parent';
+const FRAME = 'ktv420-overlay';
 
 export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks }) {
-  const panel = document.createElement('section');
-  panel.setAttribute('aria-label', 'ktv420 capture');
-  Object.assign(panel.style, { position: 'fixed', bottom: '100px', right: '20px', zIndex: '99999',
-    background: '#211b1a', color: '#fff2ec', border: '1px solid #f991b3', borderRadius: '14px', padding: '14px',
-    fontFamily: 'system-ui', maxWidth: '300px', boxShadow: '0 6px 24px #0008' });
-  const title = document.createElement('strong'); title.textContent = 'ktv420 · local audio';
-  const status = document.createElement('p'); status.setAttribute('role', 'status'); status.style.fontSize = '12px';
-  status.textContent = 'Capture this playlist or album in real time. Audio stays on this computer.';
-  const capture = document.createElement('button'); const library = document.createElement('button');
-  for (const button of [capture, library]) Object.assign(button.style, { background: '#f991b3', color: '#211b1a',
-    border: 'none', borderRadius: '6px', padding: '8px 12px', marginRight: '6px', cursor: 'pointer', fontWeight: '600' });
-  library.textContent = 'Open library';
-  library.onclick = () => { sendLocalMessage({ type: 'ktv420:open' }).catch(showError); };
-  function showError(error) { status.textContent = error?.message || String(error); }
-  function refresh() { capture.textContent = isRunActive() ? 'Stop capture' : 'Capture tracks'; panel.hidden = !isSupportedRoute() && !isRunActive(); }
-  capture.onclick = async () => {
-    capture.disabled = true;
+  const origin = chrome.runtime.getURL('').replace(/\/$/, '');
+  const button = document.createElement('button');
+  button.type = 'button'; button.textContent = 'ktv420'; button.setAttribute('aria-label', 'Open ktv420');
+  Object.assign(button.style, { background: '#211b1a', color: '#f991b3', border: '1px solid #f991b3',
+    borderRadius: '20px', padding: '8px 14px', marginLeft: '10px', cursor: 'pointer', fontWeight: '700', zIndex: '2147483647' });
+  const overlay = document.createElement('section');
+  overlay.setAttribute('aria-label', 'ktv420 Spotify overlay');
+  Object.assign(overlay.style, { position: 'fixed', inset: '64px 12px 94px', zIndex: '2147483646',
+    background: '#191315', border: '1px solid #f991b3', borderRadius: '14px', overflow: 'hidden', boxShadow: '0 12px 48px #000a', display: 'none' });
+  let iframe; let tracks = []; let notice = ''; let error = ''; let starting = false; let route = ''; let refreshing = false;
+  function post() {
+    iframe?.contentWindow?.postMessage({ source: PARENT, type: 'state', tracks,
+      active: isRunActive(), starting, notice, error, supported: isSupportedRoute() }, origin);
+  }
+  async function updateTracks() {
+    if (refreshing || isRunActive()) return;
+    refreshing = true;
     try {
-      const tracks = isRunActive() ? [] : await loadSpotifyTracks();
-      status.textContent = isRunActive() ? 'Stopping…' : 'Capturing locally. Keep Spotify open; do not seek or change tracks.';
-      capture.disabled = false;
-      await onToggleRun({ trackSnapshot: tracks });
-    } catch (error) { showError(error); }
-    finally { capture.disabled = false; refresh(); }
+      const found = await loadSpotifyTracks();
+      tracks = found.length ? found : collectTrackRows();
+      route = location.pathname;
+      error = '';
+    } catch (reason) { error = reason?.message || String(reason); }
+    finally { refreshing = false; post(); }
+  }
+  async function show() {
+    if (!iframe) {
+      iframe = document.createElement('iframe');
+      iframe.title = 'ktv420 Spotify player';
+      iframe.src = chrome.runtime.getURL('build/index.html?overlay=1');
+      iframe.allow = 'autoplay';
+      Object.assign(iframe.style, { width: '100%', height: '100%', border: '0' });
+      iframe.addEventListener('load', post);
+      overlay.append(iframe);
+    }
+    overlay.style.display = 'block';
+    await updateTracks(); post();
+  }
+  button.onclick = () => { void show(); };
+  function refresh() {
+    if (isRunActive()) starting = false;
+    const parent = document.querySelector(SELECTORS.spotifyLogo)?.closest('a')?.parentElement;
+    const target = parent || document.body;
+    if (target && button.parentElement !== target) target.append(button);
+    Object.assign(button.style, parent ? { position: 'static' } : { position: 'fixed', top: '12px', right: '20px' });
+    if (document.body && !overlay.isConnected) document.body.append(overlay);
+    button.textContent = isRunActive() ? 'ktv420 · capturing' : 'ktv420';
+    post();
+    if (iframe && route !== location.pathname && !isRunActive()) void updateTracks();
+  }
+  const handleMessage = async event => {
+    if (!iframe || event.source !== iframe.contentWindow || event.origin !== origin || event.data?.source !== FRAME) return;
+    if (event.data.type === 'close') { overlay.style.display = 'none'; return; }
+    if (event.data.type === 'ready') { post(); return; }
+    if (event.data.type !== 'toggle-capture' || starting) return;
+    starting = true; error = ''; post();
+    try {
+      if (!isRunActive()) await updateTracks();
+      // activechange refreshes the button once startup completes, keeping Stop available during capture.
+      const run = onToggleRun({ trackSnapshot: tracks });
+      post();
+      await run;
+    } catch (reason) { error = reason?.message || String(reason); }
+    finally { starting = false; refresh(); }
   };
-  panel.append(title, status, capture, library);
-  const mount = () => { if (document.body) document.body.append(panel); else requestAnimationFrame(mount); };
-  mount(); refresh();
+  window.addEventListener('message', handleMessage);
+  const toolbar = (message, _sender, respond) => {
+    if (message?.type !== 'ktv420:show-overlay') return false;
+    void show().then(() => respond({ ok: true }), reason => respond({ ok: false, error: String(reason) }));
+    return true;
+  };
+  chrome.runtime.onMessage.addListener(toolbar);
   const timer = setInterval(refresh, 1000);
-  window.addEventListener('pagehide', () => clearInterval(timer), { once: true });
+  refresh();
+  window.addEventListener('pagehide', () => {
+    clearInterval(timer); window.removeEventListener('message', handleMessage); chrome.runtime.onMessage.removeListener(toolbar);
+  }, { once: true });
   return { refresh,
-    async notifyTrackCaptured(_id, metadata) { status.textContent = `Saved ${metadata?.trackName || 'track'} locally. Open the library to separate it.`; },
-    async notifyCaptureComplete(trackIds) { status.textContent = `${trackIds?.length || 0} tracks captured. Open the library to separate and listen.`; refresh(); },
+    async notifyTrackCaptured(_id, metadata) { notice = `${metadata?.trackName || 'Track'} captured. Local separation is queued automatically.`; post(); },
+    async notifyCaptureComplete(trackIds) { notice = `${trackIds?.length || 0} tracks captured. Separation continues here automatically.`; refresh(); },
   };
 }

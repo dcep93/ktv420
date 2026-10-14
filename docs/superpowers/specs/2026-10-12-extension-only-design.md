@@ -14,11 +14,13 @@ IndexedDB transactions atomically store metadata and binary Float32 WAV blobs. T
 
 ## User experience
 
-The toolbar opens the full library. Drop or choose audio, see storage/progress/errors, separate, then listen using the existing stem player, effects and visualizers. Spotify retains its capture flow and supplies tracks to this same library. Errors keep the input and provide a retry. Queue and cancellation are explicit. The existing player receives aligned WAV files, its keyboard shortcuts respect form fields and its graphics use local assets. Keep optional current chord analysis without redesigning it.
+Updated October 13 after explicit user correction: preserve the legacy Spotify workflow and the in-Spotify overlay. The toolbar focuses Spotify and opens the extension-owned overlay. Show the current playlist/album, capture tracks as they play using the existing capture orchestrator, and automatically separate each completed capture locally. No file-import or manual library/separation step is required. The player, effects and visualizers remain inside the overlay. Stored audio is an implementation detail behind the Spotify workflow.
+
+Keep the iframe mounted when hidden so capture and separation continue. Origin/source-check the parent/iframe bridge and expose the extension HTML only to Spotify. Serialize workers across views with a browser lock; pick up new captures, recover interrupted processing and leave failures for explicit retry. Pause/resume separation is shared across extension views and does not discard captures. Keep optional current chord analysis without redesigning it.
 
 ## Release and retirement
 
-Build an unpacked extension ZIP and a small installation website at ktv420.web.app. Instructions explain load-unpacked, model download, local disk usage and keeping the library tab open during separation. CI validates, builds and publishes those artifacts without deploying audio infrastructure. Remove obsolete backend code and old naming from the repository. Delete dedicated legacy cloud resources only after browser inference/integration validation; do not create archives. Preserve unrelated resources and the hosting project. Credentials/ownership that cannot be verified are reported as blockers, never assumed.
+Build an unpacked extension ZIP and a small installation website at ktv420.web.app. Instructions explain load-unpacked, model download, local disk usage and keeping the library tab open during separation. CI validates, builds and publishes those artifacts without deploying audio infrastructure. Remove obsolete backend code and old naming from the repository. Keep existing cloud resources until the replacement is proven in the installed extension with real Spotify capture, local separation and playback; only then delete dedicated legacy cloud resources; do not create archives. Preserve unrelated resources and the hosting project. Credentials/ownership that cannot be verified are reported as blockers, never assumed.
 
 ## Acceptance
 
