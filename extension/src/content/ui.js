@@ -7,7 +7,7 @@ const BUTTON_ID = 'ktv420-spotify-capture-button';
 const IFRAME_ID = 'ktv420-prepared-iframe';
 const STYLE_ID = 'ktv420-spotify-capture-style';
 
-export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTransport, onHeartbeat }) {
+export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTransport, onHeartbeat, onOpenChange }) {
   const origin = chrome.runtime.getURL('').replace(/\/$/, '');
   const [major, minor] = chrome.runtime.getManifest().version.split('.').map(Number);
   const hostedBridge = major > 0 || minor >= 4;
@@ -55,7 +55,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
   }
   async function show() {
     prepare();
-    overlay.dataset.open = 'true'; overlay.setAttribute('aria-hidden', 'false');
+    overlay.dataset.open = 'true'; overlay.setAttribute('aria-hidden', 'false'); onOpenChange?.(true);
     await updateTracks(); post();
   }
   button.onclick = () => { void show(); };
@@ -76,7 +76,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
   const handleMessage = async event => {
     if (!iframe || event.source !== iframe.contentWindow || event.origin !== origin || event.data?.source !== FRAME) return;
     if (hostedBridge && event.data.version !== 2) return;
-    if (event.data.type === 'close') { overlay.dataset.open = 'false'; overlay.setAttribute('aria-hidden', 'true'); return; }
+    if (event.data.type === 'close') { overlay.dataset.open = 'false'; overlay.setAttribute('aria-hidden', 'true'); onOpenChange?.(false); return; }
     if (event.data.type === 'ready') { frameReady = true; post(); return; }
     if (event.data.type === 'listening-heartbeat') { onHeartbeat?.(); return; }
     if (event.data.type === 'transport') { await onTransport?.(event.data.command); return; }

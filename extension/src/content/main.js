@@ -4,7 +4,7 @@ import { createPageBridge } from "./pageBridge.js";
 import { mountButton } from "./ui.js";
 
 const bridge = createPageBridge();
-const captureTitle = createCaptureTitle();
+const captureTitle = createCaptureTitle(document, MutationObserver, chrome.runtime.getURL('assets/favicon.svg'));
 bridge.inject().catch((error) => {
   console.warn("[ktv420] Failed to inject page hooks early", error);
 });
@@ -40,6 +40,7 @@ async function getOrchestrator() {
 }
 
 const ui = mountButton({
+  onOpenChange: open => captureTitle.setOpen(open),
   isRunActive: () => Boolean(orchestrator?.isActive()),
   loadSpotifyTracks: () => loadSpotifyPlaylistTracks(),
   onTransport: command => listening?.command(command),

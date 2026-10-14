@@ -40,6 +40,14 @@ test('title prefix follows Spotify title changes without accumulating and restor
   assert.match(doc.title, /^\[99%\]/);
   title.set(null);
   assert.equal(doc.title, 'Second song • Spotify');
-  title.set(.7); title.dispose();
-  assert.equal(doc.title, 'Second song • Spotify');
+  title.setOpen(true);
+  assert.equal(doc.title, 'ktv420');
+  title.set(.7);
+  assert.equal(doc.title, '[70%] ktv420');
+  doc.title = 'Third song • Spotify'; notify();
+  assert.equal(doc.title, '[70%] ktv420');
+  title.setOpen(false);
+  assert.equal(doc.title, '[70%] ktv420 — Third song • Spotify');
+  title.dispose();
+  assert.equal(doc.title, 'Third song • Spotify');
 });
