@@ -9,3 +9,9 @@ Add Delete all audio within the existing Local audio card. Require an inline des
 This is a hosted player update only: no extension permission, protocol, or package change. Verify header coordinates for short and long lists, confirmation/cancellation, deletion of all stored original/stem blobs, preservation of the model, blocked concurrent processing, empty state, and existing automated checks.
 
 Verification: 56 existing tests passed, lint and both builds passed. Isolated Chrome checks preserved header x/y for five-track and forty-track views; cancelling retained five tracks, capture disabled cleanup, a held separation lock rejected deletion without loss, retry removed all 25 audio blobs and five track records, the model cache remained, and removing the model updated its status. No browser errors.
+
+## Model download control
+
+When the model is absent, the same button offers Download model · 181 MB. During download it shows percentage progress, followed by a finishing state while integrity verification and storage complete. A verified, saved model switches the control to Remove downloaded model. Existing automatic model loading remains available. Manual downloading prevents this view from simultaneously starting separation, preserves the processing preference, and warns before navigation interrupts the operation.
+
+Explicit downloads require a successful cache write; inference may still use verified bytes when caching is unavailable. Network and storage failures remain visible and leave the download action retryable. Validation used the real pinned model in isolated Chrome: download, SHA-256 verification, cache persistence after reload, removal, injected HTTP failure, injected quota failure, and successful retries all passed. Added a regression test that unavailable storage rejects manual download before fetching, while existing optional-cache inference tests still pass.

@@ -7,7 +7,7 @@ import { processLocalTrack } from '../features/local/processing';
 import { drainSpotifyQueue } from '../features/local/spotifyQueue';
 import { useSpotifyOverlay } from '../features/local/useSpotifyOverlay';
 import { LocalSeparator } from '../features/local/inference/client';
-import { clearModelCache, getModelCacheStatus } from '../features/local/inference/model';
+import { clearModelCache, getModelCacheStatus, loadModelBytes } from '../features/local/inference/model';
 import type { SeparationProgress } from '../features/local/inference/types';
 
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
@@ -24,6 +24,9 @@ export default function LibraryPage() {
   const [progress, setProgress] = useState<SeparationProgress | null>(null);
   const [backend, setBackend] = useState<'auto' | 'wasm'>('auto');
   const [modelCached, setModelCached] = useState(false);
+  const [modelAction, setModelAction] = useState<'download' | 'remove' | null>(null);
+  const [modelDownload, setModelDownload] = useState(0);
+  const modelBusy = useRef(false);
   const [confirmDelete, setConfirmDelete] = useState('');
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
   const [deletingAudio, setDeletingAudio] = useState(false);
@@ -56,7 +59,7 @@ export default function LibraryPage() {
   }, [refresh]);
   useEffect(() => () => { cancelled.current = true; separator.current?.dispose(); }, []);
   useEffect(() => {
-    const warn = (event: BeforeUnloadEvent) => { if (running.current || deleting.current || mix.current) { event.preventDefault(); event.returnValue = ''; } };
+    const warn = (event: BeforeUnloadEvent) => { if (running.current || deleting.current || modelBusy.current || mix.current) { event.preventDefault(); event.returnValue = ''; } };
     window.addEventListener('beforeunload', warn); return () => window.removeEventListener('beforeunload', warn);
   }, []);
   const selectedReady = activeTrack?.status === 'ready';
@@ -72,7 +75,7 @@ export default function LibraryPage() {
     return () => { disposed = true; };
   }, [selected, selectedReady, selectedCreatedAt, recording]);
   const processTracks = useCallback(async (ids: string[], automatic = false) => {
-    if (running.current || deleting.current) return;
+    if (running.current || deleting.current || modelBusy.current) return;
     running.current = true; cancelled.current = false; setError('');
     try {
       await withProcessingLock(async lock => {
@@ -100,7 +103,7 @@ export default function LibraryPage() {
     if (!autoProcessing) return;
     let disposed = false;
     const poll = async () => {
-      if (running.current || deleting.current || disposed) return;
+      if (running.current || deleting.current || modelBusy.current || disposed) return;
       try {
         const pending = await listTracks();
         if (!disposed && pending.some(track => track.source === 'spotify' && ['captured', 'processing'].includes(track.status))) {
@@ -114,6 +117,19 @@ export default function LibraryPage() {
   const setProcessingEnabled = (enabled: boolean) => {
     if (!enabled) { cancelled.current = true; separator.current?.dispose(); }
     void saveProcessingEnabled(enabled).then(() => { observedProcessingPreference.current = enabled; setAutoProcessing(enabled); }).catch(reason => setError(errorText(reason)));
+  };
+  const manageModel = async () => {
+    if (modelBusy.current || running.current || deleting.current) return;
+    modelBusy.current = true; setModelDownload(0); setError('');
+    setModelAction(modelCached ? 'remove' : 'download');
+    try {
+      if (modelCached) await clearModelCache();
+      else await loadModelBytes(setModelDownload, { requireCache: true });
+    } catch (reason) { setError(errorText(reason)); }
+    finally {
+      await refresh().catch(reason => setError(errorText(reason)));
+      modelBusy.current = false; setModelAction(null);
+    }
   };
   const remove = async (id: string) => {
     try { await deleteTrack(id); if (selected === id) { setSelected(''); loadedRevision.current = ''; setRecord(null); } setConfirmDelete(''); await refresh(); }
@@ -204,10 +220,13 @@ export default function LibraryPage() {
           </select></label>
           <button disabled={deletingAudio} aria-describedby="separation-help" onClick={() => setProcessingEnabled(!autoProcessing)}>{autoProcessing ? 'Pause separation' : 'Resume separation'}</button>
           {active && <progress max={1} value={progress?.fraction || 0} aria-label="Separation progress" title={progress?.message} />}
-          <button disabled={!modelCached || !!active || deletingAudio} aria-describedby="model-help" onClick={() => void clearModelCache().then(refresh).catch(reason => setError(errorText(reason)))}>Remove downloaded model</button>
+          <button disabled={!!modelAction || !!active || deletingAudio} aria-describedby="model-help" onClick={() => void manageModel()}>
+            {modelAction === 'download' ? (modelDownload >= 1 ? 'Finishing download…' : `Downloading ${Math.floor(modelDownload * 100)}%…`)
+              : modelAction === 'remove' ? 'Removing model…' : modelCached ? 'Remove downloaded model' : 'Download model · 181 MB'}
+          </button>
         </div>
         <p className="iframe-settings-help" id="separation-help">Separation creates stems. Capture continues while paused; unfinished separation restarts on resume.</p>
-        <p className="iframe-settings-help" id="model-help">Removing the model frees 181 MB. Songs stay; the model downloads again when needed.</p>
+        <p className="iframe-settings-help" id="model-help">{modelCached ? 'Removing the model frees 181 MB. Songs stay; the model downloads again when needed.' : 'Download once to separate songs locally. It also downloads automatically when needed.'}</p>
       </section>
       <section className="iframe-settings-source">
         <header className="iframe-settings-source-header"><h2>Local audio</h2><span>{size(tracks.reduce((total, track) => total + track.bytes, 0))}</span></header>

@@ -29,7 +29,8 @@ export async function verifyModelBytes(bytes: ArrayBuffer): Promise<void> {
 }
 
 /** Only immutable model data is fetched remotely; executable JS/WASM is served with the hosted player. */
-export async function loadModelBytes(onDownload: (fraction: number) => void): Promise<ArrayBuffer> {
+export async function loadModelBytes(onDownload: (fraction: number) => void,
+  options: { requireCache?: boolean } = {}): Promise<ArrayBuffer> {
   let cache: Cache | undefined
   try { if ('caches' in globalThis) cache = await caches.open(MODEL_CACHE_NAME) } catch { /* Storage can be denied. */ }
   try {
@@ -46,6 +47,7 @@ export async function loadModelBytes(onDownload: (fraction: number) => void): Pr
       }
     }
   } catch { cache = undefined }
+  if (options.requireCache && !cache) throw new Error('Chrome cannot save the model. Allow site storage and try again.')
   const response = await fetch(MODEL.url, { credentials: 'omit', referrerPolicy: 'no-referrer' })
   if (!response.ok) throw new Error(`Model download failed (HTTP ${response.status}).`)
   const result = new Uint8Array(MODEL.bytes)
@@ -69,7 +71,11 @@ export async function loadModelBytes(onDownload: (fraction: number) => void): Pr
   }
   await verifyModelBytes(result.buffer)
   // A cache quota failure must not prevent local separation in this session.
-  try { await cache?.put(MODEL.url, new Response(result, { headers: { 'Content-Type': 'application/octet-stream' } })) } catch { /* Optional persistent cache. */ }
+  try { await cache?.put(MODEL.url, new Response(result, { headers: { 'Content-Type': 'application/octet-stream' } })) }
+  catch {
+    if (options.requireCache) throw new Error('The model could not be saved. Free some local storage and try again.')
+    // Inference can still use the verified bytes without persistent cache.
+  }
   onDownload(1)
   return result.buffer
 }
