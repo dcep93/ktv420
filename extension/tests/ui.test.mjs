@@ -2,10 +2,11 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { mountButton } from '../src/content/ui.js';
 
-test('DOM fallback tracks reach the overlay without sending their HTML rows', async t => {
+test('overlay waits for a trusted ready message, then sends cloneable DOM track metadata', async t => {
   const elements = [];
   const messages = [];
   const timers = [];
+  const listeners = {};
   const trackId = '5EGTNEoUpibGgMWf6ECe0X';
   const row = {
     querySelector: () => ({ getAttribute: () => `/track/${trackId}`, textContent: 'Common Enemy' }),
@@ -19,7 +20,10 @@ test('DOM fallback tracks reach the overlay without sending their HTML rows', as
       addEventListener(name, listener) { this.listeners[name] = listener; },
       append(child) { this.children.push(child); child.parentElement = this; child.isConnected = true; },
     };
-    if (tag === 'iframe') element.contentWindow = { postMessage: data => messages.push(structuredClone(data)) };
+    if (tag === 'iframe') element.contentWindow = { postMessage: (data, origin) => {
+      assert.equal(origin, 'chrome-extension://test');
+      messages.push(structuredClone(data));
+    } };
     elements.push(element);
     return element;
   };
@@ -33,7 +37,8 @@ test('DOM fallback tracks reach the overlay without sending their HTML rows', as
         ? { closest: () => ({ parentElement: parent }) }
         : { querySelectorAll: () => [row] },
     },
-    window: { location: { pathname: '/playlist/example' }, addEventListener() {}, removeEventListener() {} },
+    window: { location: { pathname: '/playlist/example' },
+      addEventListener(name, listener) { listeners[name] = listener; }, removeEventListener() {} },
     location: { pathname: '/playlist/example' },
     chrome: { runtime: { getURL: path => `chrome-extension://test/${path}`, onMessage: { addListener() {}, removeListener() {} } } },
     setInterval: callback => { timers.push(callback); return 1; },
@@ -46,7 +51,18 @@ test('DOM fallback tracks reach the overlay without sending their HTML rows', as
   const ui = mountButton({ isRunActive: () => false, onToggleRun: async () => {}, loadSpotifyTracks: async () => [] });
   elements.find(element => element.id === 'ktv420-spotify-capture-button').onclick();
   await new Promise(resolve => setImmediate(resolve));
-  elements.find(element => element.tag === 'iframe').listeners.load();
+  const frame = elements.find(element => element.tag === 'iframe');
+  frame.listeners.load?.();
+  ui.refresh();
+  timers[0]();
+  assert.equal(messages.length, 0, 'loading/about:blank frames must receive no state messages');
+  const ready = { source: frame.contentWindow, origin: 'chrome-extension://test', data: { source: 'ktv420-overlay', type: 'ready' } };
+  await listeners.message({ ...ready, origin: 'https://open.spotify.com' });
+  await listeners.message({ ...ready, source: {} });
+  await listeners.message({ ...ready, data: { source: 'untrusted', type: 'ready' } });
+  ui.refresh();
+  assert.equal(messages.length, 0, 'a different origin or window cannot unlock state delivery');
+  await listeners.message(ready);
   ui.refresh();
   timers[0]();
   assert.ok(messages.length > 0);

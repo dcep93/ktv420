@@ -16,7 +16,11 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks }) {
   const overlay = document.createElement('section');
   overlay.id = IFRAME_ID; overlay.setAttribute('aria-label', 'ktv420 Spotify overlay'); overlay.setAttribute('aria-hidden', 'true');
   let iframe; let tracks = []; let notice = ''; let error = ''; let starting = false; let route = ''; let refreshing = false;
+  let frameReady = false;
   function post() {
+    // A new iframe starts as about:blank with Spotify's origin. Wait until the
+    // extension document identifies itself before sending extension-only data.
+    if (!frameReady) return;
     // DOM fallback tracks retain their HTML rows for capture. Only metadata can
     // cross the iframe's structured-clone boundary.
     const trackData = tracks.map(({ trackId, trackName, trackArtist, trackArtworkSrc, rowIndex }) => ({
@@ -43,7 +47,6 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks }) {
       iframe.src = chrome.runtime.getURL('build/index.html?overlay=1');
       iframe.allow = 'autoplay';
       Object.assign(iframe.style, { width: '100%', height: '100%', border: '0' });
-      iframe.addEventListener('load', post);
       overlay.append(iframe);
     }
     overlay.dataset.open = 'true'; overlay.setAttribute('aria-hidden', 'false');
@@ -67,7 +70,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks }) {
   const handleMessage = async event => {
     if (!iframe || event.source !== iframe.contentWindow || event.origin !== origin || event.data?.source !== FRAME) return;
     if (event.data.type === 'close') { overlay.dataset.open = 'false'; overlay.setAttribute('aria-hidden', 'true'); return; }
-    if (event.data.type === 'ready') { post(); return; }
+    if (event.data.type === 'ready') { frameReady = true; post(); return; }
     if (event.data.type !== 'toggle-capture' || starting) return;
     starting = true; error = ''; post();
     try {
