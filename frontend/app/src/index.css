@@ -329,7 +329,22 @@
   align-items: center;
   display: flex;
   gap: 16px;
+  flex-shrink: 0;
 }
+
+/* Keep the controls where the user clicked, including when returning to tracks. */
+.iframe-page[data-anchored="true"] {
+  height: 100vh;
+  justify-content: flex-start;
+  overflow: hidden;
+  padding-top: clamp(24px, var(--settings-top), calc(100vh - 120px));
+}
+
+.iframe-page[data-anchored="true"] .iframe-settings-view,
+.iframe-page[data-anchored="true"] .iframe-track-list { min-height: 0; }
+.iframe-settings-help { margin: 0; color: var(--ww-text-muted); font-size: 12px; }
+.iframe-audio-cleanup { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
+.iframe-delete-all { color: var(--ww-danger); }
 
 .iframe-close-button,
 .iframe-logo-button,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import Player from '../features/stems/player/Player';
 import type { PlaybackRecord, PlaybackRecording, RecordingEvent, RecordingStartRequest } from '../features/stems/player/types';
 import { deleteTrack, getPlaybackRecord, listTracks, getProcessingEnabled, setProcessingEnabled as saveProcessingEnabled, withProcessingLock, type LocalTrack } from '../features/local/libraryClient';
@@ -25,6 +25,12 @@ export default function LibraryPage() {
   const [backend, setBackend] = useState<'auto' | 'wasm'>('auto');
   const [modelCached, setModelCached] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState('');
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+  const [deletingAudio, setDeletingAudio] = useState(false);
+  const deleting = useRef(false);
+  const actions = useRef<HTMLDivElement>(null);
+  const [settingsTop, setSettingsTop] = useState<number | null>(null);
+  const previousView = useRef<'tracks' | 'player'>('tracks');
   const [recording, setRecording] = useState(false);
   const [autoPlay, setAutoPlay] = useState(false);
   const separator = useRef<LocalSeparator | null>(null);
@@ -50,7 +56,7 @@ export default function LibraryPage() {
   }, [refresh]);
   useEffect(() => () => { cancelled.current = true; separator.current?.dispose(); }, []);
   useEffect(() => {
-    const warn = (event: BeforeUnloadEvent) => { if (running.current || mix.current) { event.preventDefault(); event.returnValue = ''; } };
+    const warn = (event: BeforeUnloadEvent) => { if (running.current || deleting.current || mix.current) { event.preventDefault(); event.returnValue = ''; } };
     window.addEventListener('beforeunload', warn); return () => window.removeEventListener('beforeunload', warn);
   }, []);
   const selectedReady = activeTrack?.status === 'ready';
@@ -66,7 +72,7 @@ export default function LibraryPage() {
     return () => { disposed = true; };
   }, [selected, selectedReady, selectedCreatedAt, recording]);
   const processTracks = useCallback(async (ids: string[], automatic = false) => {
-    if (running.current) return;
+    if (running.current || deleting.current) return;
     running.current = true; cancelled.current = false; setError('');
     try {
       await withProcessingLock(async lock => {
@@ -94,7 +100,7 @@ export default function LibraryPage() {
     if (!autoProcessing) return;
     let disposed = false;
     const poll = async () => {
-      if (running.current || disposed) return;
+      if (running.current || deleting.current || disposed) return;
       try {
         const pending = await listTracks();
         if (!disposed && pending.some(track => track.source === 'spotify' && ['captured', 'processing'].includes(track.status))) {
@@ -112,6 +118,30 @@ export default function LibraryPage() {
   const remove = async (id: string) => {
     try { await deleteTrack(id); if (selected === id) { setSelected(''); loadedRevision.current = ''; setRecord(null); } setConfirmDelete(''); await refresh(); }
     catch (reason) { setError(errorText(reason)); }
+  };
+  const removeAll = async () => {
+    if (running.current || deleting.current || recording || spotify.active || spotify.starting) return;
+    deleting.current = true; setDeletingAudio(true); setError('');
+    try {
+      // Reuse the installed broker's guarded delete operation; no extension update required.
+      const saved = await listTracks();
+      setSelected(''); setRecord(null); loadedRevision.current = ''; previousView.current = 'tracks';
+      for (const track of saved) await deleteTrack(track.id);
+      setConfirmDeleteAll(false); setConfirmDelete('');
+    } catch (reason) { setError(`Could not delete all audio: ${errorText(reason)}`); }
+    finally {
+      deleting.current = false; setDeletingAudio(false);
+      await refresh().catch(reason => setError(errorText(reason)));
+    }
+  };
+  const toggleSettings = () => {
+    setConfirmDelete(''); setConfirmDeleteAll(false);
+    if (viewMode === 'settings') setViewMode(previousView.current);
+    else {
+      previousView.current = viewMode;
+      setSettingsTop(Math.max(24, actions.current?.getBoundingClientRect().top ?? 24));
+      setViewMode('settings');
+    }
   };
   const recordEvent = useCallback((event: RecordingEvent) => { mix.current?.events.push(event); }, []);
   const startRecording = useCallback(async (request: RecordingStartRequest) => {
@@ -138,7 +168,8 @@ export default function LibraryPage() {
       status: 'missing', source: 'spotify', bytes: 0, frames: 0, sampleRate: 44100, metadata: { trackArtworkSrc: item.trackArtworkSrc },
     }) : playbackTracks;
   const close = useCallback(() => { setViewMode('tracks'); spotify.close(); }, [spotify]);
-  const canCapture = spotify.embedded && !spotify.starting && (spotify.active || (spotify.supported && spotify.tracks.length > 0));
+  const canCapture = spotify.embedded && !spotify.starting && !deletingAudio && (spotify.active || (spotify.supported && spotify.tracks.length > 0));
+  const audioBusy = !!active || recording || spotify.active || spotify.starting || deletingAudio;
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if (event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
@@ -154,36 +185,47 @@ export default function LibraryPage() {
     if (selected !== id) { loadedRevision.current = ''; setRecord(null); setSelected(id); setAutoPlay(false); }
     setViewMode('player');
   };
-  return <main className="iframe-page" aria-label="ktv420 iframe controls">
-    <div className="iframe-actions">
+  return <main className="iframe-page" data-anchored={settingsTop !== null && viewMode !== 'player'} style={{ '--settings-top': `${settingsTop ?? 24}px` } as CSSProperties} aria-label="ktv420 iframe controls">
+    <div className="iframe-actions" ref={actions}>
       <button type="button" className="iframe-close-button" aria-label="Close" title="Close" onClick={close}>❌</button>
       <button type="button" className="iframe-logo-button" aria-label="Start or stop ktv420 capture"
         title={spotify.active ? 'Stop capture' : 'Start capture'} aria-disabled={!canCapture} disabled={!canCapture}
         aria-pressed={spotify.active} onClick={spotify.toggleCapture}><img alt="" src="./favicon.svg" /></button>
       <button type="button" className="iframe-settings-button" aria-label="Toggle settings view" title="Settings"
-        aria-pressed={viewMode === 'settings'} onClick={() => setViewMode(viewMode === 'settings' ? 'tracks' : 'settings')}>⚙️</button>
+        aria-pressed={viewMode === 'settings'} onClick={toggleSettings}>⚙️</button>
     </div>
     {(error || spotify.error) && <p className="iframe-settings-error" role="alert">{error || spotify.error}</p>}
     {viewMode === 'settings' && <section className="iframe-settings-view" aria-label="Settings view">
       <section className="iframe-settings-source">
-        <header className="iframe-settings-source-header"><h2>Processing</h2><span>{modelCached ? 'Model cached' : 'Model: 181 MB'}</span></header>
+        <header className="iframe-settings-source-header"><h2>Separation</h2><span>{modelCached ? 'Model downloaded · 181 MB' : 'Model not downloaded'}</span></header>
         <div className="iframe-processing-controls">
-          <label>Device <select value={backend} disabled={!!active} onChange={event => setBackend(event.target.value as 'auto' | 'wasm')}>
+          <label>Device <select value={backend} disabled={!!active || deletingAudio} onChange={event => setBackend(event.target.value as 'auto' | 'wasm')}>
             <option value="auto">GPU preferred</option><option value="wasm">CPU compatibility</option>
           </select></label>
-          <button onClick={() => setProcessingEnabled(!autoProcessing)}>{autoProcessing ? 'Pause separation' : 'Resume separation'}</button>
+          <button disabled={deletingAudio} aria-describedby="separation-help" onClick={() => setProcessingEnabled(!autoProcessing)}>{autoProcessing ? 'Pause separation' : 'Resume separation'}</button>
           {active && <progress max={1} value={progress?.fraction || 0} aria-label="Separation progress" title={progress?.message} />}
-          <button disabled={!!active} onClick={() => void clearModelCache().then(refresh).catch(reason => setError(errorText(reason)))}>Clear model cache</button>
+          <button disabled={!modelCached || !!active || deletingAudio} aria-describedby="model-help" onClick={() => void clearModelCache().then(refresh).catch(reason => setError(errorText(reason)))}>Remove downloaded model</button>
         </div>
+        <p className="iframe-settings-help" id="separation-help">Separation creates stems. Capture continues while paused; unfinished separation restarts on resume.</p>
+        <p className="iframe-settings-help" id="model-help">Removing the model frees 181 MB. Songs stay; the model downloads again when needed.</p>
       </section>
       <section className="iframe-settings-source">
         <header className="iframe-settings-source-header"><h2>Local audio</h2><span>{size(tracks.reduce((total, track) => total + track.bytes, 0))}</span></header>
+        <div className="iframe-audio-cleanup">
+          {confirmDeleteAll ? <>
+            <span>Delete all saved songs and stems? This can’t be undone.</span>
+            <button className="iframe-delete-all" disabled={audioBusy} onClick={() => void removeAll()}>{deletingAudio ? 'Deleting…' : 'Delete everything'}</button>
+            <button disabled={deletingAudio} onClick={() => setConfirmDeleteAll(false)}>Cancel</button>
+          </> : <button className="iframe-delete-all" disabled={!tracks.length || audioBusy} onClick={() => { setConfirmDelete(''); setConfirmDeleteAll(true); }}>Delete all audio</button>}
+        </div>
+        {audioBusy && !deletingAudio && <p className="iframe-settings-help">Stop capture, separation, and mix recording before deleting audio.</p>}
+        {!tracks.length && <p className="iframe-settings-help">No saved audio.</p>}
         <ol className="iframe-settings-list">{tracks.map(track => <li key={track.id}>
           <div className="iframe-settings-row"><span className="iframe-settings-kind">♫</span><span className="iframe-settings-path">{track.title}</span>
             <span className="iframe-settings-size">{size(track.bytes)}</span><span className="iframe-settings-row-actions">
-              {track.status === 'error' && <button className="iframe-settings-emoji-button" disabled={!!active} title="Retry separation" aria-label={`Retry ${track.title}`} onClick={() => void processTracks([track.id])}>↻</button>}
-              {confirmDelete === track.id ? <><button disabled={!!active || recording} onClick={() => void remove(track.id)}>Delete</button><button onClick={() => setConfirmDelete('')}>Cancel</button></> :
-                <button className="iframe-settings-emoji-button" disabled={!!active || recording} title="Delete audio" aria-label={`Delete ${track.title}`} onClick={() => setConfirmDelete(track.id)}>🗑️</button>}
+              {track.status === 'error' && <button className="iframe-settings-emoji-button" disabled={!!active || deletingAudio} title="Retry separation" aria-label={`Retry ${track.title}`} onClick={() => void processTracks([track.id])}>↻</button>}
+              {confirmDelete === track.id ? <><button disabled={audioBusy} onClick={() => void remove(track.id)}>Delete</button><button onClick={() => setConfirmDelete('')}>Cancel</button></> :
+                <button className="iframe-settings-emoji-button" disabled={audioBusy} title="Delete audio" aria-label={`Delete ${track.title}`} onClick={() => { setConfirmDeleteAll(false); setConfirmDelete(track.id); }}>🗑️</button>}
             </span></div>
         </li>)}</ol>
       </section>
