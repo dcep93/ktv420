@@ -1,17 +1,55 @@
 {
   "manifest_version": 3,
   "name": "ktv420",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "minimum_chrome_version": "121",
-  "description": "Local music separation, listening and DJing. Four stems, Float32 audio, no audio uploads.",
-  "icons": {"16":"assets/icon-16.png","32":"assets/icon-32.png","48":"assets/icon-48.png","128":"assets/icon-128.png"},
-  "permissions": ["storage", "unlimitedStorage"],
-  "host_permissions": ["https://open.spotify.com/*", "https://huggingface.co/*", "https://*.hf.co/*"],
-  "action": {"default_title": "Open ktv420 on Spotify"},
-  "background": {"service_worker":"build/background.js","type":"module"},
-  "content_security_policy": {"extension_pages":"script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self'; connect-src 'self' https://huggingface.co https://*.hf.co; img-src 'self' data: blob: https://i.scdn.co https://mosaic.scdn.co;"},
-  "cross_origin_embedder_policy": {"value":"require-corp"},
-  "cross_origin_opener_policy": {"value":"same-origin"},
-  "content_scripts": [{"matches":["https://open.spotify.com/*"],"js":["src/content/boot.js"],"run_at":"document_start"}],
-  "web_accessible_resources": [{"resources":["build/index.html","assets/favicon.svg","assets/icon-*.png","src/content/*.js","src/page/*.js"],"matches":["https://open.spotify.com/*"]}]
+  "description": "Capture Spotify and keep audio locally. The ktv420 hosted player handles listening, DJing and local separation.",
+  "icons": {
+    "16": "assets/icon-16.png",
+    "32": "assets/icon-32.png",
+    "48": "assets/icon-48.png",
+    "128": "assets/icon-128.png"
+  },
+  "permissions": [
+    "storage",
+    "unlimitedStorage"
+  ],
+  "host_permissions": [
+    "https://open.spotify.com/*"
+  ],
+  "action": {
+    "default_title": "Open ktv420 on Spotify"
+  },
+  "background": {
+    "service_worker": "build/background.js",
+    "type": "module"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; frame-src https://ktv420.web.app; connect-src 'none'; img-src 'self';"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://open.spotify.com/*"
+      ],
+      "js": [
+        "src/content/boot.js"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "build/index.html",
+        "assets/favicon.svg",
+        "assets/icon-*.png",
+        "src/content/*.js",
+        "src/page/*.js"
+      ],
+      "matches": [
+        "https://open.spotify.com/*"
+      ]
+    }
+  ]
 }

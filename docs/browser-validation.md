@@ -46,3 +46,7 @@ The candidate ZIP contains capture code, the storage broker and background worke
 RPC tests cover wrong peers/origins/versions, operation and size bounds, malformed or partial stems, exact Float32 values, existing database access, lock contention/disposal, shared pause state and multiline errors. Deployment tests verify retention and integrity of old hashed worker files and versioned runtimes so open sessions can continue to load their matching code.
 
 Final candidate checks: 45 tests passed; ESLint, TypeScript and both production builds passed. Reloaded client request IDs are unique across documents to reject delayed replies. Extension candidate totals 113,784 uncompressed bytes. The installed extension remains version 0.3.3 until the hosted player is published and the candidate is explicitly installed.
+
+## Hosted release — 2026-10-13
+
+Published commit `75c1f3a` through successful GitHub Actions run 38501228397. Live player HTML, JavaScript, CSS, versioned WASM MIME type and extension ZIP checksum were verified. The production top-level player rendered its Spotify instructions in Chromium. Installed files at `ktv420/extension` were updated to 0.4.0 and matched the published broker/manifest byte-for-byte. Chrome still needs an extension Reload and Spotify refresh; real production embedded capture/playback is not yet confirmed.
