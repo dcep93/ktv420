@@ -42,3 +42,33 @@ test('bridge requires exact origins/windows/version and relays only whitelisted 
   await bridge.dispose(); assert.equal(disposed, 2);
   await fromPlayer(command); assert.equal(parentMessages.length, 4);
 });
+
+test('bridge validates optional capture progress and forwards only its sanitized shape from the trusted parent', async () => {
+  const messages: Record<string, unknown>[] = [];
+  const parent = { postMessage() {} } as unknown as Window;
+  const player = { postMessage: (data: Record<string, unknown>) => messages.push(data) } as unknown as Window;
+  const bridge = createBrokerBridge({ parent, player, parentOrigin: 'https://open.spotify.com', playerOrigin: 'https://ktv420.web.app', showError() {},
+    createSession: () => ({ dispose: async () => {}, handle: async () => ({ source: 'ktv420-library', version: 2, id: 'test', ok: true }) }) as ReturnType<typeof createLibraryBrokerSession>,
+  });
+  await bridge.receive({ source: player, origin: 'https://ktv420.web.app', data: { source: 'ktv420-overlay', version: 2, type: 'ready' } });
+  const state = { source: 'ktv420-parent', version: 2, type: 'state', tracks: [], active: true, starting: false, supported: true };
+  const send = (captureProgress: unknown, source = parent, origin = 'https://open.spotify.com') =>
+    bridge.receive({ source, origin, data: { ...state, captureProgress } });
+  await bridge.receive({ source: parent, origin: 'https://open.spotify.com', data: state });
+  assert.equal(Object.hasOwn(messages.at(-1)!, 'captureProgress'), false, 'old state messages remain compatible');
+  for (const fraction of [0, 0.4, 1, null]) {
+    await send({ trackId: 'actual-track', fraction, privateData: { secret: 'stripped' } });
+    assert.deepEqual(messages.at(-1)!.captureProgress, { trackId: 'actual-track', fraction });
+  }
+  await send(null);
+  assert.equal(messages.at(-1)!.captureProgress, null);
+  const count = messages.length;
+  for (const invalid of [[], '0.5', {}, { trackId: '', fraction: 0 }, { trackId: 1, fraction: 0 },
+    { trackId: 'x'.repeat(4097), fraction: 0 }, { trackId: 'track' }, { trackId: 'track', fraction: '0.5' },
+    { trackId: 'track', fraction: NaN }, { trackId: 'track', fraction: Infinity },
+    { trackId: 'track', fraction: -0.1 }, { trackId: 'track', fraction: 1.1 }]) await send(invalid);
+  await send({ trackId: 'track', fraction: 0.5 }, player);
+  await send({ trackId: 'track', fraction: 0.5 }, parent, 'https://evil.example');
+  assert.equal(messages.length, count, 'malformed or untrusted progress never reaches the hosted player');
+  await bridge.dispose();
+});

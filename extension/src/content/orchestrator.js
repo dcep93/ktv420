@@ -17,6 +17,7 @@ import { md5Hex } from "./md5.js";
 const START_TIMEOUT_MS = 3000;
 const PAUSE_TIMEOUT_MS = 1000;
 const END_TOLERANCE_SECONDS = 0.25;
+const PROGRESS_INTERVAL_MS = 250;
 
 export class CaptureOrchestrator extends EventTarget {
   constructor({ bridge }) {
@@ -24,6 +25,8 @@ export class CaptureOrchestrator extends EventTarget {
     this.bridge = bridge;
     this.active = false;
     this.stopRequested = false;
+    this.captureProgress = null;
+    this.lastProgressAt = -Infinity;
   }
 
   isActive() {
@@ -41,6 +44,7 @@ export class CaptureOrchestrator extends EventTarget {
 
   async requestStop() {
     this.stopRequested = true;
+    this.clearCaptureProgress();
     pausePlaybackCleanly();
   }
 
@@ -56,6 +60,7 @@ export class CaptureOrchestrator extends EventTarget {
 
     this.active = true;
     this.stopRequested = false;
+    this.clearCaptureProgress();
     this.dispatchEvent(new Event("activechange"));
 
     const debug = {
@@ -148,6 +153,7 @@ export class CaptureOrchestrator extends EventTarget {
 
         let pendingCapture = null;
         if (item.cached) {
+          this.clearCaptureProgress();
           queuedTrackIds.push(item.trackId);
           summary.push({
             alreadyInLocalStorage: true,
@@ -203,6 +209,7 @@ export class CaptureOrchestrator extends EventTarget {
       this.dispatchCaptureComplete(queuedTrackIds);
       console.log("[ktv420] Capture run complete", summary);
     } catch (error) {
+      this.clearCaptureProgress();
       pausePlaybackCleanly();
       await this.bridge.command("capture-abort").catch(() => {});
       markTiming(runTimingTrace, "orchestrator_run_error", {
@@ -225,6 +232,7 @@ export class CaptureOrchestrator extends EventTarget {
       console.log("[ktv420] Capture run failed", report);
       throw error;
     } finally {
+      this.clearCaptureProgress();
       await this.bridge.command("capture-abort").catch(() => {});
       this.active = false;
       this.stopRequested = false;
@@ -300,6 +308,7 @@ export class CaptureOrchestrator extends EventTarget {
   }
 
   dispatchTrackStored(trackId, metadata) {
+    if (this.captureProgress?.trackId === trackId) this.clearCaptureProgress();
     this.dispatchEvent(
       new CustomEvent("trackstored", {
         detail: {
@@ -311,6 +320,7 @@ export class CaptureOrchestrator extends EventTarget {
   }
 
   dispatchCaptureComplete(trackIds) {
+    this.clearCaptureProgress();
     this.dispatchEvent(
       new CustomEvent("capturecomplete", {
         detail: {
@@ -318,6 +328,28 @@ export class CaptureOrchestrator extends EventTarget {
         }
       })
     );
+  }
+
+  updateCaptureProgress(item, mediaState, now = performance.now()) {
+    if (this.stopRequested) return;
+    const { duration, currentTime } = mediaState;
+    // Unknown media timing is indeterminate. Never imply that PCM is persisted
+    // merely because playback reached the boundary.
+    const fraction = Number.isFinite(duration) && duration > 0 && Number.isFinite(currentTime)
+      ? Math.min(0.99, Math.max(0, currentTime / duration)) : null;
+    const previous = this.captureProgress;
+    if (previous?.trackId === item.trackId &&
+      (previous.fraction === fraction || now - this.lastProgressAt < PROGRESS_INTERVAL_MS)) return;
+    this.captureProgress = { trackId: item.trackId, fraction };
+    this.lastProgressAt = now;
+    this.dispatchEvent(new CustomEvent("captureprogress", { detail: this.captureProgress }));
+  }
+
+  clearCaptureProgress() {
+    if (this.captureProgress === null) return;
+    this.captureProgress = null;
+    this.lastProgressAt = -Infinity;
+    this.dispatchEvent(new CustomEvent("captureprogress", { detail: null }));
   }
 
   async beginAndAcceptItem(
@@ -434,6 +466,7 @@ export class CaptureOrchestrator extends EventTarget {
     let lastMediaTime = safeCurrentTime(initialState);
     let pauseStartedAt = null;
     let ignoredNetworkTrackId = null;
+    this.updateCaptureProgress(item, initialState);
 
     debug.events.push({
       type: "recording-started",
@@ -492,6 +525,7 @@ export class CaptureOrchestrator extends EventTarget {
       const current = resolveCurrentPlaybackTrack(snapshot);
       if (current?.trackId && current.trackId !== item.trackId) {
         if (mediaSessionMatchesItem(snapshot.mediaSession, item)) {
+          this.updateCaptureProgress(item, mediaState, now);
           if (ignoredNetworkTrackId !== current.trackId) {
             ignoredNetworkTrackId = current.trackId;
             debug.events.push({
@@ -519,6 +553,7 @@ export class CaptureOrchestrator extends EventTarget {
         throw new Error(`Spotify changed to ${current.trackId} before ${item.trackName} reached the end.`);
       }
 
+      this.updateCaptureProgress(item, mediaState, now);
       if (mediaState.ended || (mediaState.paused && isAtEnd(currentTime, duration))) {
         return {
           endMediaTime: Math.min(currentTime || lastMediaTime, duration),

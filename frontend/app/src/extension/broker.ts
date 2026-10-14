@@ -9,12 +9,18 @@ type BridgeOptions = {
 function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
+function validCaptureProgress(value: unknown) {
+  return value === undefined || value === null || object(value) &&
+    typeof value.trackId === 'string' && value.trackId.length > 0 && value.trackId.length <= 4096 &&
+    (value.fraction === null || typeof value.fraction === 'number' && Number.isFinite(value.fraction) && value.fraction >= 0 && value.fraction <= 1);
+}
 function validState(value: Record<string, unknown>) {
   return value.source === 'ktv420-parent' && value.version === LIBRARY_PROTOCOL_VERSION && value.type === 'state' && Array.isArray(value.tracks) && value.tracks.length <= 10000 &&
     value.tracks.every(track => object(track) &&
       ['trackId', 'trackName', 'trackArtist', 'trackArtworkSrc'].every(key => track[key] === undefined || typeof track[key] === 'string' && track[key].length <= 4096) &&
       (track.rowIndex === undefined || Number.isSafeInteger(track.rowIndex) && Number(track.rowIndex) >= 0)) &&
     typeof value.active === 'boolean' && typeof value.starting === 'boolean' && typeof value.supported === 'boolean' &&
+    validCaptureProgress(value.captureProgress) &&
     (value.notice === undefined || typeof value.notice === 'string' && value.notice.length <= 4096) &&
     (value.error === undefined || typeof value.error === 'string' && value.error.length <= 4096);
 }
@@ -37,6 +43,10 @@ export function createBrokerBridge(options: BridgeOptions) {
             trackId: track.trackId, trackName: track.trackName, trackArtist: track.trackArtist,
             trackArtworkSrc: track.trackArtworkSrc, rowIndex: track.rowIndex,
           })) };
+        if (data.captureProgress !== undefined) {
+          const progress = data.captureProgress as { trackId: string; fraction: number | null } | null;
+          state.captureProgress = progress === null ? null : { trackId: progress.trackId, fraction: progress.fraction };
+        }
         if (ready) options.player.postMessage(state, options.playerOrigin);
       }
       return;

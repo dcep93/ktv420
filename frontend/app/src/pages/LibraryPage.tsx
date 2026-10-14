@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Player from '../features/stems/player/Player';
+import OverlayIcon from './OverlayIcon';
 import type { PlaybackRecord, PlaybackRecording, RecordingEvent, RecordingStartRequest } from '../features/stems/player/types';
 import { deleteTrack, getPlaybackRecord, listTracks, getProcessingEnabled, setProcessingEnabled as saveProcessingEnabled, withProcessingLock, type LocalTrack } from '../features/local/libraryClient';
 import { downloadBlob } from '../features/local/importAudio';
 import { processLocalTrack } from '../features/local/processing';
 import { drainSpotifyQueue } from '../features/local/spotifyQueue';
+import { nextSeparationFraction } from '../features/local/rowProgress';
 import { useSpotifyOverlay } from '../features/local/useSpotifyOverlay';
 import { LocalSeparator } from '../features/local/inference/client';
 import { clearModelCache, getModelCacheStatus, loadModelBytes } from '../features/local/inference/model';
@@ -17,11 +19,15 @@ export default function LibraryPage() {
   const [selected, setSelected] = useState('');
   const [record, setRecord] = useState<PlaybackRecord | null>(null);
   const [viewMode, setViewMode] = useState<'tracks' | 'settings' | 'player'>('tracks');
+  const content = useRef<HTMLDivElement>(null);
+  const viewScroll = useRef({ tracks: 0, settings: 0, player: 0 });
+  useLayoutEffect(() => { if (content.current) content.current.scrollTop = viewScroll.current[viewMode]; }, [viewMode]);
   const [error, setError] = useState('');
   const spotify = useSpotifyOverlay();
   const [autoProcessing, setAutoProcessing] = useState(false);
   const [active, setActive] = useState('');
   const [progress, setProgress] = useState<SeparationProgress | null>(null);
+  const [separationFraction, setSeparationFraction] = useState<number | null>(null);
   const [backend, setBackend] = useState<'auto' | 'wasm'>('auto');
   const [modelCached, setModelCached] = useState(false);
   const [modelAction, setModelAction] = useState<'download' | 'remove' | null>(null);
@@ -31,8 +37,6 @@ export default function LibraryPage() {
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
   const [deletingAudio, setDeletingAudio] = useState(false);
   const deleting = useRef(false);
-  const actions = useRef<HTMLDivElement>(null);
-  const [settingsTop, setSettingsTop] = useState<number | null>(null);
   const previousView = useRef<'tracks' | 'player'>('tracks');
   const [recording, setRecording] = useState(false);
   const [autoPlay, setAutoPlay] = useState(false);
@@ -40,9 +44,10 @@ export default function LibraryPage() {
   const running = useRef(false); const cancelled = useRef(false);
   const mix = useRef<PlaybackRecording | null>(null);
   const flush = useRef<(() => void) | null>(null);
-  const playbackTracks = spotify.embedded
+  const savedSpotifyTracks = spotify.embedded
     ? spotify.tracks.flatMap(item => tracks.filter(track => track.id === `spotify-${item.trackId}`))
     : tracks.filter(track => track.source === 'spotify').slice().reverse();
+  const playbackTracks = savedSpotifyTracks.filter(track => track.status === 'ready');
   const selectedIndex = playbackTracks.findIndex(track => track.id === selected);
   const activeTrack = tracks.find(track => track.id === selected);
   const observedProcessingPreference = useRef<boolean | null>(null);
@@ -86,8 +91,10 @@ export default function LibraryPage() {
         separator.current = new LocalSeparator(backend === 'wasm' ? { backend: 'wasm' } : {});
         const process = async (id: string) => {
           if (cancelled.current) return;
-          setActive(id); setProgress(null);
-          try { await processLocalTrack(id, separator.current!, () => cancelled.current, setProgress); }
+          setActive(id); setProgress(null); setSeparationFraction(null);
+          try { await processLocalTrack(id, separator.current!, () => cancelled.current, value => {
+            setProgress(value); setSeparationFraction(previous => nextSeparationFraction(previous, value));
+          }); }
           finally { await refresh(); }
         };
         if (automatic) await drainSpotifyQueue({ list: listTracks, process,
@@ -155,7 +162,6 @@ export default function LibraryPage() {
     if (viewMode === 'settings') setViewMode(previousView.current);
     else {
       previousView.current = viewMode;
-      setSettingsTop(Math.max(24, actions.current?.getBoundingClientRect().top ?? 24));
       setViewMode('settings');
     }
   };
@@ -182,7 +188,7 @@ export default function LibraryPage() {
     ? spotify.tracks.map(item => tracks.find(track => track.id === `spotify-${item.trackId}`) || {
       id: `spotify-${item.trackId}`, title: item.trackName, artist: item.trackArtist, createdAt: 0,
       status: 'missing', source: 'spotify', bytes: 0, frames: 0, sampleRate: 44100, metadata: { trackArtworkSrc: item.trackArtworkSrc },
-    }) : playbackTracks;
+    }) : savedSpotifyTracks;
   const close = useCallback(() => { setViewMode('tracks'); spotify.close(); }, [spotify]);
   const canCapture = spotify.embedded && !spotify.starting && !deletingAudio && (spotify.active || (spotify.supported && spotify.tracks.length > 0));
   const audioBusy = !!active || recording || spotify.active || spotify.starting || deletingAudio;
@@ -197,39 +203,56 @@ export default function LibraryPage() {
     return () => window.removeEventListener('keydown', keydown);
   }, [close, spotify, viewMode, canCapture]);
   const openTrack = (id: string) => {
-    if (recording && selected !== id) return;
-    if (selected !== id) { loadedRevision.current = ''; setRecord(null); setSelected(id); setAutoPlay(false); }
+    if (tracks.find(track => track.id === id)?.status !== 'ready' || deleting.current || (recording && selected !== id)) return;
+    if (selected !== id) { loadedRevision.current = ''; setRecord(null); setSelected(id); setAutoPlay(false); viewScroll.current.player = 0; }
     setViewMode('player');
   };
-  return <main className="iframe-page" data-anchored={settingsTop !== null && viewMode !== 'player'} style={{ '--settings-top': `${settingsTop ?? 24}px` } as CSSProperties} aria-label="ktv420 iframe controls">
-    <div className="iframe-actions" ref={actions}>
-      <button type="button" className="iframe-close-button" aria-label="Close" title="Close" onClick={close}>❌</button>
+  const stoppedByUser = !error && /^Capture run stopped by user\.?$/.test(spotify.error);
+  const statusError = !!error || (!!spotify.error && !stoppedByUser);
+  const statusMessage = error || (stoppedByUser ? 'Capture stopped.' : spotify.error) ||
+    (spotify.starting ? 'Starting capture…' : spotify.active ? 'Capturing songs as they play…' :
+      spotify.notice.replace(' Local separation is queued automatically.', '').replace(' Separation continues here automatically.', ''));
+  return <main className="iframe-page iframe-page--overlay" aria-label="ktv420 iframe controls">
+    <div className="iframe-status-slot">
+      {statusMessage && <p className="iframe-status-message" data-kind={statusError ? 'error' : 'notice'} role={statusError ? 'alert' : 'status'}>
+        <OverlayIcon name={statusError ? 'alert' : 'music'} /><span>{statusMessage}</span>
+      </p>}
+    </div>
+    <div className="iframe-actions">
+      <button type="button" className="iframe-close-button" aria-label="Close" title="Close" onClick={close}><OverlayIcon name="close" /></button>
       <button type="button" className="iframe-logo-button" aria-label="Start or stop ktv420 capture"
         title={spotify.active ? 'Stop capture' : 'Start capture'} aria-disabled={!canCapture} disabled={!canCapture}
         aria-pressed={spotify.active} onClick={spotify.toggleCapture}><img alt="" src="./favicon.svg" /></button>
-      <button type="button" className="iframe-settings-button" aria-label="Toggle settings view" title="Settings"
-        aria-pressed={viewMode === 'settings'} onClick={toggleSettings}>⚙️</button>
+      <button type="button" className="iframe-settings-button" aria-label="Toggle settings view" title={viewMode === 'settings' ? 'Back to music' : 'Settings'}
+        aria-pressed={viewMode === 'settings'} onClick={toggleSettings}><OverlayIcon name="settings" /></button>
     </div>
-    {(error || spotify.error) && <p className="iframe-settings-error" role="alert">{error || spotify.error}</p>}
+    <div className="iframe-content" ref={content} onScroll={event => { viewScroll.current[viewMode] = event.currentTarget.scrollTop; }}>
     {viewMode === 'settings' && <section className="iframe-settings-view" aria-label="Settings view">
       <section className="iframe-settings-source">
-        <header className="iframe-settings-source-header"><h2>Separation</h2><span>{modelCached ? 'Model downloaded · 181 MB' : 'Model not downloaded'}</span></header>
-        <div className="iframe-processing-controls">
-          <label>Device <select value={backend} disabled={!!active || deletingAudio} onChange={event => setBackend(event.target.value as 'auto' | 'wasm')}>
-            <option value="auto">GPU preferred</option><option value="wasm">CPU compatibility</option>
-          </select></label>
+        <header className="iframe-settings-source-header"><h2>Separation</h2><span>On your computer</span></header>
+        <p className="iframe-settings-help">Turn captured songs into vocals, drums, bass, and other sounds.</p>
+        <div className="iframe-setting-row">
+          <div><h3>Automatic separation</h3><p id="separation-help">Capture continues while paused. Unfinished songs restart on resume.</p></div>
           <button disabled={deletingAudio} aria-describedby="separation-help" onClick={() => setProcessingEnabled(!autoProcessing)}>{autoProcessing ? 'Pause separation' : 'Resume separation'}</button>
-          {active && <progress max={1} value={progress?.fraction || 0} aria-label="Separation progress" title={progress?.message} />}
+        </div>
+        {active && <progress max={1} value={progress?.fraction || 0} aria-label="Separation progress" title={progress?.message} />}
+        <div className="iframe-setting-row">
+          <div><label htmlFor="separation-device">Processing device</label><p>Use CPU if GPU separation fails.</p></div>
+          <select id="separation-device" value={backend} disabled={!!active || deletingAudio} onChange={event => setBackend(event.target.value as 'auto' | 'wasm')}>
+            <option value="auto">GPU preferred</option><option value="wasm">CPU compatibility</option>
+          </select>
+        </div>
+        <div className="iframe-setting-row">
+          <div><h3>Demucs model</h3><p id="model-help">{modelCached ? '181 MB saved. Removing it keeps your songs.' : '181 MB download. Also downloads automatically when needed.'}</p></div>
           <button disabled={!!modelAction || !!active || deletingAudio} aria-describedby="model-help" onClick={() => void manageModel()}>
             {modelAction === 'download' ? (modelDownload >= 1 ? 'Finishing download…' : `Downloading ${Math.floor(modelDownload * 100)}%…`)
               : modelAction === 'remove' ? 'Removing model…' : modelCached ? 'Remove downloaded model' : 'Download model · 181 MB'}
           </button>
         </div>
-        <p className="iframe-settings-help" id="separation-help">Separation creates stems. Capture continues while paused; unfinished separation restarts on resume.</p>
-        <p className="iframe-settings-help" id="model-help">{modelCached ? 'Removing the model frees 181 MB. Songs stay; the model downloads again when needed.' : 'Download once to separate songs locally. It also downloads automatically when needed.'}</p>
       </section>
       <section className="iframe-settings-source">
         <header className="iframe-settings-source-header"><h2>Local audio</h2><span>{size(tracks.reduce((total, track) => total + track.bytes, 0))}</span></header>
+        <p className="iframe-settings-help">Saved songs and stems in this Chrome profile. Export anything you want to keep.</p>
         <div className="iframe-audio-cleanup">
           {confirmDeleteAll ? <>
             <span>Delete all saved songs and stems? This can’t be undone.</span>
@@ -240,33 +263,43 @@ export default function LibraryPage() {
         {audioBusy && !deletingAudio && <p className="iframe-settings-help">Stop capture, separation, and mix recording before deleting audio.</p>}
         {!tracks.length && <p className="iframe-settings-help">No saved audio.</p>}
         <ol className="iframe-settings-list">{tracks.map(track => <li key={track.id}>
-          <div className="iframe-settings-row"><span className="iframe-settings-kind">♫</span><span className="iframe-settings-path">{track.title}</span>
+          <div className="iframe-settings-row"><span className="iframe-settings-kind"><OverlayIcon name="music" /></span><span className="iframe-settings-path">{track.title}</span>
             <span className="iframe-settings-size">{size(track.bytes)}</span><span className="iframe-settings-row-actions">
-              {track.status === 'error' && <button className="iframe-settings-emoji-button" disabled={!!active || deletingAudio} title="Retry separation" aria-label={`Retry ${track.title}`} onClick={() => void processTracks([track.id])}>↻</button>}
+              {track.status === 'error' && <button className="iframe-settings-icon-button" disabled={!!active || deletingAudio} title="Retry separation" aria-label={`Retry ${track.title}`} onClick={() => void processTracks([track.id])}><OverlayIcon name="retry" /></button>}
               {confirmDelete === track.id ? <><button disabled={audioBusy} onClick={() => void remove(track.id)}>Delete</button><button onClick={() => setConfirmDelete('')}>Cancel</button></> :
-                <button className="iframe-settings-emoji-button" disabled={audioBusy} title="Delete audio" aria-label={`Delete ${track.title}`} onClick={() => { setConfirmDeleteAll(false); setConfirmDelete(track.id); }}>🗑️</button>}
+                <button className="iframe-settings-icon-button" disabled={audioBusy} title="Delete audio" aria-label={`Delete ${track.title}`} onClick={() => { setConfirmDeleteAll(false); setConfirmDelete(track.id); }}><OverlayIcon name="trash" /></button>}
             </span></div>
         </li>)}</ol>
       </section>
     </section>}
     {viewMode === 'tracks' && <ol className="iframe-track-list" aria-label="Spotify page tracks">
+      {!displayTracks.length && <li className="iframe-playlist-empty">Open a Spotify playlist or album to get started.</li>}
       {displayTracks.map((track, index) => {
-        const state = track.status === 'ready' ? 'complete' : track.status === 'error' ? 'broken' : track.status === 'missing' ? 'missing' : 'in-progress';
-        const label = track.status === 'ready' ? 'Ready' : track.status === 'error' ? 'Failed' : track.status === 'missing' ? 'Not captured' : track.status === 'processing' ? 'Separating' : 'Queued';
+        const ready = track.status === 'ready';
+        const available = ready && !deletingAudio && (!recording || selected === track.id);
+        const capture = spotify.captureProgress?.trackId === track.id.replace(/^spotify-/, '') ? spotify.captureProgress : null;
+        const separating = !ready && (active === track.id || track.status === 'processing');
+        const progressKind = !ready && capture ? 'capture' : separating ? 'separation' : undefined;
+        const fraction = progressKind === 'capture' ? capture!.fraction : active === track.id ? separationFraction : null;
+        const label = ready ? 'Ready' : progressKind === 'capture' ? `Capturing${fraction === null ? '' : ` ${Math.floor(fraction * 100)}%`}`
+          : separating ? `${active === track.id && progress?.phase === 'encoding' ? 'Saving MP3' : 'Separating'}${fraction === null ? '' : ` ~${Math.floor(fraction * 100)}%`}`
+          : track.status === 'error' ? 'Failed' : track.status === 'missing' ? 'Not captured' : 'Queued';
+        const icon = ready ? 'play' : track.status === 'error' ? 'alert' : progressKind ? 'processing' : 'clock';
         const artwork = typeof track.metadata?.trackArtworkSrc === 'string' ? track.metadata.trackArtworkSrc : '';
-        return <li className="iframe-track-row" key={`${track.id}-${index}`} role="button" tabIndex={track.status !== 'missing' ? 0 : -1}
-          aria-label={`${track.title} — ${label}`} aria-disabled={track.status === 'missing' || (recording && selected !== track.id)}
-          title={track.error || (active === track.id ? progress?.message : label)}
-          onClick={() => { if (track.status !== 'missing') openTrack(track.id); }}
-          onKeyDown={event => { if (track.status !== 'missing' && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); event.stopPropagation(); openTrack(track.id); } }}>
-          <span className="iframe-track-state" data-state={state} aria-label={label} />
-          {artwork && <img className="iframe-track-artwork" alt="" src={artwork} crossOrigin="anonymous" />}
+        return <li key={`${track.id}-${index}`}><button type="button" className="iframe-track-row" data-state={track.status} data-progress={progressKind}
+          aria-label={`${track.title} — ${label}`} disabled={!available}
+          title={track.error || (active === track.id ? progress?.message : available ? 'Open stem mixer' : label)}
+          onClick={() => openTrack(track.id)}>
+          {progressKind && <span className="iframe-track-fill" data-indeterminate={fraction === null} style={{ width: fraction === null ? '35%' : `${fraction * 100}%` }} aria-hidden="true" />}
+          <span className="iframe-track-state"><OverlayIcon name={icon} /></span>
+          {artwork ? <img className="iframe-track-artwork" alt="" src={artwork} crossOrigin="anonymous" /> : <span className="iframe-track-artwork iframe-artwork-placeholder"><OverlayIcon name="music" /></span>}
           <span className="iframe-track-copy"><span className="iframe-track-name">{track.title}</span><span className="iframe-track-artist">{track.artist}</span></span>
-        </li>;
+          <span className="iframe-track-status">{label}</span>
+        </button></li>;
       })}
     </ol>}
     {activeTrack && record && record.md5 === selected && <section className="iframe-player-view" hidden={viewMode !== 'player'} aria-label="Player">
-      <button className="iframe-player-back" aria-label="Back to tracks" onClick={() => setViewMode('tracks')}>←</button>
+      <button className="iframe-player-back" aria-label="Back to tracks" onClick={() => setViewMode('tracks')}><OverlayIcon name="back" /></button>
       <Player record={record} title={activeTrack.title}
         hasPreviousTrack={!recording && selectedIndex > 0} hasNextTrack={!recording && selectedIndex >= 0 && selectedIndex < playbackTracks.length - 1}
         onPreviousTrack={() => navigateTrack(-1)} onNextTrack={() => navigateTrack(1)} onTrackEnd={() => navigateTrack(1)}
@@ -275,5 +308,6 @@ export default function LibraryPage() {
       <details className="iframe-player-exports"><summary>Export audio</summary>{record.files.map(file => <button key={file.path}
         onClick={() => downloadBlob(file.blob, `${activeTrack.title}-${file.name}`)}>{file.name.replace(/\.(wav|mp3)$/i, '')}</button>)}</details>
     </section>}
+    </div>
   </main>;
 }

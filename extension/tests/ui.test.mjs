@@ -72,4 +72,9 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
     assert.deepEqual(message.tracks, [{ trackId, trackName: 'Common Enemy', trackArtist: '', trackArtworkSrc: '', rowIndex: 0 }]);
   }
   assert.equal(messages.at(-1).tracks.length, 1);
+  assert.equal(messages.at(-1).captureProgress, null);
+  ui.notifyCaptureProgress({ trackId, fraction: 0.4 });
+  assert.deepEqual(messages.at(-1).captureProgress, { trackId, fraction: 0.4 });
+  ui.notifyCaptureProgress(null);
+  assert.equal(messages.at(-1).captureProgress, null);
 });

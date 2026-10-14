@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { brokerOrigin } from './libraryClient';
 
 export type SpotifyTrack = { trackId: string; trackName: string; trackArtist: string; trackArtworkSrc: string; rowIndex: number };
-type SpotifyState = { tracks: SpotifyTrack[]; active: boolean; starting: boolean; supported: boolean; notice: string; error: string };
-const initial: SpotifyState = { tracks: [], active: false, starting: false, supported: false, notice: '', error: '' };
+type SpotifyState = { tracks: SpotifyTrack[]; active: boolean; starting: boolean; supported: boolean; notice: string; error: string; captureProgress: { trackId: string; fraction: number | null } | null };
+const initial: SpotifyState = { tracks: [], active: false, starting: false, supported: false, notice: '', error: '', captureProgress: null };
 const embedded = window.parent !== window;
 // The extension broker authenticates Spotify and relays only overlay controls.
 const parentOrigin = embedded ? brokerOrigin() : '';
@@ -28,7 +28,11 @@ export function useSpotifyOverlay() {
         .map((track: SpotifyTrack, rowIndex: number) => ({ trackId: track.trackId, trackName: track.trackName.slice(0, 500),
           trackArtist: typeof track.trackArtist === 'string' ? track.trackArtist.slice(0, 500) : '',
           trackArtworkSrc: typeof track.trackArtworkSrc === 'string' && /^https:\/\/(?:i|mosaic)\.scdn\.co\//.test(track.trackArtworkSrc) ? track.trackArtworkSrc : '', rowIndex })) : [];
-      setState({ tracks, active: data.active === true, starting: data.starting === true, supported: data.supported === true,
+      const capture = data.captureProgress;
+      const captureProgress = data.active === true && capture && typeof capture.trackId === 'string' && /^[A-Za-z0-9]{1,100}$/.test(capture.trackId) &&
+        (capture.fraction === null || (typeof capture.fraction === 'number' && Number.isFinite(capture.fraction) && capture.fraction >= 0 && capture.fraction <= 1))
+        ? { trackId: capture.trackId, fraction: capture.fraction } : null;
+      setState({ tracks, active: data.active === true, starting: data.starting === true, supported: data.supported === true, captureProgress,
         notice: typeof data.notice === 'string' ? data.notice : '', error: typeof data.error === 'string' ? data.error : '' });
     };
     window.addEventListener('message', receive); send('ready');

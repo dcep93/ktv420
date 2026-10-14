@@ -19,6 +19,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks }) {
   overlay.id = IFRAME_ID; overlay.setAttribute('aria-label', 'ktv420 Spotify overlay'); overlay.setAttribute('aria-hidden', 'true');
   let iframe; let tracks = []; let notice = ''; let error = ''; let starting = false; let route = ''; let refreshing = false;
   let frameReady = false;
+  let captureProgress = null;
   function post() {
     // A new iframe starts as about:blank with Spotify's origin. Wait until the
     // extension document identifies itself before sending extension-only data.
@@ -29,7 +30,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks }) {
       trackId, trackName, trackArtist, trackArtworkSrc, rowIndex,
     }));
     iframe?.contentWindow?.postMessage({ source: PARENT, version: 2, type: 'state', tracks: trackData,
-      active: isRunActive(), starting, notice, error, supported: isSupportedRoute() }, origin);
+      active: isRunActive(), starting, notice, error, captureProgress, supported: isSupportedRoute() }, origin);
   }
   async function updateTracks() {
     if (refreshing || isRunActive()) return;
@@ -98,6 +99,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks }) {
     clearInterval(timer); window.removeEventListener('message', handleMessage); chrome.runtime.onMessage.removeListener(toolbar);
   }, { once: true });
   return { refresh,
+    notifyCaptureProgress(progress) { captureProgress = progress; post(); },
     async notifyTrackCaptured(_id, metadata) { notice = `${metadata?.trackName || 'Track'} captured. Local separation is queued automatically.`; post(); },
     async notifyCaptureComplete(trackIds) { notice = `${trackIds?.length || 0} tracks captured. Separation continues here automatically.`; refresh(); },
   };
