@@ -1,3 +1,4 @@
+import { parseRecording } from '../features/local/recording';
 import { claimListeningLease, type ListeningLease } from './listeningLease';
 import { beginCapture, appendCapture, finishCapture } from './capture';
 import { listTracks } from '../features/local/library';
@@ -21,6 +22,16 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
   const tabId = sender.tab.id;
   const handle = async () => {
     switch (request.type) {
+      case 'ktv420:clear-replay': {
+        const stored=await chrome.storage.local.get('pendingReplay');
+        if ((stored.pendingReplay as {tabId?:number} | undefined)?.tabId===tabId) await chrome.storage.local.remove('pendingReplay');
+        return null;
+      }
+      case 'ktv420:pending-replay': {
+        const stored = await chrome.storage.local.get('pendingReplay');
+        const pendingReplay = stored.pendingReplay as {tabId:number;recording:import('../features/local/recording').PerformanceRecording} | undefined;
+        return pendingReplay?.tabId === tabId && new URL(sender.url!).pathname === `/${pendingReplay.recording.spotifyPath}` ? pendingReplay.recording : null;
+      }
       case 'ktv420:listening-claim': {
         let granted = false;
         const operation = leaseQueue.then(async () => {
@@ -40,5 +51,25 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
     }
   };
   void handle().then(result => respond({ ok: true, result }), error => respond({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+  return true;
+});
+
+// The website can only hand off validated instructions; it cannot read local audio.
+chrome.runtime.onMessageExternal.addListener((message: unknown, sender, respond) => {
+  let url: URL;
+  try { url = new URL(sender.url || ''); } catch { return false; }
+  if (url.origin !== 'https://ktv420.web.app' || url.pathname.replace(/\/$/,'') !== '/replay' || (sender.frameId !== undefined && sender.frameId !== 0) ||
+    !message || typeof message !== 'object' || !('type' in message)) return false;
+  if (message.type === 'ktv420:replay-ping') { respond({ok:true,version:'6.2.0'}); return false; }
+  if (message.type !== 'ktv420:open-replay' || !('recording' in message)) return false;
+  void (async () => {
+    const recording = parseRecording(message.recording);
+    // Create blank first, persist before navigation: content scripts cannot race the handoff.
+    const tab = await chrome.tabs.create({ url: 'about:blank', active:true });
+    if (tab.id === undefined) throw new Error('Could not open Spotify.');
+    await chrome.storage.local.set({ pendingReplay: { tabId:tab.id, recording } });
+    await chrome.tabs.update(tab.id,{url:`https://open.spotify.com/${recording.spotifyPath}`});
+    return {ok:true};
+  })().then(respond,error => respond({ok:false,error:error instanceof Error ? error.message : String(error)}));
   return true;
 });

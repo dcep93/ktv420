@@ -1,8 +1,11 @@
+import { loadPerformance, savePerformance } from '../features/local/performanceFiles';
+import { PerformanceClock, parseRecording, MAX_RECORDING_BYTES, validSnapshot, type PerformanceRecording, type MixerControl } from '../features/local/recording';
+import { useReplay } from '../features/local/useReplay';
 import { captureStartSeconds } from '../features/local/listeningProtocol';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Player from '../features/stems/player/Player';
 import OverlayIcon from './OverlayIcon';
-import type { PlaybackRecord, PlaybackRecording, RecordingEvent, RecordingStartRequest } from '../features/stems/player/types';
+import type { PlaybackRecord, RecordingEvent, RecordingStartRequest } from '../features/stems/player/types';
 import { deleteTrack, getPlaybackRecord, listTracks, getProcessingEnabled, setProcessingEnabled as saveProcessingEnabled, withProcessingLock, type LocalTrack } from '../features/local/libraryClient';
 import { downloadBlob } from '../features/local/importAudio';
 import { processLocalTrack } from '../features/local/processing';
@@ -48,8 +51,31 @@ export default function LibraryPage() {
   const [autoPlay, setAutoPlay] = useState(false);
   const separator = useRef<LocalSeparator | null>(null);
   const running = useRef(false); const cancelled = useRef(false);
-  const mix = useRef<PlaybackRecording | null>(null);
+  const mix = useRef<PerformanceRecording | null>(null);
+  const recordingClock = useRef(new PerformanceClock());
+  const mixer = useRef<MixerControl | null>(null);
+  const [savedMix,setSavedMix] = useState<PerformanceRecording | null>(null);
+  const replay = useReplay({recording:spotify.replay,listening,transport:transportCommand,
+    select:id => { if(selected!==`spotify-${id}`) { loadedRevision.current='';setSelected(`spotify-${id}`);setRecord(null); } setViewMode('player'); },
+    control:() => mixer.current,offset:id => captureStartSeconds(tracks.find(t => t.id===`spotify-${id}`)?.metadata),
+  });
+  const required = spotify.replay?.tracks || [];
+  const replayReady = required.length>0 && required.every(item => tracks.some(t => t.id===`spotify-${item.id}` && t.status==='ready' && Math.abs(t.frames/t.sampleRate+captureStartSeconds(t.metadata)-item.duration)<1));
+  useEffect(() => { if (spotify.replay) setViewMode('tracks'); }, [spotify.replay]);
+  useEffect(() => {
+    void Promise.all([loadPerformance('last'),loadPerformance('draft')]).then(([last,draft]) => { setSavedMix(draft || last);if(draft) setError('Recovered a partial recording. Download its JSON before starting another.'); }).catch(() => {});
+  }, []);
   const flush = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    if(!recording) return;
+    const timer=setInterval(() => {
+      const current=mix.current,last=current?.events.at(-1);
+      if(!current || !last) return;
+      const draft={...current,events:[...current.events,{...last,type:'stop' as const}]};
+      void savePerformance('draft',draft).catch(() => {});
+    },2000);
+    return () => clearInterval(timer);
+  },[recording]);
   const savedSpotifyTracks = spotify.embedded
     ? spotify.tracks.flatMap(item => tracks.filter(track => track.id === `spotify-${item.trackId}`))
     : tracks.filter(track => track.source === 'spotify').slice().reverse();
@@ -80,7 +106,7 @@ export default function LibraryPage() {
   useEffect(() => {
     let disposed = false;
     const revision = `${selected}/${selectedCreatedAt}/${selectedReady ? 'stems' : 'input'}`;
-    if (recording || loadedRevision.current === revision) return;
+    if (loadedRevision.current === revision) return;
     if (selected) void getPlaybackRecord(selected).then(next => {
       if (!disposed) { loadedRevision.current = revision; setRecord({ ...next, files: next.files.filter(file => file.name !== 'source') }); }
     }).catch(reason => { if (!disposed) { setError(errorText(reason)); transportCommand({ action: 'stems-failed', trackId: selected.replace(/^spotify-/, '') }); } });
@@ -172,27 +198,76 @@ export default function LibraryPage() {
       setViewMode('settings');
     }
   };
-  const recordEvent = useCallback((event: RecordingEvent) => { mix.current?.events.push(event); }, []);
-  const startRecording = useCallback(async (request: RecordingStartRequest) => {
-    const name = `ktv420-mix-${new Date().toISOString().replaceAll(':', '-')}`;
-    mix.current = { version:1, name, createdAt:new Date().toISOString(), trackIds:[selected], events:[
-      {type:'record_start_snapshot',trackTimeSeconds:request.trackTimeSeconds,payload:request.snapshotPayload},
-      {type:'track_started',trackTimeSeconds:request.trackTimeSeconds,payload:{trackId:selected}},
-    ] }; setRecording(true); return true;
-  }, [selected]);
-  const stopRecording = useCallback(async (event: RecordingEvent) => {
+  const saveMix = useCallback((download = true) => {
     if (!mix.current) return;
-    flush.current?.(); mix.current.events.push(event);
-    downloadBlob(new Blob([JSON.stringify(mix.current, null, 2)], {type:'application/json'}), `${mix.current.name}.json`);
-    mix.current = null; setRecording(false);
+    const value = parseRecording(mix.current);
+    void savePerformance('last',value).then(() => savePerformance('draft',null)).catch(() => setError('Recording downloaded, but could not keep a local backup.'));
+    setSavedMix(value);
+    if(download) downloadBlob(new Blob([JSON.stringify(value)],{type:'application/json'}),`${value.name}.json`);
+    mix.current=null;recordingClock.current.pause();setRecording(false);
   }, []);
+  const recordEvent = useCallback((event: RecordingEvent) => {
+    const current=mix.current, control=mixer.current;
+    if(!current || !control?.ready) return;
+    const id=control.trackId.replace(/^spotify-/,'');
+    if(current.events.at(-1)?.trackId!==id) return;
+    const kind = event.type==='mixer_snapshot' ? 'mix' : event.type==='transport_play' ? 'play' : event.type==='transport_pause' ? 'pause' : event.type==='seek_commit' ? 'seek' : null;
+    if(!kind || (kind==='seek' && event.payload?.source && listening)) return;
+    const offset=captureStartSeconds(tracks.find(t => t.id===control.trackId)?.metadata);
+    const position=event.trackTimeSeconds+offset;
+    const previous=current.events.at(-1);
+    if(kind==='mix' && JSON.stringify(previous?.snapshot)===JSON.stringify(event.payload?.snapshot)) return;
+    current.events.push({type:kind,at:recordingClock.current.seconds,trackId:id,position,
+      ...(kind==='mix' && validSnapshot(event.payload?.snapshot) ? {snapshot:event.payload.snapshot} : {})});
+    if(current.events.length>=29000 || (current.events.length%50===0 && JSON.stringify(current).length>MAX_RECORDING_BYTES-20000)) {
+      current.events.push({type:'stop',at:recordingClock.current.seconds,trackId:id,position});
+      transportCommand({action:'pause'});saveMix();setError('Recording saved at the file-size limit. Start another recording to continue.');
+    }
+  }, [tracks,transportCommand,saveMix,listening]);
+  const onControls = useCallback((control: MixerControl | null) => {
+    mixer.current=control;
+    const current=mix.current;
+    if(!control?.ready || !current) return;
+    const id=control.trackId.replace(/^spotify-/,'');
+    if(current.events.at(-1)?.trackId===id) return;
+    const track=tracks.find(t => t.id===control.trackId);
+    if(!track) return;
+    const position=listening?.trackId===id ? listening.position : control.position()+captureStartSeconds(track.metadata);
+    if(!current.tracks.some(t => t.id===id)) current.tracks.push({id,title:track.title,duration:track.frames/track.sampleRate+captureStartSeconds(track.metadata)});
+    current.events.push({type:'track',at:recordingClock.current.seconds,trackId:id,position,snapshot:control.snapshot()});
+    if(listening?.playing) current.events.push({type:'play',at:recordingClock.current.seconds,trackId:id,position});
+  }, [tracks,listening]);
+  const startRecording = useCallback(async (request: RecordingStartRequest) => {
+    if(!spotify.spotifyPath || !activeTrack) {setError(spotify.supported ? 'Update ktv420 to 6.2 or later, then reload Spotify to record.' : 'Open a Spotify playlist or album before recording.');return false;}
+    const id=selected.replace(/^spotify-/,'');
+    const position=request.trackTimeSeconds+captureOffset;
+    mix.current={version:2,name:`ktv420-mix-${new Date().toISOString().replaceAll(':','-')}`,createdAt:new Date().toISOString(),spotifyPath:spotify.spotifyPath,
+      tracks:[{id,title:activeTrack.title,duration:activeTrack.frames/activeTrack.sampleRate+captureOffset}],
+      events:[{type:'track',at:0,trackId:id,position,snapshot:request.snapshot}]};
+    recordingClock.current.reset();recordingClock.current.start();setRecording(true);setError('');return true;
+  }, [selected,spotify.spotifyPath,spotify.supported,activeTrack,captureOffset]);
+  const stopRecording = useCallback(async (event: RecordingEvent) => {
+    const current=mix.current;if(!current) return;
+    const previous=current.events.at(-1)!;
+    current.events.push({type:'stop',at:recordingClock.current.seconds,trackId:previous.trackId,position:event.trackTimeSeconds+captureOffset});
+    try { saveMix(); } catch(reason) { setError(errorText(reason)); }
+  }, [captureOffset,saveMix]);
+  useEffect(() => {
+    if (!recording || !listening?.trackId || selected===`spotify-${listening.trackId}` || tracks.some(t => t.id===`spotify-${listening.trackId}` && t.status==='ready')) return;
+    transportCommand({action:'pause'});
+    void stopRecording({type:'record_stop',trackTimeSeconds:mixer.current?.position() || 0});
+    setError('Recording saved. Prepare the next song’s stems before recording it.');
+  },[recording,listening?.trackId,selected,tracks,transportCommand,stopRecording]);
   const desiredTrack = listening?.local && listening.output === 'stems' ? `spotify-${listening.trackId}` : '';
   useEffect(() => {
-    if (!desiredTrack || !tracks.some(track => track.id === desiredTrack && track.status === 'ready') || selected === desiredTrack) return;
-    if (recording) void stopRecording({ type: 'transport_pause', trackTimeSeconds: listening?.position || 0 });
+    if (replay.active || spotify.replay || !desiredTrack || !tracks.some(track => track.id === desiredTrack && track.status === 'ready') || selected === desiredTrack) return;
+    if (recording && mix.current && mixer.current) {
+      const previous=mix.current.events.at(-1)!;
+      mix.current.events.push({type:'pause',at:recordingClock.current.seconds,trackId:previous.trackId,position:mixer.current.position()+captureOffset});
+    }
     loadedRevision.current = ''; setRecord(null); setSelected(desiredTrack); setAutoPlay(false);
     viewScroll.current.player = 0; setViewMode('player');
-  }, [desiredTrack, tracks, selected, recording, stopRecording, listening?.position]);
+  }, [desiredTrack, tracks, selected, recording, stopRecording, listening?.position, replay.active, spotify.replay, captureOffset]);
   const onPlayerCommand = useCallback((command: { action: 'play' | 'pause' | 'seek'; position?: number }) => {
     if (command.action === 'seek') transportCommand({ action: 'seek', position: (command.position || 0) + captureOffset, trackId: selected.replace(/^spotify-/, '') });
     else transportCommand({ action: command.action });
@@ -206,14 +281,15 @@ export default function LibraryPage() {
     if (!next || recording) return;
     loadedRevision.current = ''; setRecord(null); setSelected(next.id); setAutoPlay(true);
   };
-  const displayTracks: (Omit<LocalTrack, 'status'> & { status: LocalTrack['status'] | 'missing' })[] = spotify.embedded
+  const allDisplayTracks: (Omit<LocalTrack, 'status'> & { status: LocalTrack['status'] | 'missing' })[] = spotify.embedded
     ? spotify.tracks.map(item => tracks.find(track => track.id === `spotify-${item.trackId}`) || {
       id: `spotify-${item.trackId}`, title: item.trackName, artist: item.trackArtist, createdAt: 0,
       status: 'missing', source: 'spotify', bytes: 0, frames: 0, sampleRate: 44100, metadata: { trackArtworkSrc: item.trackArtworkSrc },
     }) : savedSpotifyTracks;
+  const displayTracks = spotify.replay ? required.map(item => allDisplayTracks.find(t => `spotify-${item.id}`===t.id) || tracks.find(t => `spotify-${item.id}`===t.id) || {id:`spotify-${item.id}`,title:item.title,artist:'',createdAt:0,status:'missing' as const,source:'spotify' as const,bytes:0,frames:0,sampleRate:44100,metadata:undefined,error:undefined}) : allDisplayTracks;
   const close = useCallback(() => { setViewMode('tracks'); spotify.close(); }, [spotify]);
-  const canCapture = spotify.embedded && !spotify.starting && !deletingAudio && (spotify.active || (spotify.supported && spotify.tracks.length > 0));
-  const audioBusy = !!active || recording || spotify.active || spotify.starting || deletingAudio;
+  const canCapture = !replay.active && !recording && spotify.embedded && !spotify.starting && !deletingAudio && (spotify.active || (spotify.supported && spotify.tracks.length > 0));
+  const audioBusy = replay.active || !!active || recording || spotify.active || spotify.starting || deletingAudio;
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if (event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
@@ -231,8 +307,8 @@ export default function LibraryPage() {
     setViewMode('player');
   };
   const stoppedByUser = !error && /^Capture run stopped by user\.?$/.test(spotify.error);
-  const statusError = !!listening?.error || !!error || (!!spotify.error && !stoppedByUser);
-  const statusMessage = error || listening?.error || (stoppedByUser ? 'Capture stopped.' : spotify.error) ||
+  const statusError = !!replay.error || !!listening?.error || !!error || (!!spotify.error && !stoppedByUser);
+  const statusMessage = replay.error || error || listening?.error || (stoppedByUser ? 'Capture stopped.' : spotify.error) ||
     (spotify.starting ? 'Starting capture…' : spotify.active ? 'Capturing songs as they play…' :
       spotify.notice.replace(' Local separation is queued automatically.', '').replace(' Separation continues here automatically.', ''));
   return <main className="iframe-page iframe-page--overlay" aria-label="ktv420 iframe controls">
@@ -255,6 +331,18 @@ export default function LibraryPage() {
       <small>{!listening ? 'Update extension for volume' : listening.output === 'stems' ? 'Stems' : listening.output === 'capture' ? 'Capture' : 'Muted'}</small>
     </label></div>
     <div className="iframe-content" ref={content} onScroll={event => { viewScroll.current[viewMode] = event.currentTarget.scrollTop; }}>
+    {spotify.replay && <section className="replay-card" aria-label="Shared recording">
+      <div><h2>{spotify.replay.name}</h2><p>{replay.active ? `${Math.floor(replay.seconds)}s · ${replay.status === 'preparing' ? 'Preparing song…' : replay.status === 'paused' ? 'Paused' : 'Replaying'}` : replayReady ? 'Ready to replay.' : 'Capture missing songs, then let separation finish.'}</p></div>
+      {replay.active ? <><button disabled={replay.status==='preparing' || replay.busy} onClick={() => void replay.togglePause()}>{replay.status==='paused' ? 'Resume recording' : 'Pause recording'}</button><button onClick={replay.stop}>Stop replay</button></> : <button disabled={!replayReady || spotify.active || !!active} onClick={replay.start}>Play recording</button>}
+      {!replay.active && <button onClick={spotify.dismissReplay}>Leave recording</button>}
+      {required.some(item => tracks.some(t => t.id===`spotify-${item.id}` && t.status==='ready' && Math.abs(t.frames/t.sampleRate+captureStartSeconds(t.metadata)-item.duration)>=1)) && <p>A saved song has a different duration. Delete that song in Settings, then capture it again.</p>}
+      {!spotify.tracks.length && <p>Sign in to Spotify, then refresh this page.</p>}
+      {!replayReady && <p>{required.filter(item => !tracks.some(t => t.id===`spotify-${item.id}` && t.status==='ready')).length} of {required.length} songs still need preparation.{!autoProcessing && ' Resume separation in Settings.'}</p>}
+    </section>}
+    {!recording && savedMix && !spotify.replay && <section className="replay-card" aria-label="Saved recording"><div><h2>Recording saved</h2><p>Send your friend the JSON and ktv420.web.app/replay.</p></div>
+      <button onClick={() => downloadBlob(new Blob([JSON.stringify(savedMix)],{type:'application/json'}),`${savedMix.name}.json`)}>Download JSON</button>
+      <button onClick={() => { void navigator.clipboard.writeText('https://ktv420.web.app/replay').catch(() => setError('Share this link: https://ktv420.web.app/replay')); }}>Copy replay link</button>
+    </section>}
     {viewMode === 'settings' && <section className="iframe-settings-view" aria-label="Settings view">
       <section className="iframe-settings-source">
         <header className="iframe-settings-source-header"><h2>Separation</h2><span>On your computer</span></header>
@@ -327,14 +415,14 @@ export default function LibraryPage() {
     </ol>}
     {activeTrack && record && record.md5 === selected && <section className="iframe-player-view" hidden={viewMode !== 'player'} aria-label="Player">
       <button className="iframe-player-back" aria-label="Back to tracks" onClick={() => setViewMode('tracks')}><OverlayIcon name="back" /></button>
-      <Player key={record.md5} record={record} title={activeTrack.title}
+      <div className={replay.active ? "replay-mixer" : undefined} inert={!!spotify.replay}><Player key={record.md5} record={record} title={activeTrack.title} replaying={replay.active} onControls={onControls}
         masterVolume={listening ? (listening.output === 'stems' && selected === `spotify-${listening.trackId}` && listening.local ? listening.volume : 0) : 1}
-        transport={listening ? { ...listening, position: Math.max(0, listening.position - captureOffset), playing: listening.playing && listening.output === 'stems' && selected === `spotify-${listening.trackId}` } : undefined}
-        onTransportCommand={listening ? onPlayerCommand : undefined} onPlaybackError={onPlaybackError}
+        transport={!spotify.replay && listening ? { ...listening, position: Math.max(0, listening.position - captureOffset), playing: listening.playing && listening.output === 'stems' && selected === `spotify-${listening.trackId}` } : undefined}
+        onTransportCommand={!spotify.replay && listening ? onPlayerCommand : undefined} onPlaybackError={onPlaybackError}
         hasPreviousTrack={listening ? listening.canPrevious : !recording && selectedIndex > 0} hasNextTrack={listening ? listening.canNext : !recording && selectedIndex >= 0 && selectedIndex < playbackTracks.length - 1}
         onPreviousTrack={() => navigateTrack(-1)} onNextTrack={() => navigateTrack(1)} onTrackEnd={listening ? undefined : () => navigateTrack(1)}
         autoPlayOnReady={autoPlay} onAutoPlayOnReadyHandled={() => setAutoPlay(false)} trackMetadata={activeTrack.metadata} isRecording={recording}
-        onStartRecording={startRecording} onStopRecording={stopRecording} onRecordingEvent={recordEvent} onRegisterRecordingFlush={callback => { flush.current = callback; }} />
+        onStartRecording={startRecording} onStopRecording={stopRecording} onRecordingEvent={recordEvent} onRegisterRecordingFlush={callback => { flush.current = callback; }} /></div>
       <details className="iframe-player-exports"><summary>Export audio</summary>{record.files.map(file => <button key={file.path}
         onClick={() => downloadBlob(file.blob, `${activeTrack.title}-${file.name}`)}>{file.name.replace(/\.(wav|mp3)$/i, '')}</button>)}</details>
     </section>}

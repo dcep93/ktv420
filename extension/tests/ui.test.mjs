@@ -7,6 +7,7 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
   const messages = [];
   const timers = [];
   const listeners = {};
+  let pendingReply;const captureRequests=[],transportRequests=[],replayModes=[];
   const trackId = '5EGTNEoUpibGgMWf6ECe0X';
   const row = {
     querySelector: () => ({ getAttribute: () => `/track/${trackId}`, textContent: 'Common Enemy' }),
@@ -40,7 +41,7 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
     window: { location: { pathname: '/playlist/example' },
       addEventListener(name, listener) { listeners[name] = listener; }, removeEventListener() {} },
     location: { pathname: '/playlist/example' },
-    chrome: { runtime: { getManifest: () => ({ version: '0.5.0' }), getURL: path => `chrome-extension://test/${path}`, onMessage: { addListener() {}, removeListener() {} } } },
+    chrome: { runtime: { sendMessage(_message, respond) { pendingReply=respond;respond({ok:true,result:null}); }, getManifest: () => ({ version: '0.5.0' }), getURL: path => `chrome-extension://test/${path}`, onMessage: { addListener() {}, removeListener() {} } } },
     setInterval: callback => { timers.push(callback); return 1; },
   };
   for (const [key, value] of Object.entries(globals)) {
@@ -48,7 +49,7 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
     t.after(() => descriptor ? Object.defineProperty(globalThis, key, descriptor) : delete globalThis[key]);
   }
-  const ui = mountButton({ isRunActive: () => false, onToggleRun: async () => {}, loadSpotifyTracks: async () => [] });
+  const ui = mountButton({ isRunActive: () => false, onToggleRun: async options => {captureRequests.push(options);}, loadSpotifyTracks: async () => [], onTransport: async command => {transportRequests.push(command);}, onReplay: enabled => replayModes.push(enabled) });
   elements.find(element => element.id === 'ktv420-spotify-capture-button').onclick();
   await new Promise(resolve => setImmediate(resolve));
   const frame = elements.find(element => element.tag === 'iframe');
@@ -77,4 +78,11 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
   assert.deepEqual(messages.at(-1).captureProgress, { trackId, fraction: 0.4 });
   ui.notifyCaptureProgress(null);
   assert.equal(messages.at(-1).captureProgress, null);
+  pendingReply({ok:true,result:{tracks:[{id:trackId,title:'Common Enemy'}]}});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.deepEqual(replayModes,[true],'imported recording arms silent preparation');
+  assert.equal(messages.some(message=>message.type==='replay'),true);
+  await listeners.message({...ready,data:{...ready.data,type:'toggle-capture'}});
+  assert.deepEqual(captureRequests.at(-1).trackIds,[trackId],'capture only songs required by this recording');
+  assert.deepEqual(transportRequests.at(-1),{action:'volume',volume:0},'capture begins silently without changing its PCM samples');
 });

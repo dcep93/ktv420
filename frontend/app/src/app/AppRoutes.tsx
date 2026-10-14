@@ -1,5 +1,7 @@
+import ReplayPage from '../pages/ReplayPage';
 import LibraryPage from '../pages/LibraryPage';
 export default function AppRoutes() {
+  if (location.pathname.replace(/\/$/, '') === '/replay') return <ReplayPage />;
   if (window.parent === window) return <main className="iframe-page">
     <section className="direct-player-guide">
       <h1 className="app-title">ktv420</h1>

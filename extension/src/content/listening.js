@@ -5,7 +5,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
   let busy = false, disposed = false, owner = false, lastLease = 0, catalogAt = 0;
   let catalog = new Map(), recording = null, last = null, generation = 0, lastSource = '';
   let volume = 0.7, volumeRevision = -1, output = 'muted', error = '', armed = false;
-  let batchPending = false, silentGeneration = -1;
+  let batchPending = false, silentGeneration = -1, replayPreparation = false;
   let frameHeartbeat = 0, failedTrack = '', ignoreUntil = 0, commands = Promise.resolve();
   let lastVolumeDom = null;
   let storageQueue = Promise.resolve();
@@ -77,7 +77,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       // Start the PCM tap while the player loads, so a cold iframe does not
       // discard the beginning of a newly selected song. Monitoring still waits
       // for the hosted player's explicit silence acknowledgment below.
-      if (playing && armed && !batch && !ready && !batchPending && now > ignoreUntil && !recording) {
+      if (playing && armed && !replayPreparation && !batch && !ready && !batchPending && now > ignoreUntil && !recording) {
         const result = await bridge.command('capture-begin');
         recording = { ...dom, complete: result.target.currentTime <= 0.35 && !catalog.has(dom.trackId) && !storing.has(dom.trackId) };
       }
@@ -116,6 +116,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
   const timer = setInterval(() => void tick(), 200);
   void tick();
   return {
+    prepareReplay(enabled = true) { replayPreparation = enabled; if (enabled) volume = 0; void policy(0); },
     isCapturing() { return output === 'capture'; },
     heartbeat() { frameHeartbeat = Date.now(); },
     command(command) {

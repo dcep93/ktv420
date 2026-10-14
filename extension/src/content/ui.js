@@ -7,7 +7,7 @@ const BUTTON_ID = 'ktv420-spotify-capture-button';
 const IFRAME_ID = 'ktv420-prepared-iframe';
 const STYLE_ID = 'ktv420-spotify-capture-style';
 
-export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTransport, onHeartbeat, onOpenChange }) {
+export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTransport, onHeartbeat, onOpenChange, onReplay }) {
   const origin = chrome.runtime.getURL('').replace(/\/$/, '');
   const [major, minor] = chrome.runtime.getManifest().version.split('.').map(Number);
   const hostedBridge = major > 0 || minor >= 4;
@@ -18,7 +18,13 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
   const overlay = document.createElement('section');
   overlay.id = IFRAME_ID; overlay.setAttribute('aria-label', 'ktv420 Spotify overlay'); overlay.setAttribute('aria-hidden', 'true');
   let iframe; let tracks = []; let notice = ''; let error = ''; let starting = false; let route = ''; let refreshing = false;
-  let frameReady = false;
+  let frameReady = false, lastTrackRefresh = 0;
+  let replay = null;
+  const postReplay = () => { if (frameReady && replay) iframe.contentWindow.postMessage({source:PARENT,version:2,type:'replay',recording:replay},origin); };
+  chrome.runtime.sendMessage({type:'ktv420:pending-replay'}, response => {
+    if (chrome.runtime.lastError || !response?.ok || !response.result) return;
+    replay = response.result; onReplay?.(true); void show(); postReplay();
+  });
   let captureProgress = null; let listening = null;
   function post() {
     // A new iframe starts as about:blank with Spotify's origin. Wait until the
@@ -29,7 +35,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
     const trackData = tracks.map(({ trackId, trackName, trackArtist, trackArtworkSrc, rowIndex }) => ({
       trackId, trackName, trackArtist, trackArtworkSrc, rowIndex,
     }));
-    iframe?.contentWindow?.postMessage({ source: PARENT, version: 2, type: 'state', tracks: trackData,
+    iframe?.contentWindow?.postMessage({ source: PARENT, version: 2, type: 'state', spotifyPath: location.pathname.slice(1), tracks: trackData,
       active: isRunActive() || !!listening?.capturing, starting, notice, error, captureProgress: captureProgress || listening?.captureProgress || null, listening, supported: isSupportedRoute() }, origin);
   }
   async function updateTracks() {
@@ -41,7 +47,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
       route = location.pathname;
       error = '';
     } catch (reason) { error = reason?.message || String(reason); }
-    finally { refreshing = false; post(); }
+    finally { refreshing = false; lastTrackRefresh = Date.now(); post(); }
   }
   function prepare() {
     if (!iframe) {
@@ -71,13 +77,18 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
     button.disabled = !isSupportedRoute() && !isRunActive() && !listening;
     button.title = isRunActive() ? 'ktv420 capture active' : 'Open ktv420';
     post();
-    if (iframe && route !== location.pathname && !isRunActive()) void updateTracks();
+    if (iframe && !isRunActive() && (route !== location.pathname || (replay && (!tracks.length || replay.tracks.some(item => !tracks.some(t => t.trackId === item.id))) && Date.now() - lastTrackRefresh > 3000))) void updateTracks();
   }
   const handleMessage = async event => {
     if (!iframe || event.source !== iframe.contentWindow || event.origin !== origin || event.data?.source !== FRAME) return;
     if (hostedBridge && event.data.version !== 2) return;
     if (event.data.type === 'close') { overlay.dataset.open = 'false'; overlay.setAttribute('aria-hidden', 'true'); onOpenChange?.(false); return; }
-    if (event.data.type === 'ready') { frameReady = true; post(); return; }
+    if (event.data.type === 'dismiss-replay') {
+      replay = null; onReplay?.(false);
+      chrome.runtime.sendMessage({type:'ktv420:clear-replay'}, () => { void chrome.runtime.lastError; });
+      iframe.contentWindow.postMessage({source:PARENT,version:2,type:'replay',recording:null},origin);return;
+    }
+    if (event.data.type === 'ready') { frameReady = true; post(); postReplay(); return; }
     if (event.data.type === 'listening-heartbeat') { onHeartbeat?.(); return; }
     if (event.data.type === 'transport') { await onTransport?.(event.data.command); return; }
     if (event.data.type !== 'toggle-capture' || starting) return;
@@ -85,7 +96,12 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
     try {
       if (!isRunActive()) await updateTracks();
       // activechange refreshes the button once startup completes, keeping Stop available during capture.
-      const run = onToggleRun({ trackSnapshot: tracks });
+      if (replay && !isRunActive()) {
+        const missing = replay.tracks.filter(item => !tracks.some(t => t.trackId === item.id));
+        if (missing.length) throw new Error(`Find the required songs in this Spotify page first: ${missing.map(t => t.title).join(', ')}`);
+        await onTransport?.({action:'volume',volume:0});
+      }
+      const run = onToggleRun({ trackSnapshot: tracks, trackIds: replay ? replay.tracks.map(t => t.id) : null });
       post();
       await run;
     } catch (reason) { error = reason?.message || String(reason); }

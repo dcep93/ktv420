@@ -96,3 +96,25 @@ test('transport and heartbeat require the ready hosted peer and sanitize command
   assert.equal(messages.length, count);
   await bridge.dispose();
 });
+
+test('replay handoff waits for the hosted peer, survives reload, and rejects untrusted or malformed instructions', async () => {
+  const messages: Record<string,unknown>[] = [], errors:string[]=[];
+  const parent={postMessage(){}} as unknown as Window;
+  const player={postMessage:(data:Record<string,unknown>)=>messages.push(data)} as unknown as Window;
+  const bridge=createBrokerBridge({parent,player,parentOrigin:'https://open.spotify.com',playerOrigin:'https://ktv420.web.app',showError:e=>errors.push(e),
+    createSession:()=>({dispose:async()=>{},handle:async()=>({source:'ktv420-library',version:2,id:'test',ok:true})}) as ReturnType<typeof createLibraryBrokerSession>});
+  const id='1111111111111111111111';
+  const recording={version:2,name:'Mix',createdAt:'2026-10-14',spotifyPath:`playlist/${id}`,tracks:[{id,title:'Song',duration:12}],events:[
+    {type:'track',at:0,position:0,trackId:id,snapshot:{visualizer:'time-ribbon',spotlight:null,stems:[{name:'vocals.mp3',input:false,volume:1,mute:false,deafen:false,effect:'wah',value:.5}]}},
+    {type:'stop',at:1,position:1,trackId:id}]};
+  const data={source:'ktv420-parent',version:2,type:'replay',recording};
+  await bridge.receive({source:parent,origin:'https://evil.example',data});
+  await bridge.receive({source:player,origin:'https://open.spotify.com',data});assert.equal(messages.length,0);
+  await bridge.receive({source:parent,origin:'https://open.spotify.com',data});assert.equal(messages.length,0);
+  const ready={source:player,origin:'https://ktv420.web.app',data:{source:'ktv420-overlay',version:2,type:'ready'}};
+  await bridge.receive(ready);assert.deepEqual(messages.at(-1)?.recording,recording);
+  await bridge.reload();await bridge.reload();await bridge.receive(ready);assert.deepEqual(messages.at(-1)?.recording,recording);
+  await bridge.receive({source:parent,origin:'https://open.spotify.com',data:{...data,recording:{version:1}}});assert.equal(errors.length,1);
+  await bridge.receive({source:parent,origin:'https://open.spotify.com',data:{...data,recording:null}});assert.equal(messages.at(-1)?.recording,null);
+  await bridge.dispose();
+});

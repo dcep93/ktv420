@@ -11,7 +11,7 @@ for (const directory of ['src', 'assets']) {
   await cp(new URL(`extension/${directory}/`, root), new URL(`${directory}/`, output), { recursive: true });
 }
 const manifest = JSON.parse(await readFile(new URL('extension/manifest.json', root), 'utf8'));
-manifest.version = '6.1.1';
+manifest.version = '6.2.0';
 manifest.description = 'Capture Spotify and keep audio locally. The ktv420 hosted player handles listening, DJing and local separation.';
 manifest.host_permissions = ['https://open.spotify.com/*'];
 manifest.content_security_policy.extension_pages = "script-src 'self'; object-src 'none'; frame-src https://ktv420.web.app; connect-src 'none'; img-src 'self';";

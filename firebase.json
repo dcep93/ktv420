@@ -8,6 +8,14 @@
     ],
     "rewrites": [
       {
+        "source": "/replay",
+        "destination": "/player/index.html"
+      },
+      {
+        "source": "/replay/**",
+        "destination": "/player/index.html"
+      },
+      {
         "source": "/player/**",
         "destination": "/player/index.html"
       },
@@ -103,6 +111,15 @@
           {
             "key": "Cache-Control",
             "value": "public,max-age=31536000,immutable"
+          }
+        ]
+      },
+      {
+        "source": "/replay",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
           }
         ]
       }

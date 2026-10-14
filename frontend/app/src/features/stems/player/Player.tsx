@@ -1,3 +1,4 @@
+import type { MixerSnapshot } from '../../local/recording';
 import {
   type PointerEvent,
   useCallback,
@@ -81,7 +82,7 @@ function getLogarithmicVolumeGain(volume: number) {
 }
 
 export default function Player({
-  record,
+  record, replaying = false, onControls,
   masterVolume = 1, transport, onTransportCommand, onPlaybackError,
   title,
   trackMetadata,
@@ -99,6 +100,8 @@ export default function Player({
   onRecordingEvent,
   onRegisterRecordingFlush,
 }: PlayerProps) {
+  const controlsCallback = useRef(onControls); controlsCallback.current=onControls;
+  useEffect(() => () => controlsCallback.current?.(null), []);
   const playbackErrorRef = useRef(onPlaybackError);
   useEffect(() => { playbackErrorRef.current = onPlaybackError; }, [onPlaybackError]);
   const [transportError, setTransportError] = useState('');
@@ -510,30 +513,9 @@ export default function Player({
     [createRecordingEvent]
   );
 
-  const queueDebouncedRecordingEvent = useCallback(
-    (key: string, event: RecordingEvent) => {
-      if (!isRecordingRef.current) {
-        return;
-      }
-
-      const existing = debouncedRecordingEventsRef.current.get(key);
-
-      if (existing) {
-        window.clearTimeout(existing.timeoutId);
-      }
-
-      const timeoutId = window.setTimeout(() => {
-        debouncedRecordingEventsRef.current.delete(key);
-
-        if (isRecordingRef.current) {
-          onRecordingEventRef.current?.(event);
-        }
-      }, 300);
-
-      debouncedRecordingEventsRef.current.set(key, { timeoutId, event });
-    },
-    []
-  );
+  const queueDebouncedRecordingEvent = useCallback((_key: string, event: RecordingEvent) => {
+    if (isRecordingRef.current) onRecordingEventRef.current?.(event);
+  }, []);
 
   const cancelDebouncedRecordingEvent = useCallback((key: string) => {
     const existing = debouncedRecordingEventsRef.current.get(key);
@@ -576,103 +558,13 @@ export default function Player({
     return () => onRegisterRecordingFlush?.(null);
   }, [flushDebouncedRecordingEvents, onRegisterRecordingFlush]);
 
-  const buildRecordingSnapshotPayload = useCallback(
-    (trackTimeSeconds: number): RecordingEventPayload | undefined => {
-      const payload: Record<string, unknown> = {};
-      const roundedTrackTime = roundTrackTime(trackTimeSeconds);
-      const defaultVisualizer = visualizerOptions[0]?.value ?? "time-ribbon";
-
-      if (roundedTrackTime !== 0) {
-        payload.timestamp = roundedTrackTime;
-      }
-
-      if (visualizerType !== defaultVisualizer) {
-        payload.visualizer = visualizerType;
-      }
-
-      const nonDefaultVolumes = tracks
-        .map((track) => ({
-          ...getStemRecordingPayload(track.id),
-          value: volumesRef.current[track.id] ?? 1,
-        }))
-        .filter((volume) => !isNearlyEqual(volume.value, 1));
-
-      if (nonDefaultVolumes.length > 0) {
-        payload.volumes = nonDefaultVolumes;
-      }
-
-      const nonDefaultMuteStates = tracks
-        .map((track) => {
-          const value = trackMuteStatesRef.current[track.id] ?? false;
-          const defaultValue = track.isInput;
-          const payload = getStemRecordingPayload(track.id);
-
-          return {
-            payload,
-            value,
-            defaultValue,
-          };
-        })
-        .filter((state) => state.value !== state.defaultValue)
-        .map((state) => ({
-          ...state.payload,
-          value: state.value,
-        }));
-
-      if (nonDefaultMuteStates.length > 0) {
-        payload.muteStates = nonDefaultMuteStates;
-      }
-
-      const nonDefaultDeafenStates = tracks
-        .map((track) => ({
-          ...getStemRecordingPayload(track.id),
-          value: trackDeafenStatesRef.current[track.id] ?? false,
-        }))
-        .filter((state) => state.value);
-
-      if (nonDefaultDeafenStates.length > 0) {
-        payload.deafenStates = nonDefaultDeafenStates;
-      }
-
-      const defaultEffectType: AudioEffectType = "wah";
-      const defaultEffectValue = getDefaultEffectValue(defaultEffectType);
-      const nonDefaultEffects = tracks
-        .map((track) => {
-          const effectType =
-            effectTypesRef.current[track.id] ?? defaultEffectType;
-          const effectValue =
-            effectValuesRef.current[track.id] ??
-            getDefaultEffectValue(effectType);
-          const effect: Record<string, unknown> = {
-            ...getStemRecordingPayload(track.id),
-          };
-
-          if (effectType !== defaultEffectType) {
-            effect.effectType = effectType;
-          }
-
-          if (!isNearlyEqual(effectValue, defaultEffectValue)) {
-            effect.effectValue = effectValue;
-          }
-
-          return effect;
-        })
-        .filter(
-          (effect) => "effectType" in effect || "effectValue" in effect
-        );
-
-      if (nonDefaultEffects.length > 0) {
-        payload.effects = nonDefaultEffects;
-      }
-
-      if (spotlightState) {
-        payload.spotlightState = serializeSpotlightState(spotlightState);
-      }
-
-      return Object.keys(payload).length > 0 ? payload : undefined;
-    },
-    [getStemRecordingPayload, spotlightState, tracks, visualizerType]
-  );
+  const snapshot = useCallback((): MixerSnapshot => ({
+    visualizer: visualizerType,
+    stems: tracks.map(track => ({name:track.name,input:track.isInput,volume:volumesRef.current[track.id] ?? 1,
+      mute:trackMuteStatesRef.current[track.id] ?? false,deafen:trackDeafenStatesRef.current[track.id] ?? false,
+      effect:effectTypesRef.current[track.id] ?? 'wah',value:effectValuesRef.current[track.id] ?? getDefaultEffectValue('wah')})),
+    spotlight: spotlightState,
+  }), [tracks,visualizerType,spotlightState]);
 
   useEffect(() => {
     const audioContextSnapshot = audioCtxRef.current;
@@ -1394,6 +1286,7 @@ export default function Player({
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target;
+      if (replaying) return;
       if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey ||
           (target instanceof Element && target.closest('input,textarea,select,button,a,[contenteditable="true"],[role="slider"]'))) return;
       if (event.repeat) return;
@@ -1447,7 +1340,7 @@ export default function Player({
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [handlePlayPause, selectVisualizerType, visualizerType]);
+  }, [handlePlayPause, selectVisualizerType, visualizerType,replaying]);
 
   const handleVolumeChange = (trackId: string, value: number) => {
     setVolumes((previous) => ({ ...previous, [trackId]: value }));
@@ -1574,6 +1467,16 @@ export default function Player({
     };
     update(); const timer = setInterval(update, 200); return () => clearInterval(timer);
   }, [masterVolume, transport]);
+  const observedTransport = useRef<{position:number;playing:boolean;at:number} | null>(null);
+  useEffect(() => {
+    if (!transport || !areTracksReady || (transport.trackId && record.md5!==`spotify-${transport.trackId}`)) return;
+    const previous = observedTransport.current;
+    const now = {position:transport.position,playing:transport.playing,at:transport.observedAt};
+    observedTransport.current = now;
+    if (!isRecording) return;
+    if (previous && Math.abs(now.position - previous.position - (previous.playing ? (now.at-previous.at)/1000 : 0)) > .6) emitRecordingEvent('seek_commit',{targetSeconds:now.position},now.position);
+    if (!previous || previous.playing !== now.playing) emitRecordingEvent(now.playing ? 'transport_play' : 'transport_pause',undefined,now.position);
+  }, [transport,areTracksReady,isRecording,emitRecordingEvent,record.md5]);
   useEffect(() => {
     if (!transport || !areTracksReady) return;
     const playing = transport.playing && Date.now() - transport.observedAt < 1800;
@@ -1588,13 +1491,45 @@ export default function Player({
   useEffect(() => {
     if (transport && tracks.length && readyTrackIds.length < tracks.length && unavailableMessage) onPlaybackError?.(unavailableMessage);
   }, [transport, tracks.length, readyTrackIds.length, unavailableMessage, onPlaybackError]);
+  useEffect(() => {
+    if (isRecording && areTracksReady) onRecordingEventRef.current?.({type:'mixer_snapshot',trackTimeSeconds:currentPlaybackTime(),payload:{snapshot:snapshot()}});
+  }, [isRecording,areTracksReady,volumes,trackMuteStates,trackDeafenStates,effectValues,effectTypes,visualizerType,spotlightState,snapshot,currentPlaybackTime]);
+
+  useEffect(() => {
+    onControls?.({
+      trackId:record.md5,ready:areTracksReady,position:currentPlaybackTime,snapshot,
+      play:async () => { stopAllSources(); await schedulePlayback(startOffsetRef.current); },
+      pause:pausePlayback,
+      seek:async position => { const resume = isPlaying; stopAllSources(); startOffsetRef.current = Math.max(0,Math.min(duration,position)); setCurrentTime(startOffsetRef.current); if (resume) await schedulePlayback(startOffsetRef.current); },
+      apply:value => {
+        if (!visualizerOptions.some(option => option.value === value.visualizer) || value.stems.length !== tracks.length) throw new Error('Recording requires an unsupported mixer layout.');
+        const v: Record<string,number> = {}, m: Record<string,boolean> = {}, d: Record<string,boolean> = {}, e: Record<string,AudioEffectType> = {}, x: Record<string,number> = {};
+        for (const track of tracks) {
+          const stem = value.stems.find(stem => stem.name === track.name && stem.input === track.isInput);
+          if (!stem || !audioEffectOptions.some(option => option.value === stem.effect)) throw new Error('Recording requires a different stem or effect version.');
+          v[track.id]=stem.volume; m[track.id]=stem.mute; d[track.id]=stem.deafen; e[track.id]=stem.effect as AudioEffectType; x[track.id]=stem.value;
+        }
+        volumesRef.current=v; trackMuteStatesRef.current=m; trackDeafenStatesRef.current=d; effectTypesRef.current=e; effectValuesRef.current=x;
+        setVolumes(v);setTrackMuteStates(m);setTrackDeafenStates(d);setEffectTypes(e);setEffectValues(x);
+        setVisualizerType(value.visualizer as VisualizerType);setSpotlightState(value.spotlight as SpotlightState | null);
+        for (const track of tracks) {
+          const gain = gainNodesRef.current[track.id], ctx = audioCtxRef.current;
+          if (gain && ctx) gain.gain.setTargetAtTime(getEffectiveVolumeFromRefs(track.id),ctx.currentTime,0.01);
+          applyEffectValue(track.id,x[track.id],e[track.id]);
+        }
+      },
+    });
+
+  }, [onControls,record.md5,areTracksReady,currentPlaybackTime,snapshot,stopAllSources,schedulePlayback,pausePlayback,isPlaying,duration,tracks,applyEffectValue,getEffectiveVolumeFromRefs]);
+
   const recordingButtonDisabled = isRecording
     ? !onStopRecording
-    : !areTracksReady || isPlaying || !onStartRecording;
+    : replaying || !areTracksReady || isPlaying || !onStartRecording;
 
   const handleRecordingButton = useCallback(async () => {
     if (isRecording) {
       flushDebouncedRecordingEvents();
+      if (onTransportCommand) onTransportCommand({action:'pause'});
       const stoppedAt = isPlaying ? pausePlayback() : currentPlaybackTime();
       pausedAtPerformanceTimeRef.current = null;
       await onStopRecording?.(
@@ -1610,7 +1545,7 @@ export default function Player({
     const startTime = currentPlaybackTime();
     const didStart = await onStartRecording({
       trackTimeSeconds: roundTrackTime(startTime),
-      snapshotPayload: buildRecordingSnapshotPayload(startTime),
+      snapshot: snapshot(),
     });
 
     if (!didStart) {
@@ -1618,10 +1553,13 @@ export default function Player({
     }
 
     pausedAtPerformanceTimeRef.current = null;
-    await schedulePlayback(startOffsetRef.current);
+    isRecordingRef.current = true;
+    if (onTransportCommand) onTransportCommand({action: 'play'});
+    else await schedulePlayback(startOffsetRef.current);
   }, [
+    onTransportCommand,
     areTracksReady,
-    buildRecordingSnapshotPayload,
+    snapshot,
     createRecordingEvent,
     currentPlaybackTime,
     flushDebouncedRecordingEvents,
@@ -2014,8 +1952,4 @@ function roundDuration(value: number) {
   }
 
   return Math.max(0, Math.round(value * 1000) / 1000);
-}
-
-function isNearlyEqual(left: number, right: number) {
-  return Math.abs(left - right) < 0.0001;
 }

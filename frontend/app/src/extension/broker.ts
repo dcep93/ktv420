@@ -1,3 +1,4 @@
+import { parseRecording, spotifyContext } from '../features/local/recording';
 import { parseListeningState, parseTransportCommand } from '../features/local/listeningProtocol';
 import { createLibraryBrokerSession, LIBRARY_PROTOCOL_VERSION } from './libraryBroker';
 
@@ -30,6 +31,7 @@ function validState(value: Record<string, unknown>) {
 export function createBrokerBridge(options: BridgeOptions) {
   let session = options.createSession(), ready = false, closed = false, loaded = false;
   let state: Record<string, unknown> | undefined;
+  let replay: Record<string, unknown> | undefined;
   let resetting = Promise.resolve();
   async function receive(event: Pick<MessageEvent, 'source' | 'origin' | 'data'>): Promise<void> {
     if (closed || !object(event.data)) return;
@@ -38,9 +40,14 @@ export function createBrokerBridge(options: BridgeOptions) {
       if (data.source === 'ktv420-parent' && data.type === 'state' && data.version !== LIBRARY_PROTOCOL_VERSION) {
         options.showError('Spotify bridge version mismatch. Reload Spotify after updating the extension.'); return;
       }
+      if (data.source === 'ktv420-parent' && data.version === LIBRARY_PROTOCOL_VERSION && data.type === 'replay') {
+        try { replay = {source:'ktv420-parent',version:2,type:'replay',recording:data.recording===null ? null : parseRecording(data.recording)}; if (ready) options.player.postMessage(replay,options.playerOrigin); }
+        catch { options.showError('Invalid recording. Import it again from ktv420.web.app/replay.'); }
+        return;
+      }
       if (validState(data)) {
         state = { source: 'ktv420-parent', version: LIBRARY_PROTOCOL_VERSION, type: 'state', active: data.active, starting: data.starting, supported: data.supported,
-          notice: data.notice, error: data.error, tracks: (data.tracks as Record<string, unknown>[]).map(track => ({
+          spotifyPath: spotifyContext(data.spotifyPath) ? data.spotifyPath : '', notice: data.notice, error: data.error, tracks: (data.tracks as Record<string, unknown>[]).map(track => ({
             trackId: track.trackId, trackName: track.trackName, trackArtist: track.trackArtist,
             trackArtworkSrc: track.trackArtworkSrc, rowIndex: track.rowIndex,
           })) };
@@ -73,12 +80,13 @@ export function createBrokerBridge(options: BridgeOptions) {
       options.onReady?.();
       options.parent.postMessage({ source: 'ktv420-overlay', version: LIBRARY_PROTOCOL_VERSION, type: 'ready' }, options.parentOrigin);
       if (state) options.player.postMessage(state, options.playerOrigin);
+      if (replay) options.player.postMessage(replay,options.playerOrigin);
     } else if (ready && data.type === 'listening-heartbeat') {
       options.parent.postMessage({ source: 'ktv420-overlay', version: LIBRARY_PROTOCOL_VERSION, type: data.type }, options.parentOrigin);
     } else if (ready && data.type === 'transport') {
       const command = parseTransportCommand(data.command);
       if (command) options.parent.postMessage({ source: 'ktv420-overlay', version: LIBRARY_PROTOCOL_VERSION, type: 'transport', command }, options.parentOrigin);
-    } else if (ready && (data.type === 'close' || data.type === 'toggle-capture')) {
+    } else if (ready && (data.type === 'dismiss-replay' || data.type === 'close' || data.type === 'toggle-capture')) {
       options.parent.postMessage({ source: 'ktv420-overlay', version: LIBRARY_PROTOCOL_VERSION, type: data.type }, options.parentOrigin);
     }
   }

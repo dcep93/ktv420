@@ -981,3 +981,11 @@
 .iframe-master-volume > span { display: flex; justify-content: space-between; }
 .iframe-master-volume input { width: 100%; margin: 3px 0; accent-color: var(--ww-title-pink); }
 .iframe-master-volume small { font-size: 10px; color: var(--ww-accent-cyan); }
+
+/* Shared recordings reuse the overlay's warm surfaces and compact controls. */
+.replay-card { display:flex; align-items:center; flex-wrap:wrap; gap:.8rem; padding:1.1rem 1.3rem; margin-bottom:1rem; border:1px solid var(--color-border, #49392b); border-radius:16px; background:rgba(40,30,24,.65); }
+.replay-card>div {flex:1;min-width:12rem;} .replay-card h2 {font-size:1.1rem;margin:0 0 .35rem;overflow-wrap:anywhere;} .replay-card p {margin:.25rem 0;color:#c7bdb6;font-size:.9rem;}
+.replay-card button,.replay-import button {padding:.6rem .9rem;border:1px solid #8d6a47;border-radius:10px;background:#30251d;color:#f5ede7;cursor:pointer;}
+.replay-card button:disabled {opacity:.4;cursor:default;} .replay-card button:hover:not(:disabled),.replay-import button:hover {border-color:#ff7bc3;}
+.replay-import {max-width:38rem;margin:4rem auto;padding:2rem;border:1px solid #49392b;border-radius:24px;}
+.replay-import input {display:block;margin:.8rem 0;font:inherit;} .replay-import nav {display:flex;gap:1rem;flex-wrap:wrap;margin:1rem 0;} .replay-import small {display:block;margin-top:2rem;color:#bba99b;} .replay-import [role=alert] {color:#ff9da8;}

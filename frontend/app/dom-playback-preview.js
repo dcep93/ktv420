@@ -1,3 +1,4 @@
+import {loadPerformance,savePerformance} from './src/features/local/performanceFiles.ts';
 import hookUrl from '../../extension/src/page/spotifyHooks.js?url';
 import workletUrl from '../../extension/src/page/pcmWorklet.js?url';
 import { createListeningController } from '../../extension/src/content/listening.js';
@@ -33,7 +34,7 @@ document.querySelector('[data-testid="control-button-skip-back"]').onclick=()=>a
 seek.onchange=()=>{audio.currentTime=Number(seek.value)/1000;};volume.onchange=()=>{audio.volume=Number(volume.value);};
 audio.onended=()=>select(index+1);
 setInterval(()=>{play.textContent=audio.paused?'Play':'Pause';play.setAttribute('aria-label',play.textContent);seek.value=String(audio.currentTime*1000);seek.setAttribute('aria-valuetext',`0:${String(Math.floor(audio.currentTime)).padStart(2,'0')}/0:08`);},50);
-const post=()=>{frame.contentWindow.postMessage({source:'ktv420-parent',version:2,type:'state',tracks:metadata,active:!!listening?.capturing,starting:false,supported:true,error:'',notice:'',listening,captureProgress:listening?.captureProgress||null},location.origin);};
+const post=()=>{frame.contentWindow.postMessage({source:'ktv420-parent',version:2,type:'state',spotifyPath:`playlist/${ids[0]}`,tracks:metadata,active:!!listening?.capturing,starting:false,supported:true,error:'',notice:'',listening,captureProgress:listening?.captureProgress||null},location.origin);};
 const controller=createListeningController({bridge,emit:state=>{listening=state;post();},ensurePlayer:()=>{},getRunner:()=>null});
 window.addEventListener('message',event=>{if(event.source!==frame.contentWindow||event.origin!==location.origin)return;const d=event.data;if(d?.source!=='ktv420-overlay')return;if(d.type==='listening-heartbeat'&&!suppressHeartbeat)controller.heartbeat();if(d.type==='transport')void controller.command(d.command);if(d.type==='ready')post();});
 document.querySelector('#seed').onclick=async()=>{for(const i of [0,2]){const id=`spotify-${ids[i]}`;const track={id,title:`DOM song ${i+1}`,artist:'Test artist',source:'spotify',createdAt:Date.now(),status:'ready',sampleRate:44100,frames:44100*8,bytes:blobs[i].size*5,metadata:metadata[i]};await saveInput(track,blobs[i]);await transaction(['tracks','audio'],'readwrite',tx=>{tx.objectStore('tracks').put(track);for(const stem of ['drums','bass','vocals','other'])tx.objectStore('audio').put({key:`${id}/${stem}.wav`,trackId:id,name:`${stem}.wav`,blob:blobs[i]});});}report.textContent='Saved stems prepared for songs 1 and 3.';};
@@ -78,3 +79,58 @@ document.querySelector('#range-test').onclick = () => {
   input.step = '.1'; const restored = input.value;
   document.querySelector('#range-result').textContent = JSON.stringify({stepped, exact, restored});
 };
+
+
+// Exercise the shipped React recorder, broker and replay coordinator with synthetic audio.
+const tracklist=document.createElement('div');tracklist.dataset.testid='playlist-tracklist';
+for(const [i,item] of metadata.entries()) {
+ const row=document.createElement('div');row.dataset.testid='tracklist-row';
+ const anchor=document.createElement('a');anchor.href=`/track/${item.trackId}`;anchor.textContent=item.trackName;
+ row.append(anchor);row.ondblclick=()=>select(i);tracklist.append(row);
+}
+document.body.append(tracklist);
+document.querySelector('#record-replay-suite').onclick=async()=>{try{
+ results.length=0;
+ await document.querySelector('#seed').onclick();select(0);await sleep(2800);
+ const playerWindow=()=>frame.contentDocument.querySelector('iframe').contentWindow;
+ const playerDoc=()=>playerWindow().document;
+ const button=label=>playerDoc().querySelector(`button[aria-label="${label}"]`);
+ const textButton=text=>[...playerDoc().querySelectorAll('button')].find(b=>b.textContent===text);
+ await until(()=>button('Pause')&&!button('Pause').disabled,'mixer not ready',12000);
+ button('Pause').click();await until(()=>button('Start recording')&&!button('Start recording').disabled,'record unavailable');
+ // Avoid producing fixture downloads on the user's computer.
+ playerWindow().HTMLAnchorElement.prototype.click=function(){};
+ await savePerformance('last',null);await savePerformance('draft',null);
+ button('Start recording').click();await until(()=>listening?.playing,'record did not start Spotify');
+ await sleep(300);
+ const volumeInput=playerDoc().querySelector('.player-track-row input[type="range"][max="2"]');
+ if(!volumeInput)throw Error('mixer volume not found');
+ const setter=Object.getOwnPropertyDescriptor(playerWindow().HTMLInputElement.prototype,'value').set;
+ for(const value of [.9,.7,.5]) {setter.call(volumeInput,String(value));volumeInput.dispatchEvent(new (playerWindow().Event)('input',{bubbles:true}));await sleep(70);}
+ await controller.command({action:'pause'});await sleep(350);
+ await controller.command({action:'seek',trackId:ids[0],position:1});await controller.command({action:'play'});await sleep(350);
+ select(2);await until(()=>playerDoc().querySelector('h3')?.textContent==='DOM song 3' && button('Stop and save recording')&&!button('Stop and save recording').disabled,'recording did not follow next song');
+ await sleep(1800);
+ button('Stop and save recording').click();await sleep(500);
+ const recording=await loadPerformance('last');if(!recording)throw Error('recording did not save');
+ assert(recording.version===2&&recording.spotifyPath===`playlist/${ids[0]}`,'record includes versioned Spotify context');
+ const values=recording.events.filter(e=>e.type==='mix').flatMap(e=>e.snapshot.stems.map(s=>s.volume));
+ assert([.9,.7,.5].every(v=>values.includes(v)),'continuous fader samples retained');
+ assert(recording.events.some(e=>e.type==='pause')&&recording.events.filter(e=>e.type==='play').length>=2,'remote pause and resume recorded');
+ assert(recording.events.some(e=>e.type==='seek'),'remote seek recorded');
+ assert(recording.tracks.length===2 && recording.events.filter(e=>e.type==='track').length===2,'recording spans songs without ending');
+ frame.contentWindow.postMessage({source:'ktv420-parent',version:2,type:'replay',recording},location.origin);
+ await until(()=>textButton('Play recording')&&!textButton('Play recording').disabled,'replay did not become ready');
+ textButton('Play recording').click();
+ await until(()=>textButton('Stop replay'),'replay did not start');
+ await until(()=>textButton('Pause recording')&&!textButton('Pause recording').disabled && listening?.playing,'replay did not begin playing');
+ textButton('Pause recording').click();await sleep(500);
+ assert(audio.paused,'user can pause the entire replay');
+ textButton('Resume recording').click();
+ await until(()=>textButton('Play recording')&&!textButton('Stop replay'),'replay did not finish',20000);
+ const alert=playerDoc().querySelector('[role="alert"]');
+ assert(!alert,'replay completes without synchronization errors: '+(alert?.textContent||''));
+ assert((await bridge.command('listening-state')).monitorGain===0,'Spotify remains silent during replay');
+ assert(audio.paused,'recording stop pauses Spotify companion');
+ report.textContent=JSON.stringify({ok:true,results,eventTypes:recording.events.map(e=>e.type)},null,2);
+ }catch(error){report.textContent=JSON.stringify({ok:false,error:String(error),results},null,2);audio.pause();}};

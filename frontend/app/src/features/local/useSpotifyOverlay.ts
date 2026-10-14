@@ -1,10 +1,11 @@
+import { parseRecording, spotifyContext, type PerformanceRecording } from './recording';
 import { parseListeningState, type ListeningState, type TransportCommand } from './listeningProtocol';
 import { useEffect, useState } from 'react';
 import { brokerOrigin } from './libraryClient';
 
 export type SpotifyTrack = { trackId: string; trackName: string; trackArtist: string; trackArtworkSrc: string; rowIndex: number };
-type SpotifyState = { listening: ListeningState | null; tracks: SpotifyTrack[]; active: boolean; starting: boolean; supported: boolean; notice: string; error: string; captureProgress: { trackId: string; fraction: number | null } | null };
-const initial: SpotifyState = { listening: null, tracks: [], active: false, starting: false, supported: false, notice: '', error: '', captureProgress: null };
+type SpotifyState = { spotifyPath: string; listening: ListeningState | null; tracks: SpotifyTrack[]; active: boolean; starting: boolean; supported: boolean; notice: string; error: string; captureProgress: { trackId: string; fraction: number | null } | null };
+const initial: SpotifyState = { spotifyPath: '', listening: null, tracks: [], active: false, starting: false, supported: false, notice: '', error: '', captureProgress: null };
 const embedded = window.parent !== window;
 // The extension broker authenticates Spotify and relays only overlay controls.
 const parentOrigin = embedded ? brokerOrigin() : '';
@@ -13,6 +14,7 @@ function send(type: string, command?: TransportCommand) {
 }
 export function useSpotifyOverlay() {
   const [state, setState] = useState(initial);
+  const [replay,setReplay] = useState<PerformanceRecording | null>(null);
   useEffect(() => {
     if (!embedded) return;
     const receive = (event: MessageEvent) => {
@@ -20,6 +22,11 @@ export function useSpotifyOverlay() {
       if (event.data?.source === 'ktv420-broker' && event.data.type === 'hello') {
         if (event.data.version !== 2) setState(previous => ({ ...previous, error: 'Update the ktv420 extension to use this player.' }));
         else send('ready');
+        return;
+      }
+      if (event.data?.source === 'ktv420-parent' && event.data.version === 2 && event.data.type === 'replay') {
+        if(event.data.recording===null) {setReplay(null);return;}
+        try { const next = parseRecording(event.data.recording); setReplay(previous => previous?.createdAt === next.createdAt && previous?.name === next.name ? previous : next); } catch { /* broker reports malformed recordings */ }
         return;
       }
       if (event.data?.source !== 'ktv420-parent' || event.data.type !== 'state' || event.data.version !== 2) return;
@@ -33,7 +40,7 @@ export function useSpotifyOverlay() {
       const captureProgress = data.active === true && capture && typeof capture.trackId === 'string' && /^[A-Za-z0-9]{1,100}$/.test(capture.trackId) &&
         (capture.fraction === null || (typeof capture.fraction === 'number' && Number.isFinite(capture.fraction) && capture.fraction >= 0 && capture.fraction <= 1))
         ? { trackId: capture.trackId, fraction: capture.fraction } : null;
-      setState({ listening: parseListeningState(data.listening), tracks, active: data.active === true, starting: data.starting === true, supported: data.supported === true, captureProgress,
+      setState({ spotifyPath: spotifyContext(data.spotifyPath) ? data.spotifyPath : '', listening: parseListeningState(data.listening), tracks, active: data.active === true, starting: data.starting === true, supported: data.supported === true, captureProgress,
         notice: typeof data.notice === 'string' ? data.notice : '', error: typeof data.error === 'string' ? data.error : '' });
     };
     window.addEventListener('message', receive); send('ready');
@@ -41,7 +48,7 @@ export function useSpotifyOverlay() {
     send('listening-heartbeat');
     return () => { clearInterval(heartbeat); window.removeEventListener('message', receive); };
   }, []);
-  return { ...state, embedded, transport: sendTransport, toggleCapture: () => send('toggle-capture'), close: () => send('close') };
+  return { ...state, replay, embedded, transport: sendTransport, dismissReplay: () => send('dismiss-replay'), toggleCapture: () => send('toggle-capture'), close: () => send('close') };
 }
 
 const sendTransport = (command: TransportCommand) => send('transport', command);

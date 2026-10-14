@@ -1,3 +1,4 @@
+import type { MixerControl, MixerSnapshot } from '../../local/recording';
 export type PlaybackFile = {
   name: string;
   path: string;
@@ -13,6 +14,7 @@ export type PlaybackRecord = {
 export type CachedTrackFile = PlaybackFile;
 
 export type RecordingEventType =
+  | "mixer_snapshot"
   | "record_start_snapshot"
   | "track_started"
   | "record_stop"
@@ -37,17 +39,9 @@ export type RecordingEvent = {
   payload?: RecordingEventPayload;
 };
 
-export type PlaybackRecording = {
-  version: 1;
-  name: string;
-  createdAt: string;
-  trackIds: string[];
-  events: RecordingEvent[];
-};
-
 export type RecordingStartRequest = {
   trackTimeSeconds: number;
-  snapshotPayload?: RecordingEventPayload;
+  snapshot: MixerSnapshot;
 };
 
 export type VisualizerType =
@@ -77,8 +71,10 @@ export type VisualizerType =
   | "delay-pedal";
 
 export type PlayerProps = {
+  replaying?: boolean;
+  onControls?: (control: MixerControl | null) => void;
   masterVolume?: number;
-  transport?: { position: number; playing: boolean; generation: number; observedAt: number };
+  transport?: { trackId?: string; position: number; playing: boolean; generation: number; observedAt: number };
   onTransportCommand?: (command: { action: 'play' | 'pause' | 'seek'; position?: number }) => void;
   onPlaybackError?: (message: string) => void;
   record: PlaybackRecord;

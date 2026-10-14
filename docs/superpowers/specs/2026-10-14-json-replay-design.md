@@ -1,0 +1,11 @@
+# JSON recording and replay
+
+Approved with yesi. A fixed /replay link accepts a versioned JSON performance; no audio or mix instructions are uploaded. Import persists locally across installation/refresh. A restricted external-message handoff stores a per-tab recording, opens its Spotify playlist/album, and opens the overlay after content initialization. Unsupported extension versions receive update instructions.
+
+The overlay checks the exact required track IDs. Missing captures use the existing capture page and selected-track batch capture, with monitoring initially zero. Separation is automatic and the replay action appears only when all required stems exist. Missing/unavailable playlist entries are explicit errors, never silently substituted. Refresh restores the pending recording, not autoplay.
+
+Version 2 recordings include a Spotify context, required tracks, complete starting mixer snapshots, ordered monotonic performance timestamps and Spotify-relative song positions. Continuous input events are retained. Track changes preserve recording and add snapshots once the next player is ready. Record start/stop go through Spotify DOM transport when connected. Legacy v1 files cannot faithfully recover missing timing/context and are rejected with a clear rerecord instruction.
+
+Replay has a separate clock, preserves recorded pauses/seeks/fades/effects/visualizers and loads one song at a time. Song-loading time pauses its clock. Spotify is a muted DOM-controlled companion; remote pause/resume affects replay, while an unexpected song change ends replay rather than combining performances. Recipient listening volume is independent of recorded stem levels. No Spotify Connect API. One click starts prepared playback; explicit failures pause rather than silently drifting. Browser timers impose scheduling granularity; do not promise bit-identical audio on independently captured/separated inputs.
+
+Validation covers schema bounds, malformed files, timeline ordering/backward seeks/pauses, recorder automation, persistent extension handoff and exact missing-track selection. Existing tests, lint/build, packaged extension and hosted routing must pass. Real Spotify and Chrome Web Store installation require user validation before declaring end-to-end proven. Preserve installed extension path. Do not push until work is complete.
