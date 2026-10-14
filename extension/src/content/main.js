@@ -1,8 +1,10 @@
+import { createCaptureTitle } from './captureTitle.js';
 import { createListeningController } from './listening.js';
 import { createPageBridge } from "./pageBridge.js";
 import { mountButton } from "./ui.js";
 
 const bridge = createPageBridge();
+const captureTitle = createCaptureTitle();
 bridge.inject().catch((error) => {
   console.warn("[ktv420] Failed to inject page hooks early", error);
 });
@@ -16,6 +18,7 @@ async function getOrchestrator() {
     orchestratorPromise = import("./orchestrator.js").then(({ CaptureOrchestrator }) => {
       orchestrator = new CaptureOrchestrator({ bridge });
       orchestrator.addEventListener("activechange", () => ui.refresh());
+      orchestrator.addEventListener("captureoverallprogress", event => captureTitle.set(event.detail));
       orchestrator.addEventListener("captureprogress", (event) => ui.notifyCaptureProgress(event.detail));
       orchestrator.addEventListener("trackstored", (event) => {
         const detail = event.detail || {};
@@ -55,8 +58,11 @@ const ui = mountButton({
   }
 });
 
-listening = createListeningController({ bridge, emit: state => ui.notifyListening(state), ensurePlayer: () => ui.prepare(), getRunner: () => orchestrator });
-window.addEventListener('pagehide', () => listening?.dispose(), { once: true });
+listening = createListeningController({ bridge, emit: state => {
+  ui.notifyListening(state);
+  if (!orchestrator?.isActive()) captureTitle.set(state.overallCaptureFraction);
+}, ensurePlayer: () => ui.prepare(), getRunner: () => orchestrator, getTrackIds: () => ui.getTrackIds() });
+window.addEventListener('pagehide', () => { listening?.dispose(); captureTitle.dispose(); }, { once: true });
 
 async function loadSpotifyPlaylistTracks() {
   const playlistUri = currentSpotifyPlaylistUri();

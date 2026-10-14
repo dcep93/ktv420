@@ -1,7 +1,7 @@
 import { readTransportDom, commandTransport } from './transport.js';
 import { sendLocalMessage, writeTrackArtifact } from './storage.js';
 
-export function createListeningController({ bridge, emit, ensurePlayer, getRunner }) {
+export function createListeningController({ bridge, emit, ensurePlayer, getRunner, getTrackIds = () => [] }) {
   let busy = false, disposed = false, owner = false, lastLease = 0, catalogAt = 0;
   let catalog = new Map(), recording = null, last = null, generation = 0, lastSource = '';
   let volume = 0.7, volumeRevision = -1, output = 'muted', error = '', armed = false;
@@ -96,7 +96,12 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       await policy(output === 'capture' && silentGeneration === generation ? volume : 0);
       last = { ...dom, observedAt: now };
       lastSource = media?.source || '';
-      emit({ ...dom, generation, position: local ? media.currentTime : dom.position, observedAt: Date.now(),
+      const playlist = [...new Set(getTrackIds())];
+      const scope = playlist.includes(dom.trackId) ? playlist : [dom.trackId];
+      const captured = scope.filter(id => catalog.has(id)).length;
+      const partial = recording?.complete && !catalog.has(dom.trackId) && dom.duration > 0 ? Math.min(.99, dom.position / dom.duration) : 0;
+      const overallCaptureFraction = recording && scope.length ? (captured + partial) / scope.length : null;
+      emit({ ...dom, overallCaptureFraction, generation, position: local ? media.currentTime : dom.position, observedAt: Date.now(),
         playing: playing && connected, local: owner && local, output, volume, error,
         capability: 1, capturing: !!recording || !!batch,
         captureProgress: recording ? { trackId: recording.trackId, fraction: dom.duration > 0 ? Math.min(.99, dom.position / dom.duration) : null } : null,

@@ -103,7 +103,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
   window.addEventListener('pagehide', () => {
     clearInterval(timer); window.removeEventListener('message', handleMessage); chrome.runtime.onMessage.removeListener(toolbar);
   }, { once: true });
-  return { refresh, prepare,
+  return { refresh, prepare, getTrackIds: () => tracks.map(track => track.trackId),
     notifyListening(state) { listening = state; post(); },
     notifyCaptureProgress(progress) { captureProgress = progress; post(); },
     async notifyTrackCaptured(_id, metadata) { notice = `${metadata?.trackName || 'Track'} captured. Local separation is queued automatically.`; post(); },

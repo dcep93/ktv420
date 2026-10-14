@@ -1,3 +1,4 @@
+import { CaptureRunProgress } from "./captureTitle.js";
 import { STORAGE_VERSION } from "./constants.js";
 import {
   clickSkipForward,
@@ -26,6 +27,7 @@ export class CaptureOrchestrator extends EventTarget {
     this.stopRequested = false;
     this.captureProgress = null;
     this.lastProgressAt = -Infinity;
+    this.overallProgress = new CaptureRunProgress(fraction => this.dispatchEvent(new CustomEvent("captureoverallprogress", { detail: fraction })));
   }
 
   isActive() {
@@ -41,10 +43,11 @@ export class CaptureOrchestrator extends EventTarget {
     await this.run(options);
   }
 
-  handoff() { if (this.active) { this.stopRequested = true; this.handingOff = true; this.clearCaptureProgress(); } }
+  handoff() { if (this.active) { this.stopRequested = true; this.handingOff = true; this.clearCaptureProgress(); this.overallProgress.reset(); } }
 
   async requestStop() {
     this.stopRequested = true;
+    this.overallProgress.reset();
     this.clearCaptureProgress();
     pausePlaybackCleanly();
   }
@@ -85,6 +88,8 @@ export class CaptureOrchestrator extends EventTarget {
 
       markTiming(runTimingTrace, "orchestrator_preflight_start");
       const queue = await this.preflightQueue(debug, trackIds, trackSnapshot);
+      this.throwIfStopped();
+      this.overallProgress.begin(queue);
       markTiming(runTimingTrace, "orchestrator_preflight_end", {
         queueCount: queue.length,
         cachedCount: queue.filter((item) => item.cached).length
@@ -234,6 +239,7 @@ export class CaptureOrchestrator extends EventTarget {
       console.log("[ktv420] Capture run failed", report);
       throw error;
     } finally {
+      this.overallProgress.reset();
       this.clearCaptureProgress();
       await this.bridge.command("capture-abort").catch(() => {});
       this.active = false;
@@ -310,6 +316,7 @@ export class CaptureOrchestrator extends EventTarget {
   }
 
   dispatchTrackStored(trackId, metadata) {
+    if (!this.stopRequested) this.overallProgress.update(trackId, 1);
     if (this.captureProgress?.trackId === trackId) this.clearCaptureProgress();
     this.dispatchEvent(
       new CustomEvent("trackstored", {
@@ -342,6 +349,7 @@ export class CaptureOrchestrator extends EventTarget {
     const previous = this.captureProgress;
     if (previous?.trackId === item.trackId &&
       (previous.fraction === fraction || now - this.lastProgressAt < PROGRESS_INTERVAL_MS)) return;
+    this.overallProgress.update(item.trackId, fraction);
     this.captureProgress = { trackId: item.trackId, fraction };
     this.lastProgressAt = now;
     this.dispatchEvent(new CustomEvent("captureprogress", { detail: this.captureProgress }));
