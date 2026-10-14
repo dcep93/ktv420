@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-export type SpotifyTrack = { trackId: string; trackName: string; trackArtist: string; rowIndex: number };
+export type SpotifyTrack = { trackId: string; trackName: string; trackArtist: string; trackArtworkSrc: string; rowIndex: number };
 type SpotifyState = { tracks: SpotifyTrack[]; active: boolean; starting: boolean; supported: boolean; notice: string; error: string };
 const initial: SpotifyState = { tracks: [], active: false, starting: false, supported: false, notice: '', error: '' };
 const embedded = window.parent !== window;
@@ -19,7 +19,8 @@ export function useSpotifyOverlay() {
       const tracks: SpotifyTrack[] = Array.isArray(data.tracks) ? data.tracks.slice(0, 10000)
         .filter((track: SpotifyTrack) => typeof track?.trackId === 'string' && /^[A-Za-z0-9]{1,100}$/.test(track.trackId) && typeof track.trackName === 'string')
         .map((track: SpotifyTrack, rowIndex: number) => ({ trackId: track.trackId, trackName: track.trackName.slice(0, 500),
-          trackArtist: typeof track.trackArtist === 'string' ? track.trackArtist.slice(0, 500) : '', rowIndex })) : [];
+          trackArtist: typeof track.trackArtist === 'string' ? track.trackArtist.slice(0, 500) : '',
+          trackArtworkSrc: typeof track.trackArtworkSrc === 'string' && /^https:\/\/(?:i|mosaic)\.scdn\.co\//.test(track.trackArtworkSrc) ? track.trackArtworkSrc : '', rowIndex })) : [];
       setState({ tracks, active: data.active === true, starting: data.starting === true, supported: data.supported === true,
         notice: typeof data.notice === 'string' ? data.notice : '', error: typeof data.error === 'string' ? data.error : '' });
     };

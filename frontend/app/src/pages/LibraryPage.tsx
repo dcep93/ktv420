@@ -16,7 +16,7 @@ export default function LibraryPage() {
   const [tracks, setTracks] = useState<LocalTrack[]>([]);
   const [selected, setSelected] = useState('');
   const [record, setRecord] = useState<PlaybackRecord | null>(null);
-  const [search, setSearch] = useState('');
+  const [viewMode, setViewMode] = useState<'tracks' | 'settings' | 'player'>('tracks');
   const [error, setError] = useState('');
   const spotify = useSpotifyOverlay();
   const [autoProcessing, setAutoProcessing] = useState(() => localStorage.getItem('ktv420-auto-processing') !== 'paused');
@@ -139,46 +139,82 @@ export default function LibraryPage() {
   const displayTracks: (Omit<LocalTrack, 'status'> & { status: LocalTrack['status'] | 'missing' })[] = spotify.embedded
     ? spotify.tracks.map(item => tracks.find(track => track.id === `spotify-${item.trackId}`) || {
       id: `spotify-${item.trackId}`, title: item.trackName, artist: item.trackArtist, createdAt: 0,
-      status: 'missing', source: 'spotify', bytes: 0, frames: 0, sampleRate: 44100,
+      status: 'missing', source: 'spotify', bytes: 0, frames: 0, sampleRate: 44100, metadata: { trackArtworkSrc: item.trackArtworkSrc },
     }) : playbackTracks;
-  const visible = displayTracks.filter(track => `${track.title} ${track.artist}`.toLowerCase().includes(search.toLowerCase()));
-  return <main className="local-app">
-    <header className="library-header"><div><p className="eyebrow">ALL LOCAL · FOUR STEMS · YOUR MIX</p><h1>ktv420<span className="accent">.</span></h1><p>Capture Spotify as it plays. Listen and remix right here.</p></div>
-      <div><a href="https://ktv420.web.app" target="_blank" rel="noreferrer">Getting started ↗</a>{spotify.embedded && <button onClick={spotify.close} style={{ marginLeft: 16 }}>Back to Spotify</button>}</div></header>
-    <section className="library-tools" aria-label="Spotify capture controls">
-      {spotify.embedded ? <button className="primary" disabled={spotify.starting || (!spotify.active && (!spotify.supported || !spotify.tracks.length))}
-        onClick={spotify.toggleCapture}>{spotify.starting ? 'Starting…' : spotify.active ? 'Stop capture' : 'Capture tracks'}</button>
-        : <a href="https://open.spotify.com/">Open Spotify to capture a playlist or album ↗</a>}
-      <label>Processing <select value={backend} disabled={!!active} onChange={event => setBackend(event.target.value as 'auto' | 'wasm')}><option value="auto">GPU preferred</option><option value="wasm">CPU compatibility</option></select></label>
-      <button onClick={() => setProcessingEnabled(!autoProcessing)}>{autoProcessing ? 'Pause separation' : 'Resume separation'}</button><span className="muted">{autoProcessing ? 'Captured songs separate automatically' : 'Separation paused; captures stay queued'}</span>
-    </section>
-    <div className="local-facts"><span>{playbackTracks.length} captured tracks · {size(playbackTracks.reduce((total,track) => total+track.bytes,0))}</span><span>{modelCached ? 'Model saved for offline use' : 'First separation downloads a 181 MB model'}</span><span>Audio never uploaded</span></div>
-    {spotify.embedded && <p className="muted">{spotify.active ? 'Capturing Spotify in real time. Do not seek or change tracks.' : spotify.supported ? 'Capture plays this playlist or album in order and skips songs already captured.' : 'Open a Spotify playlist or album to begin.'}</p>}
-    {spotify.notice && <p role="status">{spotify.notice}</p>}
-    {spotify.error && <div className="notice error" role="alert">{spotify.error}</div>}
-    {error && <div className="notice error" role="alert">{error}<button onClick={() => setError('')} aria-label="Dismiss error">×</button></div>}
-    {active && <section className="notice processing" role="status"><strong>{tracks.find(track => track.id === active)?.title}</strong><span>{progress?.message || 'Preparing local audio…'}</span><progress max={1} value={progress?.fraction || 0} aria-label="Separation progress" /><button onClick={() => setProcessingEnabled(false)}>Pause separation</button><small>Keep Spotify open. You can hide this overlay while processing continues.</small></section>}
-    <div className="library-layout"><section className="track-library" aria-label="Tracks"><label className="search-label">Spotify tracks<input type="search" placeholder="Search tracks or artists" value={search} onChange={event => setSearch(event.target.value)} /></label>
-      {!displayTracks.length && <div className="empty-library"><h2>Start on Spotify.</h2><p>Open a playlist or album, click ktv420 and choose Capture tracks. Stems appear here automatically as each song finishes.</p><p>Float32 audio uses about 424 MB for a four-minute original plus four stems.</p></div>}
-      {visible.map(track => <article className={`library-track ${selected === track.id ? 'selected' : ''}`} key={track.id}>
-        <button className="track-select" disabled={track.status === 'missing' || (recording && selected !== track.id)} onClick={() => { if (selected !== track.id) { loadedRevision.current = ''; setRecord(null); setSelected(track.id); setAutoPlay(false); } }}><strong>{track.title}</strong><span>{track.artist || (track.source === 'spotify' ? 'Spotify capture' : 'Local file')}</span></button>
-        <div className="track-facts"><span className={`status ${track.status}`}>{track.status === 'missing' ? 'Not captured' : track.status === 'captured' ? 'Queued for separation' : track.status === 'processing' && active !== track.id ? 'Processing / awaiting resume' : track.status}</span>{track.status !== 'missing' && <span>{Math.floor(track.frames/track.sampleRate/60)}:{String(Math.floor(track.frames/track.sampleRate)%60).padStart(2,'0')} · {size(track.bytes)}</span>}</div>
-        {track.error && <p className="track-error">{track.error}</p>}
-        <div className="track-actions">{track.status === 'error' && <button disabled={!!active} onClick={() => void processTracks([track.id])}>Retry separation</button>}
-          {track.status !== 'missing' && (confirmDelete === track.id ? <><span>Delete local audio?</span><button disabled={!!active || recording} onClick={() => void remove(track.id)}>Delete</button><button onClick={() => setConfirmDelete('')}>Keep</button></> : <button disabled={!!active || recording} onClick={() => setConfirmDelete(track.id)}>Remove</button>)}</div>
-      </article>)}
-      {displayTracks.length > 0 && !visible.length && <p>No matching tracks.</p>}
-      <details className="storage-details"><summary>Local storage</summary><p>Stored in this Chrome profile. Uninstalling the extension removes its library. Export files you want to keep.</p><button disabled={!!active} onClick={() => void clearModelCache().then(refresh).catch(reason => setError(errorText(reason)))}>Remove downloaded model</button></details>
-    </section><section className="listening-room" aria-label="Player">
-      {activeTrack && record && record.md5 === selected ? <><div className="now-playing"><p className="eyebrow">{activeTrack.status === 'ready' ? 'READY TO REMIX' : 'ORIGINAL AUDIO'}</p><h2>{activeTrack.title}</h2><p>{activeTrack.artist}</p></div>
-        <Player record={record} title={activeTrack.title}
-          hasPreviousTrack={!recording && selectedIndex > 0} hasNextTrack={!recording && selectedIndex >= 0 && selectedIndex < playbackTracks.length - 1}
-          onPreviousTrack={() => navigateTrack(-1)} onNextTrack={() => navigateTrack(1)} onTrackEnd={() => navigateTrack(1)}
-          autoPlayOnReady={autoPlay} onAutoPlayOnReadyHandled={() => setAutoPlay(false)} trackMetadata={activeTrack.metadata} isRecording={recording} onStartRecording={startRecording} onStopRecording={stopRecording} onRecordingEvent={recordEvent} onRegisterRecordingFlush={callback => { flush.current = callback; }} />
-        <div className="exports"><strong>Export WAV</strong>{record.files.map(file => <button key={file.path} onClick={() => downloadBlob(file.blob, `${activeTrack.title}-${file.name}`)}>{file.name.replace('.wav','')}</button>)}
-          {activeTrack.metadata?.decodedAt44100 === true && <button onClick={() => void getPlaybackRecord(selected).then(all => {const original=all.files.find(file => file.name==='source'); if(original) downloadBlob(original.blob,String(activeTrack.metadata?.originalName || 'source'));})}>Original source file</button>}</div>
-        {recording && <p className="muted">Recording mixer actions locally. Stop recording to export the action log as JSON.</p>}
-      </> : <div className="player-empty"><div className="stem-bars" aria-hidden="true"><i/><i/><i/><i/></div><h2>Four stems.<br/>Endless combinations.</h2><p>Select a track to listen, adjust its stems and explore the visualizers.</p></div>}
-    </section></div>
+  const close = useCallback(() => { setViewMode('tracks'); spotify.close(); }, [spotify]);
+  const canCapture = spotify.embedded && !spotify.starting && (spotify.active || (spotify.supported && spotify.tracks.length > 0));
+  useEffect(() => {
+    const keydown = (event: KeyboardEvent) => {
+      if (event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (event.key === 'Escape') { event.preventDefault(); close(); return; }
+      if (event.target instanceof HTMLElement && event.target.closest('input,textarea,select,button,[contenteditable="true"]')) return;
+      if (event.key === 'Enter' && viewMode === 'tracks' && canCapture) { event.preventDefault(); spotify.toggleCapture(); }
+    };
+    window.addEventListener('keydown', keydown);
+    return () => window.removeEventListener('keydown', keydown);
+  }, [close, spotify, viewMode, canCapture]);
+  const openTrack = (id: string) => {
+    if (recording && selected !== id) return;
+    if (selected !== id) { loadedRevision.current = ''; setRecord(null); setSelected(id); setAutoPlay(false); }
+    setViewMode('player');
+  };
+  return <main className="iframe-page" aria-label="ktv420 iframe controls">
+    <div className="iframe-actions">
+      <button type="button" className="iframe-close-button" aria-label="Close" title="Close" onClick={close}>❌</button>
+      <button type="button" className="iframe-logo-button" aria-label="Start or stop ktv420 capture"
+        title={spotify.active ? 'Stop capture' : 'Start capture'} aria-disabled={!canCapture} disabled={!canCapture}
+        aria-pressed={spotify.active} onClick={spotify.toggleCapture}><img alt="" src="./favicon.svg" /></button>
+      <button type="button" className="iframe-settings-button" aria-label="Toggle settings view" title="Settings"
+        aria-pressed={viewMode === 'settings'} onClick={() => setViewMode(viewMode === 'settings' ? 'tracks' : 'settings')}>⚙️</button>
+    </div>
+    {(error || spotify.error) && <p className="iframe-settings-error" role="alert">{error || spotify.error}</p>}
+    {viewMode === 'settings' && <section className="iframe-settings-view" aria-label="Settings view">
+      <section className="iframe-settings-source">
+        <header className="iframe-settings-source-header"><h2>Processing</h2><span>{modelCached ? 'Model cached' : 'Model: 181 MB'}</span></header>
+        <label>Device <select value={backend} disabled={!!active} onChange={event => setBackend(event.target.value as 'auto' | 'wasm')}>
+          <option value="auto">GPU preferred</option><option value="wasm">CPU compatibility</option>
+        </select></label>
+        <button onClick={() => setProcessingEnabled(!autoProcessing)}>{autoProcessing ? 'Pause separation' : 'Resume separation'}</button>
+        {active && <progress max={1} value={progress?.fraction || 0} aria-label="Separation progress" title={progress?.message} />}
+        <button disabled={!!active} onClick={() => void clearModelCache().then(refresh).catch(reason => setError(errorText(reason)))}>Remove cached model</button>
+      </section>
+      <section className="iframe-settings-source">
+        <header className="iframe-settings-source-header"><h2>Local audio</h2><span>{size(tracks.reduce((total, track) => total + track.bytes, 0))}</span></header>
+        <ol className="iframe-settings-list">{tracks.map(track => <li key={track.id}>
+          <div className="iframe-settings-row"><span className="iframe-settings-kind">♫</span><span className="iframe-settings-path">{track.title}</span>
+            <span className="iframe-settings-size">{size(track.bytes)}</span><span className="iframe-settings-row-actions">
+              {track.status === 'error' && <button className="iframe-settings-emoji-button" disabled={!!active} title="Retry separation" aria-label={`Retry ${track.title}`} onClick={() => void processTracks([track.id])}>↻</button>}
+              {confirmDelete === track.id ? <><button disabled={!!active || recording} onClick={() => void remove(track.id)}>Delete</button><button onClick={() => setConfirmDelete('')}>Cancel</button></> :
+                <button className="iframe-settings-emoji-button" disabled={!!active || recording} title="Delete audio" aria-label={`Delete ${track.title}`} onClick={() => setConfirmDelete(track.id)}>🗑️</button>}
+            </span></div>
+        </li>)}</ol>
+      </section>
+    </section>}
+    {viewMode === 'tracks' && <ol className="iframe-track-list" aria-label="Spotify page tracks">
+      {displayTracks.map((track, index) => {
+        const state = track.status === 'ready' ? 'complete' : track.status === 'error' ? 'broken' : track.status === 'missing' ? 'missing' : 'in-progress';
+        const label = track.status === 'ready' ? 'Ready' : track.status === 'error' ? 'Failed' : track.status === 'missing' ? 'Not captured' : track.status === 'processing' ? 'Separating' : 'Queued';
+        const artwork = typeof track.metadata?.trackArtworkSrc === 'string' ? track.metadata.trackArtworkSrc : '';
+        return <li className="iframe-track-row" key={`${track.id}-${index}`} role="button" tabIndex={track.status !== 'missing' ? 0 : -1}
+          aria-label={`${track.title} — ${label}`} aria-disabled={track.status === 'missing' || (recording && selected !== track.id)}
+          title={track.error || (active === track.id ? progress?.message : label)}
+          onClick={() => { if (track.status !== 'missing') openTrack(track.id); }}
+          onKeyDown={event => { if (track.status !== 'missing' && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); event.stopPropagation(); openTrack(track.id); } }}>
+          <span className="iframe-track-state" data-state={state} aria-label={label} />
+          {artwork && <img className="iframe-track-artwork" alt="" src={artwork} crossOrigin="anonymous" />}
+          <span className="iframe-track-copy"><span className="iframe-track-name">{track.title}</span><span className="iframe-track-artist">{track.artist}</span></span>
+        </li>;
+      })}
+    </ol>}
+    {activeTrack && record && record.md5 === selected && <section className="iframe-player-view" hidden={viewMode !== 'player'} aria-label="Player">
+      <button className="iframe-player-back" aria-label="Back to tracks" onClick={() => setViewMode('tracks')}>←</button>
+      <Player record={record} title={activeTrack.title}
+        hasPreviousTrack={!recording && selectedIndex > 0} hasNextTrack={!recording && selectedIndex >= 0 && selectedIndex < playbackTracks.length - 1}
+        onPreviousTrack={() => navigateTrack(-1)} onNextTrack={() => navigateTrack(1)} onTrackEnd={() => navigateTrack(1)}
+        autoPlayOnReady={autoPlay} onAutoPlayOnReadyHandled={() => setAutoPlay(false)} trackMetadata={activeTrack.metadata} isRecording={recording}
+        onStartRecording={startRecording} onStopRecording={stopRecording} onRecordingEvent={recordEvent} onRegisterRecordingFlush={callback => { flush.current = callback; }} />
+      <details className="iframe-player-exports"><summary>Export WAV</summary>{record.files.map(file => <button key={file.path}
+        onClick={() => downloadBlob(file.blob, `${activeTrack.title}-${file.name}`)}>{file.name.replace('.wav', '')}</button>)}</details>
+    </section>}
   </main>;
 }
