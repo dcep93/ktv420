@@ -74,19 +74,20 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       if (media && media.playbackRate !== 1) error = 'Use 1× playback speed for synchronized listening.';
       const playing = !!(owner && local && dom.trackId && dom.playing && !media.paused && !media.ended && media.playbackRate === 1);
       if (playing) { armed = true; ensurePlayer(); }
+      // Start the PCM tap while the player loads, so a cold iframe does not
+      // discard the beginning of a newly selected song. Monitoring still waits
+      // for the hosted player's explicit silence acknowledgment below.
+      if (playing && armed && !batch && !ready && !batchPending && now > ignoreUntil && !recording) {
+        const result = await bridge.command('capture-begin');
+        recording = { ...dom, complete: result.target.currentTime <= 0.35 && !catalog.has(dom.trackId) && !storing.has(dom.trackId) };
+      }
       const connected = now - frameHeartbeat < 2000;
       const previousOutput = output;
       output = 'muted';
       if (playing && armed && connected) {
         if (batch) output = 'capture';
         else if (ready) output = 'stems';
-        else if (!batchPending && now > ignoreUntil) {
-          if (!recording) {
-            const result = await bridge.command('capture-begin');
-            recording = { ...dom, complete: result.target.currentTime <= 0.35 && !catalog.has(dom.trackId) && !storing.has(dom.trackId) };
-          }
-          output = 'capture';
-        }
+        else if (recording && !batchPending && now > ignoreUntil) output = 'capture';
       }
       if (previousOutput !== output) generation++;
       const current = readTransportDom();

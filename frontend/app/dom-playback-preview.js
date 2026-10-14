@@ -8,7 +8,7 @@ import { encodeFloat32Wav, decodeWav } from './src/features/local/audio/wav.ts';
 if (!import.meta.env.DEV) throw new Error('Development only');
 localStorage.setItem('ktv420-auto-processing','paused');
 const ids=['1111111111111111111111','2222222222222222222222','3333333333333333333333'];
-let index=0, listening, sourceCounter=0;
+let index=0, listening, sourceCounter=0, suppressHeartbeat=false;
 const frame=document.querySelector('iframe'), report=document.querySelector('#report');
 const metadata=ids.map((trackId,i)=>({trackId,trackName:`DOM song ${i+1}`,trackArtist:'Test artist',trackArtworkSrc:'',rowIndex:i}));
 window.chrome={runtime:{getURL:path=>new URL(path.endsWith('spotifyHooks.js')?hookUrl:path.endsWith('pcmWorklet.js')?workletUrl:`/${path}`,location.origin).href,
@@ -32,10 +32,10 @@ document.querySelector('[data-testid="control-button-skip-forward"]').onclick=()
 document.querySelector('[data-testid="control-button-skip-back"]').onclick=()=>audio.currentTime>3?audio.currentTime=0:select(index-1);
 seek.onchange=()=>{audio.currentTime=Number(seek.value)/1000;};volume.onchange=()=>{audio.volume=Number(volume.value);};
 audio.onended=()=>select(index+1);
-setInterval(()=>{play.textContent=audio.paused?'Play':'Pause';play.setAttribute('aria-label',play.textContent);seek.value=String(audio.currentTime*1000);},50);
+setInterval(()=>{play.textContent=audio.paused?'Play':'Pause';play.setAttribute('aria-label',play.textContent);seek.value=String(audio.currentTime*1000);seek.setAttribute('aria-valuetext',`0:${String(Math.floor(audio.currentTime)).padStart(2,'0')}/0:08`);},50);
 const post=()=>{frame.contentWindow.postMessage({source:'ktv420-parent',version:2,type:'state',tracks:metadata,active:!!listening?.capturing,starting:false,supported:true,error:'',notice:'',listening,captureProgress:listening?.captureProgress||null},location.origin);};
 const controller=createListeningController({bridge,emit:state=>{listening=state;post();},ensurePlayer:()=>{},getRunner:()=>null});
-window.addEventListener('message',event=>{if(event.source!==frame.contentWindow||event.origin!==location.origin)return;const d=event.data;if(d?.source!=='ktv420-overlay')return;if(d.type==='listening-heartbeat')controller.heartbeat();if(d.type==='transport')void controller.command(d.command);if(d.type==='ready')post();});
+window.addEventListener('message',event=>{if(event.source!==frame.contentWindow||event.origin!==location.origin)return;const d=event.data;if(d?.source!=='ktv420-overlay')return;if(d.type==='listening-heartbeat'&&!suppressHeartbeat)controller.heartbeat();if(d.type==='transport')void controller.command(d.command);if(d.type==='ready')post();});
 document.querySelector('#seed').onclick=async()=>{for(const i of [0,2]){const id=`spotify-${ids[i]}`;const track={id,title:`DOM song ${i+1}`,artist:'Test artist',source:'spotify',createdAt:Date.now(),status:'ready',sampleRate:44100,frames:44100*8,bytes:blobs[i].size*5,metadata:metadata[i]};await saveInput(track,blobs[i]);await transaction(['tracks','audio'],'readwrite',tx=>{tx.objectStore('tracks').put(track);for(const stem of ['drums','bass','vocals','other'])tx.objectStore('audio').put({key:`${id}/${stem}.wav`,trackId:id,name:`${stem}.wav`,blob:blobs[i]});});}report.textContent='Saved stems prepared for songs 1 and 3.';};
 document.querySelector('#check').onclick=async()=>{const saved=await listTracks();let peak=null;try{const decoded=decodeWav(await(await getInput(`spotify-${ids[1]}`)).arrayBuffer());peak=Math.max(...decoded.left.slice(4410,8820).map(Math.abs));}catch{}report.textContent=JSON.stringify({saved:saved.map(t=>({id:t.id,status:t.status,frames:t.frames})),peak,listening},null,2);};
 document.querySelector('#snapshot').onclick=async()=>{report.textContent=JSON.stringify({listening,page:await bridge.command('listening-state'),sourceCounter},null,2);};
@@ -54,7 +54,11 @@ document.querySelector('#suite').onclick=async()=>{try{
  await controller.command({action:'pause'});await until(()=>!listening.playing,'pause not reflected');assert(audio.paused,'App pause controls Spotify DOM');
  await controller.command({action:'seek',position:3,trackId:ids[0]});assert(Math.abs(audio.currentTime-3)<.2,'App seek controls Spotify DOM');
  await controller.command({action:'play'});await until(()=>listening.playing,'resume not reflected');assert(!audio.paused,'App play resumes Spotify DOM');
- await controller.command({action:'next'});await until(()=>listening?.trackId===ids[1]&&listening.output==='capture','unsaved capture not selected');
+ suppressHeartbeat=true;await sleep(2200);
+ await controller.command({action:'next'});await until(()=>listening?.trackId===ids[1]&&listening.capturing,'cold player did not begin capture');
+ assert(listening.output==='muted','Cold player captures immediately but stays silent until ready');suppressHeartbeat=false;
+ await until(()=>listening?.trackId===ids[1]&&listening.output==='capture','unsaved capture not selected');
+ await controller.command({action:'volume',volume:.37});assert(Math.abs(audio.volume-.37)<.001,'Listening volume preserves precise values on Spotify stepped sliders');
  await controller.command({action:'volume',volume:0});await until(()=>listening.volume===0,'volume not set');assert((await bridge.command('listening-state')).monitorGain===0,'Zero listening volume silences capture monitoring');
  await sleep(400);audio.pause();await sleep(1800);assert(!listening.playing&&listening.output==='muted','Remote DOM pause holds capture without adding silence');await audio.play();
  await until(()=>listening.trackId===ids[2], 'song did not finish',12000);await sleep(1500);
@@ -66,3 +70,11 @@ document.querySelector('#suite').onclick=async()=>{try{
  audio.pause();audio.removeAttribute('src');audio.load();await until(()=>!listening.local,'local ownership not lost');assert(listening.output==='muted','Losing local media silences output');
  report.textContent=JSON.stringify({passed:true,results},null,2);
  }catch(error){audio.pause();report.textContent=JSON.stringify({passed:false,error:String(error),results,listening},null,2);}};
+
+document.querySelector('#range-test').onclick = () => {
+  const input = document.createElement('input'); input.type = 'range'; input.min = '0'; input.max = '1'; input.step = '.1';
+  input.value = '.37'; const stepped = input.value;
+  input.step = 'any'; input.value = '.37'; const exact = input.value;
+  input.step = '.1'; const restored = input.value;
+  document.querySelector('#range-result').textContent = JSON.stringify({stepped, exact, restored});
+};

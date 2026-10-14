@@ -33,6 +33,6 @@ Selected approach: a DOM controller for the existing Spotify tab, with local med
 
 ## Verification recorded during implementation
 
-The browser fixture at `frontend/app/dom-playback-preview.html` uses detached native audio, the actual PCM worklet, DOM adapter, coordinator, storage broker, and hosted player. It passes twelve assertions covering silent Spotify during stems, bidirectional play/pause/seek, volume independent of capture amplitude, complete paused/resumed capture, no pause padding, preservation of existing stems, partial-capture rejection, and loss of local media. Separate unit tests cover ownership expiry, bounded messages, and trusted origins/windows.
+The browser fixture at `frontend/app/dom-playback-preview.html` uses detached native audio, the actual PCM worklet, DOM adapter, coordinator, storage broker, and hosted player. It passes fourteen assertions covering silent Spotify during stems, bidirectional play/pause/seek, precise values on Spotify’s stepped sliders, cold-start capture before the iframe is ready, volume independent of capture amplitude, complete paused/resumed capture, no pause padding, preservation of existing stems, partial-capture rejection, and loss of local media. Separate unit tests cover ownership expiry, bounded messages, and trusted origins/windows.
 
 Playback speed remains 1×. A phone remote, actual device transfer, and shuffle/repeat require real-device validation; passing a DOM fixture is not evidence of those interactions.

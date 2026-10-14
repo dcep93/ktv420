@@ -3,6 +3,10 @@ import { collectTrackRows, extractTrackIdFromHref, dispatchSyntheticDoubleClick 
 const control = name => document.querySelector(`[data-testid="control-button-${name}"]`);
 const ranges = () => [...document.querySelectorAll('[data-testid="now-playing-bar"] input[type="range"]')];
 const slider = volume => ranges().find(e => volume ? Number(e.max) === 1 : Number(e.max) > 1);
+const time = value => {
+  const match = value?.match(/^(\d+):(\d{2})(?::(\d{2}))?/);
+  return match ? match[3] === undefined ? Number(match[1]) * 60 + Number(match[2]) : Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]) : null;
+};
 const text = selector => document.querySelector(selector)?.textContent?.trim() || '';
 export function readTransportDom() {
   const widget = document.querySelector('[data-testid="now-playing-widget"]');
@@ -21,7 +25,7 @@ export function readTransportDom() {
     trackId: candidates.size === 1 ? [...candidates][0] : '', title, artist,
     artwork: widget?.querySelector('img')?.src || '',
     playing: /pause/i.test(button?.getAttribute('aria-label') || ''),
-    position: seek ? Number(seek.value) / 1000 : 0, duration: seek ? Number(seek.max) / 1000 : 0,
+    position: seek ? time(seek.getAttribute('aria-valuetext')) ?? Number(seek.value) / 1000 : 0, duration: seek ? Number(seek.max) / 1000 : 0,
     volume: volume ? Number(volume.value) : null,
     available: !!button && !button.disabled && !!seek,
     canNext: !!control('skip-forward') && !control('skip-forward').disabled,
@@ -36,6 +40,9 @@ async function verify(predicate, message) {
 function setRange(input, value) {
   if (!input || input.disabled) throw new Error('Spotify slider is unavailable.');
   const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+  // Spotify's range step is for keyboard navigation; do not round precise seeks
+  // or volume requests to five seconds / ten percent.
+  input.step = 'any';
   setter.call(input, String(value));
   input.dispatchEvent(new Event('input', { bubbles: true }));
   input.dispatchEvent(new Event('change', { bubbles: true }));
