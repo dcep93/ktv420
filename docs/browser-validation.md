@@ -31,4 +31,8 @@ The user requested the original Spotify capture flow and in-Spotify overlay, wit
 
 Queue tests cover arrivals during processing, interrupted-track recovery, exclusion of file imports/completed/failed tracks, continuing after failure and pause behavior. The overlay retains its document when hidden. The packaged HTML is web-accessible only to Spotify; its parent message bridge checks origin and source. Chrome documents that embedded extension pages retain their extension storage partition: https://developer.chrome.com/docs/extensions/develop/concepts/storage-and-cookies .
 
-Cloud retirement remains pending an installed-extension test of real Spotify capture → local separation → playback. Synthetic tests do not satisfy that release gate.
+## Installed-extension confirmation — 2026-10-13
+
+The user confirmed that real Spotify capture → local separation → stem playback works in the installed Chrome extension. This satisfies the agreed cloud-retirement gate. The confirmation is a user-run functional check, separate from the synthetic numerical and timing measurements above; it does not establish performance or compatibility on other devices.
+
+The dedicated legacy cloud audio service and bucket were subsequently deleted, with new soft deletion disabled before removing storage. The post-deletion inventory showed neither resource. The repository's obsolete audio-cloud credential was removed and its one-time maintenance workflow disabled. The shared project's unrelated resources and the static installation website were preserved. No archive was created.

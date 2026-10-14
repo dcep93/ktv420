@@ -690,8 +690,7 @@ button:disabled {
   min-height: 0;
 }
 
-.settings-section[aria-label="OPFS"] .settings-list,
-.settings-section[aria-label="GCS entries"] .settings-list {
+.settings-section[aria-label="OPFS"] .settings-list {
   gap: 4px;
 }
 

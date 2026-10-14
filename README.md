@@ -39,4 +39,4 @@ Tests cover exact Float32 round trips, malformed audio, resampling, overlap seam
 
 CI builds the extension ZIP and publishes it beside the installation guide. It does not deploy any audio service.
 
-The old cloud audio resources remain deployed until the installed Spotify capture → local separation → playback flow is proven working. Do not run retirement merely because builds or synthetic tests pass.
+The installed Spotify capture → local separation → playback flow was confirmed working by the user on October 13, 2026. The legacy cloud audio service and storage have been deleted. Firebase Hosting serves only the installation guide and extension download; audio capture, separation, storage and playback run locally.
