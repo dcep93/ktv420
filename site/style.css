@@ -57,7 +57,7 @@ footer { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; margin-top: 1.25rem; 
 .diagram-arrow { fill: none; stroke: var(--ww-accent-amber); stroke-width: 1.5; marker-end: url(#arrow); }
 .diagram-two-way { marker-start: url(#arrow); }
 #arrow path { fill: var(--ww-accent-amber); }
-.architecture-caption { margin: 0.5rem 0 0; color: var(--ww-text-muted); font-size: 0.85rem; }
+.diagram-privacy { fill: var(--ww-text-soft); font-size: 13px; }
 
 @media (max-width: 60rem) {
   .page-layout { grid-template-columns: minmax(0, 1fr); max-width: 35rem; }
