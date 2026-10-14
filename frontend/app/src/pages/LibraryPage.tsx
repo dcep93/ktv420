@@ -280,7 +280,6 @@ export default function LibraryPage() {
       </section>
       <section className="iframe-settings-source">
         <header className="iframe-settings-source-header"><h2>Local audio</h2><span>{size(tracks.reduce((total, track) => total + track.bytes, 0))}</span></header>
-        <p className="iframe-settings-help">Saved songs and stems in this Chrome profile. Export anything you want to keep.</p>
         <div className="iframe-audio-cleanup">
           {confirmDeleteAll ? <>
             <span>Delete all saved songs and stems? This can’t be undone.</span>
