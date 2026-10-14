@@ -187,7 +187,7 @@ export type EffectNodes = {
 };
 
 type EffectParams = {
-  context: AudioContext;
+  context: BaseAudioContext;
   nodes: EffectNodes;
   effect: AudioEffectType;
   value: number;
@@ -212,7 +212,7 @@ const createSaturationCurve = (amount: number) => {
   return curve;
 };
 
-const createNeutralImpulse = (context: AudioContext) => {
+const createNeutralImpulse = (context: BaseAudioContext) => {
   const buffer = context.createBuffer(2, 1, context.sampleRate);
   buffer.getChannelData(0)[0] = 1;
   buffer.getChannelData(1)[0] = 1;
@@ -220,7 +220,7 @@ const createNeutralImpulse = (context: AudioContext) => {
 };
 
 const createReverbImpulse = (
-  context: AudioContext,
+  context: BaseAudioContext,
   duration: number,
   decay: number
 ) => {
@@ -274,7 +274,7 @@ const connectBaseRouting = (nodes: EffectNodes, usePhaserStages: boolean) => {
   }
 };
 
-export const createEffectNodes = (context: AudioContext): EffectNodes => {
+export const createEffectNodes = (context: BaseAudioContext): EffectNodes => {
   const filter = context.createBiquadFilter();
   const phaserStages = Array.from({ length: 4 }, () =>
     context.createBiquadFilter()

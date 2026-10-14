@@ -69,12 +69,13 @@ export class TempoEngine {
     this.clock.changeRate(tempo); this.tempo=tempo; this.pitch=pitch;
     if (!this.running) return;
     if (this.neutral) {
-      void this.node.schedule({ active:false }); this.gate(0,this.context.currentTime);
+      const update = this.node.schedule({ active:false }); this.gate(0,this.context.currentTime);
       this.node.disconnect();this.connected=false;this.startNative(position,this.context.currentTime);
+      return update;
     } else {
       if (wasNeutral) this.stopNative();
       this.connectProcessor();this.gate(1,this.context.currentTime);
-      void this.node.schedule({ output:this.context.currentTime,input:position,rate:tempo,semitones:pitch,active:true });
+      return this.node.schedule({ output:this.context.currentTime,input:position,rate:tempo,semitones:pitch,active:true });
     }
   }
   pause() {

@@ -1,3 +1,5 @@
+import { useReplayExport } from '../features/local/export/useReplayExport';
+import ReplayExportButton from './ReplayExportButton';
 import { loadPerformance, savePerformance } from '../features/local/performanceFiles';
 import { PerformanceClock, parseRecording, MAX_RECORDING_BYTES, validSnapshot, type PerformanceRecording, type MixerControl } from '../features/local/recording';
 import { useReplay } from '../features/local/useReplay';
@@ -19,6 +21,8 @@ import type { SeparationProgress } from '../features/local/inference/types';
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
 const size = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
 export default function LibraryPage() {
+  const mp3Export = useReplayExport();
+  const exportController = mp3Export.controller;
   const [tracks, setTracks] = useState<LocalTrack[]>([]);
   const [selected, setSelected] = useState('');
   const [record, setRecord] = useState<PlaybackRecord | null>(null);
@@ -98,9 +102,9 @@ export default function LibraryPage() {
   }, [refresh]);
   useEffect(() => () => { cancelled.current = true; separator.current?.dispose(); }, []);
   useEffect(() => {
-    const warn = (event: BeforeUnloadEvent) => { if (running.current || deleting.current || modelBusy.current || mix.current) { event.preventDefault(); event.returnValue = ''; } };
+    const warn = (event: BeforeUnloadEvent) => { if (running.current || deleting.current || modelBusy.current || exportController.current || mix.current) { event.preventDefault(); event.returnValue = ''; } };
     window.addEventListener('beforeunload', warn); return () => window.removeEventListener('beforeunload', warn);
-  }, []);
+  }, [exportController]);
   const selectedReady = activeTrack?.status === 'ready';
   const selectedCreatedAt = activeTrack?.createdAt;
   const loadedRevision = useRef('');
@@ -114,7 +118,7 @@ export default function LibraryPage() {
     return () => { disposed = true; };
   }, [selected, selectedReady, selectedCreatedAt, recording, transportCommand]);
   const processTracks = useCallback(async (ids: string[], automatic = false) => {
-    if (running.current || deleting.current || modelBusy.current) return;
+    if (running.current || deleting.current || modelBusy.current || exportController.current) return;
     running.current = true; cancelled.current = false; setError('');
     try {
       await withProcessingLock(async lock => {
@@ -139,12 +143,12 @@ export default function LibraryPage() {
       });
     } catch (reason) { setError(errorText(reason)); }
     finally { separator.current?.dispose(); separator.current = null; running.current = false; setActive(''); setProgress(null); await refresh(); }
-  }, [backend, refresh]);
+  }, [backend, refresh, exportController]);
   useEffect(() => {
     if (!autoProcessing) return;
     let disposed = false;
     const poll = async () => {
-      if (running.current || deleting.current || modelBusy.current || disposed) return;
+      if (running.current || deleting.current || modelBusy.current || exportController.current || disposed) return;
       try {
         const pending = await listTracks();
         if (!disposed && pending.some(track => track.source === 'spotify' && ['captured', 'processing'].includes(track.status))) {
@@ -154,7 +158,7 @@ export default function LibraryPage() {
     };
     void poll(); const timer = setInterval(() => { void poll(); }, 2500);
     return () => { disposed = true; clearInterval(timer); };
-  }, [autoProcessing, processTracks]);
+  }, [autoProcessing, processTracks, exportController]);
   const setProcessingEnabled = (enabled: boolean) => {
     if (!enabled) { cancelled.current = true; separator.current?.dispose(); }
     void saveProcessingEnabled(enabled).then(() => { observedProcessingPreference.current = enabled; setAutoProcessing(enabled); }).catch(reason => setError(errorText(reason)));
@@ -239,6 +243,7 @@ export default function LibraryPage() {
     if(listening?.playing) current.events.push({type:'play',at:recordingClock.current.seconds,trackId:id,position});
   }, [tracks,listening]);
   const startRecording = useCallback(async (request: RecordingStartRequest) => {
+    if(exportController.current) return false;
     if(!spotify.spotifyPath || !activeTrack) {setError(spotify.supported ? 'Update ktv420 to 6.2 or later, then reload Spotify to record.' : 'Open a Spotify playlist or album before recording.');return false;}
     const id=selected.replace(/^spotify-/,'');
     const position=request.trackTimeSeconds+captureOffset;
@@ -246,7 +251,7 @@ export default function LibraryPage() {
       tracks:[{id,title:activeTrack.title,duration:activeTrack.frames/activeTrack.sampleRate+captureOffset}],
       events:[{type:'track',at:0,trackId:id,position,snapshot:request.snapshot}]};
     recordingClock.current.reset();recordingClock.current.start();setRecording(true);setError('');return true;
-  }, [selected,spotify.spotifyPath,spotify.supported,activeTrack,captureOffset]);
+  }, [selected,spotify.spotifyPath,spotify.supported,activeTrack,captureOffset,exportController]);
   const stopRecording = useCallback(async (event: RecordingEvent) => {
     const current=mix.current;if(!current) return;
     const previous=current.events.at(-1)!;
@@ -291,13 +296,13 @@ export default function LibraryPage() {
   const displayTracks = spotify.replay ? required.map(item => allDisplayTracks.find(t => `spotify-${item.id}`===t.id) || tracks.find(t => `spotify-${item.id}`===t.id) || {id:`spotify-${item.id}`,title:item.title,artist:'',createdAt:0,status:'missing' as const,source:'spotify' as const,bytes:0,frames:0,sampleRate:44100,metadata:undefined,error:undefined}) : allDisplayTracks;
   // Cancel replay's pending async actions before hiding/unmounting its player.
   closeRef.current = () => {
-    replay.stop();
+    mp3Export.cancel(); replay.stop();
     if (mix.current) void stopRecording({type:'record_stop',trackTimeSeconds:mixer.current?.position() || 0});
     setAutoPlay(false); setViewMode('tracks');
   };
   const close = useCallback(() => { closeRef.current(); spotify.close(); }, [spotify]);
-  const canCapture = !replay.active && !recording && spotify.embedded && !spotify.starting && !deletingAudio && (spotify.active || (spotify.supported && spotify.tracks.length > 0));
-  const audioBusy = replay.active || !!active || recording || spotify.active || spotify.starting || deletingAudio;
+  const canCapture = !mp3Export.busy && !replay.active && !recording && spotify.embedded && !spotify.starting && !deletingAudio && (spotify.active || (spotify.supported && spotify.tracks.length > 0));
+  const audioBusy = mp3Export.busy || replay.active || !!active || recording || spotify.active || spotify.starting || deletingAudio;
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if (event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
@@ -314,9 +319,13 @@ export default function LibraryPage() {
     if (selected !== id) { loadedRevision.current = ''; setRecord(null); setSelected(id); setAutoPlay(false); viewScroll.current.player = 0; }
     setViewMode('player');
   };
+  const startExport = (value: PerformanceRecording) => {
+    if (running.current || deleting.current || modelBusy.current || mix.current || replay.active || spotify.active || spotify.starting) { setError('Wait for capture, separation, or recording to finish before exporting.'); return; }
+    void mp3Export.start(value);
+  };
   const stoppedByUser = !error && /^Capture run stopped by user\.?$/.test(spotify.error);
-  const statusError = !!replay.error || !!listening?.error || !!error || (!!spotify.error && !stoppedByUser);
-  const statusMessage = replay.error || error || listening?.error || (stoppedByUser ? 'Capture stopped.' : spotify.error) ||
+  const statusError = !!mp3Export.error || !!replay.error || !!listening?.error || !!error || (!!spotify.error && !stoppedByUser);
+  const statusMessage = mp3Export.error || replay.error || error || listening?.error || (stoppedByUser ? 'Capture stopped.' : spotify.error) ||
     (spotify.starting ? 'Starting capture…' : spotify.active ? 'Capturing songs as they play…' :
       spotify.notice.replace(' Local separation is queued automatically.', '').replace(' Separation continues here automatically.', ''));
   return <main className="iframe-page iframe-page--overlay" aria-label="ktv420 iframe controls">
@@ -341,13 +350,15 @@ export default function LibraryPage() {
     <div className="iframe-content" ref={content} onScroll={event => { viewScroll.current[viewMode] = event.currentTarget.scrollTop; }}>
     {spotify.replay && <section className="replay-card" aria-label="Shared recording">
       <div><h2>{spotify.replay.name}</h2><p>{replay.active ? `${Math.floor(replay.seconds)}s · ${replay.status === 'preparing' ? 'Preparing song…' : replay.status === 'paused' ? 'Paused' : 'Replaying'}` : replayReady ? 'Ready to replay.' : 'Capture missing songs, then let separation finish.'}</p></div>
-      {replay.active ? <><button disabled={replay.status==='preparing' || replay.busy} onClick={() => void replay.togglePause()}>{replay.status==='paused' ? 'Resume recording' : 'Pause recording'}</button><button onClick={replay.stop}>Stop replay</button></> : <button disabled={!replayReady || spotify.active || !!active} onClick={replay.start}>Play recording</button>}
-      {!replay.active && <button onClick={spotify.dismissReplay}>Leave recording</button>}
+      {replay.active ? <><button disabled={replay.status==='preparing' || replay.busy} onClick={() => void replay.togglePause()}>{replay.status==='paused' ? 'Resume recording' : 'Pause recording'}</button><button onClick={replay.stop}>Stop replay</button></> : <button disabled={!replayReady || spotify.active || !!active || mp3Export.busy} onClick={replay.start}>Play recording</button>}
+      <ReplayExportButton progress={mp3Export.progress} disabled={audioBusy || !replayReady} onExport={() => startExport(spotify.replay!)} onCancel={mp3Export.cancel}/>
+      {!replay.active && <button disabled={mp3Export.busy} onClick={spotify.dismissReplay}>Leave recording</button>}
       {required.some(item => tracks.some(t => t.id===`spotify-${item.id}` && t.status==='ready' && Math.abs(t.frames/t.sampleRate+captureStartSeconds(t.metadata)-item.duration)>=1)) && <p>A saved song has a different duration. Delete that song in Settings, then capture it again.</p>}
       {!spotify.tracks.length && <p>Sign in to Spotify, then refresh this page.</p>}
       {!replayReady && <p>{required.filter(item => !tracks.some(t => t.id===`spotify-${item.id}` && t.status==='ready')).length} of {required.length} songs still need preparation.{!autoProcessing && ' Resume separation in Settings.'}</p>}
     </section>}
     {!recording && savedMix && !spotify.replay && <section className="replay-card" aria-label="Saved recording"><div><h2>Recording saved</h2><p>Send your friend the JSON and ktv420.web.app/replay.</p></div>
+      <ReplayExportButton progress={mp3Export.progress} disabled={audioBusy} onExport={() => startExport(savedMix)} onCancel={mp3Export.cancel}/>
       <button onClick={() => downloadBlob(new Blob([JSON.stringify(savedMix)],{type:'application/json'}),`${savedMix.name}.json`)}>Download JSON</button>
       <button onClick={() => { void navigator.clipboard.writeText('https://ktv420.web.app/replay').catch(() => setError('Share this link: https://ktv420.web.app/replay')); }}>Copy replay link</button>
     </section>}
@@ -399,7 +410,7 @@ export default function LibraryPage() {
       {!displayTracks.length && <li className="iframe-playlist-empty">Open a Spotify playlist or album to get started.</li>}
       {displayTracks.map((track, index) => {
         const ready = track.status === 'ready';
-        const available = ready && !deletingAudio && (!recording || selected === track.id);
+        const available = ready && !mp3Export.busy && !deletingAudio && (!recording || selected === track.id);
         const capture = spotify.captureProgress?.trackId === track.id.replace(/^spotify-/, '') ? spotify.captureProgress : null;
         const separating = !ready && (active === track.id || track.status === 'processing');
         const progressKind = !ready && capture ? 'capture' : separating ? 'separation' : undefined;
@@ -423,7 +434,7 @@ export default function LibraryPage() {
     </ol>}
     {activeTrack && record && record.md5 === selected && <section className="iframe-player-view" hidden={viewMode !== 'player'} aria-label="Player">
       <button className="iframe-player-back" aria-label="Back to tracks" onClick={() => setViewMode('tracks')}><OverlayIcon name="back" /></button>
-      <div className={replay.active ? "replay-mixer" : undefined} inert={!!spotify.replay}><Player key={record.md5} record={record} title={activeTrack.title} replaying={replay.active} onControls={onControls}
+      <div className={replay.active ? "replay-mixer" : undefined} inert={!!spotify.replay || mp3Export.busy}><Player key={record.md5} record={record} title={activeTrack.title} replaying={replay.active || mp3Export.busy} onControls={onControls}
         masterVolume={listening ? (listening.output === 'stems' && selected === `spotify-${listening.trackId}` && listening.local ? listening.volume : 0) : 1}
         tempoSupported={!listening || listening.tempoSupported === true}
         transport={!spotify.replay && listening ? { ...listening, position: Math.max(0, listening.position - captureOffset), playing: listening.playing && listening.output === 'stems' && selected === `spotify-${listening.trackId}` } : undefined}

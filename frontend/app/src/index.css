@@ -995,3 +995,8 @@
 .player-tuning input { width:90px; margin:0; }
 .player-tuning .player-tuning-reset { min-width:4.2em; padding:.25rem .3rem; border-color:transparent; background:transparent; font:inherit; color:var(--ww-accent-amber); font-variant-numeric:tabular-nums; }
 .player-tuning .player-tuning-reset:hover:enabled { border-color:var(--ww-border); }
+
+.replay-card > .replay-export { flex: 0 1 17rem; min-width: 12rem; display: grid; grid-template-columns: 1fr auto; gap: .4rem .7rem; align-items: center; font-size: .85rem; color: var(--ww-accent-cyan); }
+.replay-export span { grid-column: 1; font-variant-numeric: tabular-nums; }
+.replay-export progress { grid-column: 1; width: 100%; height: 4px; accent-color: var(--ww-title-pink); }
+.replay-export button { grid-column: 2; grid-row: 1 / 3; }

@@ -87,8 +87,8 @@ export const setTrackStatus = (id: string, status: TrackStatus, error?: string) 
 export const saveMp3 = (id: string, files: Mp3Files, metadata: Record<string, unknown>, encoding: Mp3Encoding) => request<void>('saveMp3', [id, files, metadata, encoding]);
 export const getProcessingEnabled = () => request<boolean>('getProcessingEnabled');
 export const setProcessingEnabled = (enabled: boolean) => request<void>('setProcessingEnabled', [enabled]);
-export async function withProcessingLock(run: (acquired: boolean) => Promise<void>) {
+export async function withProcessingLock<T>(run: (acquired: boolean) => Promise<T>): Promise<T> {
   const acquired = await request<boolean>('acquireLock');
-  try { await run(acquired); }
+  try { return await run(acquired); }
   finally { if (acquired) await request<void>('releaseLock'); }
 }
