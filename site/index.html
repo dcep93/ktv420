@@ -5,10 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Listen. Separate. Mix. ktv420 for desktop Chrome and Spotify.">
   <title>ktv420 — Listen. Separate. Mix.</title>
-  <link rel="stylesheet" href="style.css?v=multisport-1">
+  <link rel="stylesheet" href="style.css?v=architecture-1">
 </head>
 <body>
-  <main class="install-panel">
+  <main class="page-layout">
+  <section class="install-panel" aria-label="Install ktv420">
     <header>
       <h1 class="app-title">ktv420</h1>
       <p class="tagline">Listen. Separate. Mix.</p>
@@ -35,6 +36,61 @@
       <a href="ktv420-extension.zip.sha256">Checksum</a>
       <a href="https://github.com/dcep93/ktv420/issues">Report a problem</a>
     </footer>
+  </section>
+  <section class="architecture-panel" aria-labelledby="architecture-heading">
+    <h2 id="architecture-heading">How it works</h2>
+    <svg class="architecture-diagram" viewBox="0 0 480 350" role="img" aria-labelledby="architecture-title architecture-description">
+      <title id="architecture-title">ktv420 architecture</title>
+      <desc id="architecture-description">Website code and model files download to Chrome. On your computer, Spotify audio flows into the extension. Its bridge connects the player iframe to local audio storage. The player runs Demucs on your GPU or CPU and provides the mixer and visualizers. Captured audio is never uploaded.</desc>
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" />
+        </marker>
+      </defs>
+      <rect class="diagram-boundary" x="1" y="96" width="478" height="242" rx="16" />
+      <text class="diagram-boundary-label" x="17" y="120">Your computer · Chrome</text>
+
+      <g class="diagram-node">
+        <rect x="290" y="10" width="174" height="48" rx="10" />
+        <text x="377" y="31">Website + model</text>
+        <text class="diagram-detail" x="377" y="48">App files + weights</text>
+      </g>
+      <path class="diagram-arrow" d="M 401 58 V 138" />
+      <text class="diagram-detail diagram-download-label" x="390" y="80">download</text>
+
+      <g class="diagram-node">
+        <rect x="16" y="140" width="125" height="54" rx="10" />
+        <text x="78.5" y="163">Spotify</text>
+        <text class="diagram-detail" x="78.5" y="181">Audio as it plays</text>
+      </g>
+      <path class="diagram-arrow" d="M 141 167 H 175" />
+      <g class="diagram-node">
+        <rect x="178" y="140" width="125" height="54" rx="10" />
+        <text x="240.5" y="163">Extension</text>
+        <text class="diagram-detail" x="240.5" y="181">Capture + bridge</text>
+      </g>
+      <path class="diagram-arrow diagram-two-way" d="M 306 167 H 335" />
+      <g class="diagram-node">
+        <rect x="338" y="140" width="126" height="54" rx="10" />
+        <text x="401" y="163">Player iframe</text>
+        <text class="diagram-detail" x="401" y="181">Mixer + visualizers</text>
+      </g>
+
+      <path class="diagram-arrow diagram-two-way" d="M 240.5 198 V 245" />
+      <path class="diagram-arrow diagram-two-way" d="M 401 198 V 245" />
+      <g class="diagram-node">
+        <rect x="178" y="248" width="125" height="62" rx="10" />
+        <text x="240.5" y="274">Local audio</text>
+        <text class="diagram-detail" x="240.5" y="292">Originals + stems</text>
+      </g>
+      <g class="diagram-node">
+        <rect x="338" y="248" width="126" height="62" rx="10" />
+        <text x="401" y="274">Demucs</text>
+        <text class="diagram-detail" x="401" y="292">GPU / CPU</text>
+      </g>
+    </svg>
+    <p class="architecture-caption">Audio stays on your computer.</p>
+  </section>
   </main>
 </body>
 </html>

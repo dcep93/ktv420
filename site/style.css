@@ -2,9 +2,17 @@
 
 body { padding: 3rem 1.5rem; }
 
-.install-panel {
-  max-width: 35rem;
+.page-layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 1.5rem;
+  max-width: 72rem;
   margin: 0 auto;
+}
+
+.install-panel, .architecture-panel {
+  min-width: 0;
   padding: 1.5rem;
   border: 0.0625rem solid var(--ww-border);
   border-radius: 1.375rem;
@@ -31,3 +39,26 @@ code {
 .help h2 { margin: 1rem 0 0.3rem; font-size: 0.9rem; }
 .help p { margin: 0.4rem 0; font-size: 0.85rem; color: var(--ww-text-muted); }
 footer { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; margin-top: 1.25rem; font-size: 0.75rem; }
+
+.architecture-panel h2 {
+  margin: 0 0 1rem;
+  color: var(--ww-title-pink);
+  font-family: var(--app-title-font);
+  font-size: 1.6rem;
+  font-weight: 400;
+}
+.architecture-diagram { display: block; width: 100%; height: auto; overflow: visible; }
+.diagram-boundary { fill: var(--ww-panel-strong); stroke: var(--ww-border-strong); stroke-dasharray: 4 4; }
+.diagram-boundary-label { fill: var(--ww-text-muted); font-size: 13px; }
+.diagram-node rect { fill: var(--ww-panel-soft); stroke: var(--ww-border-strong); }
+.diagram-node text { fill: var(--ww-text); font-size: 14px; font-weight: 600; text-anchor: middle; }
+.diagram-node .diagram-detail, .diagram-detail { fill: var(--ww-text-muted); font-size: 11px; font-weight: 400; }
+.diagram-download-label { text-anchor: end; }
+.diagram-arrow { fill: none; stroke: var(--ww-accent-amber); stroke-width: 1.5; marker-end: url(#arrow); }
+.diagram-two-way { marker-start: url(#arrow); }
+#arrow path { fill: var(--ww-accent-amber); }
+.architecture-caption { margin: 0.5rem 0 0; color: var(--ww-text-muted); font-size: 0.85rem; }
+
+@media (max-width: 60rem) {
+  .page-layout { grid-template-columns: minmax(0, 1fr); max-width: 35rem; }
+}
