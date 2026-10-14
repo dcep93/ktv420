@@ -16,6 +16,7 @@
   const nativeMuted = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'muted');
   const outputElements = new Map();
   let monitor = { gain: 0, expires: 0 };
+  const rateElements = new Set();
   let volumeRevision = 0, requestedVolume = 1;
   function guardOutput(element) {
     if (outputElements.has(element)) return;
@@ -36,6 +37,7 @@
   }
   function updateMonitor() {
     const gain = performance.now() < monitor.expires ? monitor.gain : 0;
+    if (performance.now() >= monitor.expires) { for (const element of rateElements) element.playbackRate = 1; rateElements.clear(); }
     for (const element of outputElements.keys()) {
       const graph = audioGraphs.get(element);
       if (graph) {
@@ -195,6 +197,24 @@
           if (target && !target.paused) await getOrCreateAudioGraph(target);
           result = { media: target ? describeMediaElement(target) : null, volumeRevision, requestedVolume,
             captureInvalid: controller.invalid(), captureEnded: controller.ended(), monitorGain: performance.now() < monitor.expires ? monitor.gain : 0 };
+        } else if (command === "listening-rate") {
+          const rate = payload?.rate;
+          if (!Number.isFinite(rate) || rate < .5 || rate > 1.5) throw new Error('Invalid playback tempo.');
+          const elements = mediaTracker.all().filter(element => getMediaSource(element) && Number.isFinite(element.duration) && element.duration > 0);
+          if (rate === 1 && payload.reset) {
+            for (const element of new Set([...rateElements,...elements])) element.playbackRate = 1;
+            if (elements.some(element => element.playbackRate !== 1)) throw new Error('Spotify could not restore normal capture speed.');
+            rateElements.clear(); result = {rate:1};
+          } else {
+            const playing = elements.filter(element => !element.paused && !element.ended);
+            const target = playing.length === 1 ? playing[0] : elements.length === 1 ? elements[0] : null;
+            if (!target) throw new Error('Spotify local playback is unavailable.');
+            for (const element of rateElements) if (element !== target) element.playbackRate = 1;
+            rateElements.clear(); target.playbackRate = rate; rateElements.add(target);
+            await delay(100);
+            if (target.playbackRate !== rate) throw new Error('Spotify rejected the tempo change.');
+            result = {rate:target.playbackRate};
+          }
         } else if (command === "listening-output") {
           if (!Number.isFinite(payload?.gain) || payload.gain < 0 || payload.gain > 1) throw new Error('Invalid listening volume.');
           monitor = { gain: payload.gain, expires: performance.now() + 2500 };
@@ -350,6 +370,8 @@
 
   class PagePcmCapture {
     static async create(element) {
+      element.playbackRate = 1; rateElements.delete(element);
+      if (element.playbackRate !== 1) throw new Error('Capture requires normal playback speed.');
       const graph = await getOrCreateAudioGraph(element);
       return new PagePcmCapture(element, graph);
     }
@@ -369,6 +391,8 @@
       this.onSeek = () => { if (this.capturing) this.invalid = true; };
       this.ended = false;
       this.onEnded = () => { this.capturing = false; this.ended = true; };
+      this.onRate = () => { if (this.capturing && element.playbackRate !== 1) this.invalid = true; };
+      element.addEventListener('ratechange', this.onRate);
       element.addEventListener('seeking', this.onSeek);
       element.addEventListener('ended', this.onEnded);
       this.graph.consumers.add(this);
@@ -387,7 +411,7 @@
     }
 
     markAcceptedStart() {
-      this.invalid = false; this.ended = false;
+      this.invalid = this.element.playbackRate !== 1; this.ended = false;
       this.chunks = [];
       this.byteLength = 0;
       this.startMediaTime = safeMediaTime(this.element);
@@ -398,6 +422,7 @@
       this.chunks = [];
       this.byteLength = 0;
       this.graph.consumers.delete(this);
+      this.element.removeEventListener('ratechange', this.onRate);
       this.element.removeEventListener('seeking', this.onSeek);
       this.element.removeEventListener('ended', this.onEnded);
     }
@@ -405,6 +430,7 @@
     finish() {
       this.capturing = false;
       this.graph.consumers.delete(this);
+      this.element.removeEventListener('ratechange', this.onRate);
       this.element.removeEventListener('seeking', this.onSeek);
       this.element.removeEventListener('ended', this.onEnded);
       const bytes = new Uint8Array(this.byteLength);
@@ -426,6 +452,7 @@
     }
 
     handleAudioChunk(message) {
+      if (this.capturing && this.element.playbackRate !== 1) this.invalid = true;
       if (!this.capturing || this.invalid || this.element.paused || this.element.seeking) {
         return;
       }

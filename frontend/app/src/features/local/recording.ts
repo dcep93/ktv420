@@ -1,6 +1,8 @@
+import { validTempo, validPitch } from '../stems/player/tempo';
 /** Portable performances contain instructions only. Times use seconds, never wall-clock dates. */
 export const MAX_RECORDING_BYTES = 4 * 1024 * 1024;
 export type MixerSnapshot = {
+  tempo?: number; pitch?: number;
   visualizer: string;
   stems: { name: string; input: boolean; volume: number; mute: boolean; deafen: boolean; effect: string; value: number }[];
   spotlight: { intent: { kind: 'input' | 'output'; name?: string }; level: 'track' | 'track-with-selectors' } | null;
@@ -9,7 +11,7 @@ export type PerformanceEvent = {
   at: number; type: 'track' | 'mix' | 'play' | 'pause' | 'seek' | 'stop'; trackId: string; position: number; snapshot?: MixerSnapshot;
 };
 export type PerformanceRecording = {
-  version: 2; name: string; createdAt: string; spotifyPath: string;
+  version: 2 | 3; name: string; createdAt: string; spotifyPath: string;
   tracks: { id: string; title: string; duration: number }[]; events: PerformanceEvent[];
 };
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -19,6 +21,7 @@ export const spotifyTrackId = (v: unknown): v is string => typeof v === 'string'
 export const spotifyContext = (v: unknown): v is string => typeof v === 'string' && /^(playlist|album)\/[a-zA-Z0-9]{22}$/.test(v);
 export function validSnapshot(v: unknown): v is MixerSnapshot {
   if (!object(v) || !str(v.visualizer, 80) || !Array.isArray(v.stems) || v.stems.length < 1 || v.stems.length > 8) return false;
+  if ((v.tempo !== undefined && !validTempo(v.tempo)) || (v.pitch !== undefined && !validPitch(v.pitch))) return false;
   const names = new Set<string>();
   for (const s of v.stems) {
     if (!object(s) || !str(s.name, 100) || names.has(s.name) || typeof s.input !== 'boolean' || !finite(s.volume, 2) ||
@@ -34,7 +37,7 @@ export function validSnapshot(v: unknown): v is MixerSnapshot {
 }
 export function parseRecording(value: unknown): PerformanceRecording {
   if (object(value) && value.version === 1) throw new Error('This older recording has no reliable replay timing. Make a new recording with ktv420 6.2 or later.');
-  if (!object(value) || value.version !== 2 || !str(value.name) || !str(value.createdAt,80) || !spotifyContext(value.spotifyPath) ||
+  if (!object(value) || (value.version !== 2 && value.version !== 3) || !str(value.name) || !str(value.createdAt,80) || !spotifyContext(value.spotifyPath) ||
     !Array.isArray(value.tracks) || !value.tracks.length || value.tracks.length > 500 || !Array.isArray(value.events) ||
     value.events.length < 2 || value.events.length > 30000) throw new Error('Not a supported ktv420 recording.');
   if (JSON.stringify(value).length > MAX_RECORDING_BYTES) throw new Error('Recording is too large (maximum 4 MB).');
@@ -51,6 +54,8 @@ export function parseRecording(value: unknown): PerformanceRecording {
     if (trackId !== e.trackId || (index === 0 && (e.type !== 'track' || e.at !== 0)) ||
       (e.type === 'stop' && index !== value.events.length - 1) ||
       ((e.type === 'mix' || e.type === 'track') && !validSnapshot(e.snapshot))) throw new Error('Incomplete recording timeline.');
+    if (value.version === 3 && (e.type === 'track' || e.type === 'mix') && (!object(e.snapshot) || !validTempo(e.snapshot.tempo) || !validPitch(e.snapshot.pitch))) throw new Error('Recording is missing tempo or pitch.');
+    if (value.version === 2 && object(e.snapshot) && ((e.snapshot.tempo !== undefined && e.snapshot.tempo !== 1) || (e.snapshot.pitch !== undefined && e.snapshot.pitch !== 0))) throw new Error('Tempo recordings require version 3.');
     const track = (value.tracks as PerformanceRecording['tracks']).find(t => t.id === e.trackId)!;
     if (e.position > track.duration + 1) throw new Error('Song position is outside the recording.');
     at = e.at;

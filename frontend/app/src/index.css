@@ -989,3 +989,9 @@
 .replay-card button:disabled {opacity:.4;cursor:default;} .replay-card button:hover:not(:disabled),.replay-import button:hover {border-color:#ff7bc3;}
 .replay-import {max-width:38rem;margin:4rem auto;padding:2rem;border:1px solid #49392b;border-radius:24px;}
 .replay-import input {display:block;margin:.8rem 0;font:inherit;} .replay-import nav {display:flex;gap:1rem;flex-wrap:wrap;margin:1rem 0;} .replay-import small {display:block;margin-top:2rem;color:#bba99b;} .replay-import [role=alert] {color:#ff9da8;}
+
+.player-tuning { display:flex; align-items:center; gap:.45rem; color:var(--ww-text-soft); font-size:.82rem; }
+.player-tuning label { display:flex; align-items:center; gap:.4rem; }
+.player-tuning input { width:90px; margin:0; }
+.player-tuning .player-tuning-reset { min-width:4.2em; padding:.25rem .3rem; border-color:transparent; background:transparent; font:inherit; color:var(--ww-accent-amber); font-variant-numeric:tabular-nums; }
+.player-tuning .player-tuning-reset:hover:enabled { border-color:var(--ww-border); }

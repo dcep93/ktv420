@@ -1,4 +1,6 @@
+import { validTempo } from '../stems/player/tempo';
 export type ListeningState = {
+  tempoSupported?: boolean; playbackRate?: number;
   capability: 1; trackId: string; generation: number; position: number; duration: number;
   playing: boolean; local: boolean; output: 'muted' | 'capture' | 'stems'; volume: number;
   observedAt: number; error: string; title?: string; artist?: string; artwork?: string;
@@ -7,6 +9,7 @@ export type ListeningState = {
 export type TransportCommand = { action: 'play' | 'pause' | 'next' | 'previous' | 'enable' }
   | { action: 'seek'; position: number; trackId: string }
   | { action: 'select' | 'stems-failed'; trackId: string }
+  | { action: 'rate'; rate: number; trackId: string }
   | { action: 'volume'; volume: number }
   | { action: 'silenced'; generation: number };
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -15,6 +18,7 @@ const id = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9]{1
 export function parseTransportCommand(v: unknown): TransportCommand | null {
   if (!object(v)) return null;
   if (['play', 'pause', 'next', 'previous', 'enable'].includes(String(v.action))) return { action: v.action } as TransportCommand;
+  if (v.action === 'rate' && validTempo(v.rate) && id(v.trackId)) return {action:'rate',rate:v.rate,trackId:v.trackId};
   if (v.action === 'silenced' && Number.isSafeInteger(v.generation) && number(v.generation, Number.MAX_SAFE_INTEGER)) return { action: 'silenced', generation: v.generation };
   if (v.action === 'volume' && number(v.volume, 1)) return { action: 'volume', volume: v.volume };
   if (v.action === 'seek' && id(v.trackId) && number(v.position)) return { action: 'seek', position: v.position, trackId: v.trackId };
@@ -26,7 +30,8 @@ export function parseListeningState(v: unknown): ListeningState | null {
     !number(v.position) || !number(v.duration) || typeof v.playing !== 'boolean' || typeof v.local !== 'boolean' ||
     !['muted','capture','stems'].includes(String(v.output)) || !number(v.volume, 1) || !number(v.observedAt, Number.MAX_SAFE_INTEGER) ||
     typeof v.error !== 'string' || v.error.length > 4096) return null;
-  return { capability: 1, trackId: v.trackId, generation: v.generation, position: v.position, duration: v.duration,
+  if (v.playbackRate !== undefined && !validTempo(v.playbackRate)) return null;
+  return { tempoSupported: v.tempoSupported === true, playbackRate: typeof v.playbackRate === 'number' ? v.playbackRate : 1, capability: 1, trackId: v.trackId, generation: v.generation, position: v.position, duration: v.duration,
     playing: v.playing, local: v.local, output: v.output as ListeningState['output'], volume: v.volume,
     observedAt: v.observedAt, error: v.error, title: typeof v.title === 'string' ? v.title.slice(0,500) : '',
     artist: typeof v.artist === 'string' ? v.artist.slice(0,500) : '',

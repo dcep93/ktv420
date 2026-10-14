@@ -13,3 +13,5 @@ __pycache__/
 /frontend/app/dist-extension/
 /site/player/
 /site/theme/
+
+/frontend/app/dist-tempo-validation/

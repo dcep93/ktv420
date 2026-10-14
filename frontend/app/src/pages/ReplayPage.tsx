@@ -28,7 +28,11 @@ export default function ReplayPage() {
   }, []);
   async function open(value: PerformanceRecording) {
     setBusy(true); setError('');
-    try { await extensionMessage({type:'ktv420:open-replay', recording:value}); setOpened(true); }
+    try {
+      const peer = await extensionMessage({type:'ktv420:replay-ping'});
+      const [major, minor] = (peer.version || '0.0').split('.').map(Number);
+      if (value.version === 3 && !(major > 6 || (major === 6 && minor >= 3))) { setInstalled(false); throw new Error('This recording needs ktv420 6.3 or later. Update the extension, then refresh.'); }
+      await extensionMessage({type:'ktv420:open-replay', recording:value}); setOpened(true); }
     catch (e) { setError(String(e instanceof Error ? e.message : e)); }
     finally { setBusy(false); }
   }

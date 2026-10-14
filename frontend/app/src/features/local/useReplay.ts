@@ -37,6 +37,14 @@ export function useReplay(options: Options) {
     await wait(current,() => (latest.current.listening?.observedAt || 0)>observed && condition(),'Spotify did not synchronize. Check that Spotify is playing on this computer.');
     current.guard=Date.now()+100;
   }
+  async function applySnapshot(current: Run, snapshot: import('./recording').MixerSnapshot) {
+    const rate = snapshot.tempo ?? 1;
+    const changeRate=rate !== (latest.current.listening?.playbackRate ?? 1);
+    if (changeRate && !latest.current.listening?.tempoSupported) throw new Error('Update ktv420 to 6.3 or later, then reload Spotify to replay tempo changes.');
+    // Audible automation follows performance time; acknowledgment must not delay it.
+    latest.current.control()?.apply(snapshot);
+    if (changeRate) await command(current,{action:'rate',rate,trackId:current.track},() => latest.current.listening?.playbackRate===rate);
+  }
   const actions = useRef({ stop, wait, command }); actions.current={stop,wait,command};
   async function tick() {
     const current=run.current;
@@ -45,7 +53,7 @@ export function useReplay(options: Options) {
     try {
       while (current.cursor<current.recording.events.length && current.recording.events[current.cursor].at<=current.clock.seconds) {
         const event=current.recording.events[current.cursor++];
-        if (event.type==='mix') latest.current.control()?.apply(event.snapshot!);
+        if (event.type==='mix') await applySnapshot(current,event.snapshot!);
         else {
           current.clock.pause();
           const controller=() => latest.current.control();
@@ -57,7 +65,7 @@ export function useReplay(options: Options) {
             await actions.current.command(current,{action:'select',trackId:event.trackId},() => listening()?.trackId===event.trackId && listening()?.local===true);
             await actions.current.command(current,{action:'pause'},() => listening()?.playing===false);
             await actions.current.command(current,{action:'seek',trackId:event.trackId,position:event.position},() => Math.abs((listening()?.position ?? -10)-event.position)<.6);
-            controller()!.apply(event.snapshot!);
+            await applySnapshot(current,event.snapshot!);
             await controller()!.seek(Math.max(0,event.position-latest.current.offset(event.trackId)));
             setStatus('playing');
           } else if (event.type==='play') {
@@ -133,7 +141,7 @@ export function useReplay(options: Options) {
       const next=current.recording.events.slice(current.cursor).find(event => event.type==='track');
       if (!(next?.trackId===state.trackId && next.at-current.clock.seconds<2)) { actions.current.stop();setError('Spotify changed songs. Replay stopped.');return; }
     }
-    if (current.audio && !current.paused && state.playing && state.trackId===current.track && Math.abs(state.position-(latest.current.control()?.position() || 0)-latest.current.offset(current.track))>1.5) { actions.current.stop();setError('Spotify moved to another position. Replay stopped; press Play recording to restart.');return; }
+    if (current.audio && !current.paused && state.playing && state.trackId===current.track && Math.abs(state.position + Math.max(0,Date.now()-state.observedAt)/1000*(state.playbackRate ?? 1)-(latest.current.control()?.position() || 0)-latest.current.offset(current.track))>1.5) { actions.current.stop();setError('Spotify moved to another position. Replay stopped; press Play recording to restart.');return; }
     if (current.audio && !current.paused && !state.playing) { current.paused=true;current.clock.pause();latest.current.control()?.pause();setStatus('paused'); }
     else if(current.paused && state.playing) { current.paused=false;void latest.current.control()?.play();current.clock.start();setStatus('playing'); }
   },[options.listening]);

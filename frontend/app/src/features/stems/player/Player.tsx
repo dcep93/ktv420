@@ -1,3 +1,5 @@
+import { TempoEngine } from './tempoEngine';
+import { validTempo, validPitch } from './tempo';
 import type { MixerSnapshot } from '../../local/recording';
 import {
   type PointerEvent,
@@ -83,7 +85,7 @@ function getLogarithmicVolumeGain(volume: number) {
 
 export default function Player({
   record, replaying = false, onControls,
-  masterVolume = 1, transport, onTransportCommand, onPlaybackError,
+  masterVolume = 1, tempoSupported = true, transport, onTransportCommand, onPlaybackError,
   title,
   trackMetadata,
   unavailableMessage,
@@ -108,6 +110,17 @@ export default function Player({
   const playbackEpoch = useRef(0);
   const syncBusy = useRef(false);
   const masterGain = useRef<GainNode | null>(null);
+  const engine = useRef<TempoEngine | null>(null);
+  const [engineReady, setEngineReady] = useState(false);
+  const [tempo, setTempo] = useState(1);
+  const [pitch, setPitch] = useState(0);
+  const tempoRef = useRef(1), pitchRef = useRef(0);
+  const applyTempoPitch = useCallback((rate: number, semitones: number) => {
+    if (!validTempo(rate) || !validPitch(semitones)) throw new Error('Invalid tempo or pitch.');
+    engine.current?.set(rate, semitones);
+    tempoRef.current = rate; pitchRef.current = semitones;
+    setTempo(rate); setPitch(semitones);
+  }, []);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -159,7 +172,6 @@ export default function Player({
   const gainNodesRef = useRef<Record<string, GainNode>>({});
   const effectNodesRef = useRef<Record<string, EffectNodes>>({});
   const analyserNodesRef = useRef<Record<string, AnalyserNode>>({});
-  const sourcesRef = useRef<Record<string, AudioBufferSourceNode>>({});
   const canvasRefs = useRef<Record<string, HTMLCanvasElement | null>>({});
   const drawAnimationFrameRef = useRef<number | null>(null);
   const timeAnimationFrameRef = useRef<number | null>(null);
@@ -412,16 +424,7 @@ export default function Player({
 
   const stopAllSources = useCallback(() => {
     playbackEpoch.current++;
-    Object.values(sourcesRef.current).forEach((source) => {
-      try {
-        source.stop();
-      } catch (error) {
-        console.warn("Failed to stop source", error);
-      }
-      source.disconnect();
-    });
-
-    sourcesRef.current = {};
+    engine.current?.pause();
   }, []);
 
   const applyEffectiveVolume = useCallback(
@@ -468,19 +471,7 @@ export default function Player({
   );
 
   const currentPlaybackTime = useCallback(() => {
-    const context = audioCtxRef.current;
-
-    if (!context) {
-      return startOffsetRef.current;
-    }
-
-    if (isPlaying) {
-      return (
-        context.currentTime - startAtCtxTimeRef.current + startOffsetRef.current
-      );
-    }
-
-    return startOffsetRef.current;
+    return isPlaying && engine.current ? engine.current.position : startOffsetRef.current;
   }, [isPlaying]);
 
   const createRecordingEvent = useCallback(
@@ -559,6 +550,7 @@ export default function Player({
   }, [flushDebouncedRecordingEvents, onRegisterRecordingFlush]);
 
   const snapshot = useCallback((): MixerSnapshot => ({
+    tempo: tempoRef.current, pitch: pitchRef.current,
     visualizer: visualizerType,
     stems: tracks.map(track => ({name:track.name,input:track.isInput,volume:volumesRef.current[track.id] ?? 1,
       mute:trackMuteStatesRef.current[track.id] ?? false,deafen:trackDeafenStatesRef.current[track.id] ?? false,
@@ -567,7 +559,6 @@ export default function Player({
   }), [tracks,visualizerType,spotlightState]);
 
   useEffect(() => {
-    const audioContextSnapshot = audioCtxRef.current;
 
     return () => {
       flushDebouncedRecordingEvents();
@@ -581,7 +572,8 @@ export default function Player({
       }
 
       stopAllSources();
-      audioContextSnapshot?.close().catch((error) => {
+      engine.current?.dispose(); engine.current = null;
+      audioCtxRef.current?.close().catch((error) => {
         console.error("Failed to close audio context", error);
       });
     };
@@ -617,6 +609,8 @@ export default function Player({
     setDuration(0);
     setIsPlaying(false);
     setReadyTrackIds([]);
+    setEngineReady(false);
+    tempoRef.current = 1; pitchRef.current = 0; setTempo(1); setPitch(0);
     setTrackMuteStates(initialMuteStates);
     setTrackDeafenStates(initialDeafenStates);
     setAmplitudeEnvelopes({});
@@ -625,6 +619,7 @@ export default function Player({
     startAtCtxTimeRef.current = 0;
     pausedAtPerformanceTimeRef.current = null;
     stopAllSources();
+    engine.current?.dispose(); engine.current = null;
     buffersRef.current = {};
     gainNodesRef.current = {};
     effectNodesRef.current = {};
@@ -816,6 +811,14 @@ export default function Player({
 
     void (async () => {
       await Promise.all(tracks.map((track) => analyzeTrack(track)));
+      if (isCancelled || !tracks.length || tracks.some(track => !buffersRef.current[track.id])) return;
+      try {
+        const next = await TempoEngine.create(context, tracks.map(t => buffersRef.current[t.id]), tracks.map(t => gainNodesRef.current[t.id]), message => {
+          setTransportError(message); setIsPlaying(false); playbackErrorRef.current?.(message);
+        });
+        if (isCancelled) { next.dispose(); return; }
+        engine.current = next; next.set(tempoRef.current, pitchRef.current); setEngineReady(true);
+      } catch (reason) { if (!isCancelled) setTransportError(`Could not prepare tempo processing: ${String(reason)}`); }
     })();
 
     return () => {
@@ -1107,26 +1110,11 @@ export default function Player({
       if (epoch !== playbackEpoch.current) return;
       if (context.state !== 'running') { setTransportError('Click Play to enable sound.'); return; }
       setTransportError('');
-      const startAt = context.currentTime + 0.02;
-      const newSources: Record<string, AudioBufferSourceNode> = {};
-
-      readyTracks.forEach((track) => {
-        const buffer = buffersRef.current[track.id];
-        const gainNode = gainNodesRef.current[track.id];
-
-        if (!buffer || !gainNode) {
-          return;
-        }
-
-        const source = context.createBufferSource();
-        source.buffer = buffer;
-        source.connect(gainNode);
-        source.start(startAt, offsetSeconds);
-        newSources[track.id] = source;
-      });
-
-      sourcesRef.current = newSources;
-      startAtCtxTimeRef.current = startAt;
+      if (!engine.current) throw new Error('Audio processor is still loading.');
+      engine.current.set(tempoRef.current, pitchRef.current);
+      await engine.current.start(offsetSeconds);
+      if (epoch !== playbackEpoch.current) return;
+      startOffsetRef.current = offsetSeconds;
       hasHandledPlaybackEndRef.current = false;
       setIsPlaying(true);
     },
@@ -1225,10 +1213,7 @@ export default function Player({
       return startOffsetRef.current;
     }
 
-    startOffsetRef.current =
-      context.currentTime -
-      startAtCtxTimeRef.current +
-      startOffsetRef.current;
+    startOffsetRef.current = engine.current?.pause() ?? startOffsetRef.current;
     stopAllSources();
     setIsPlaying(false);
     return startOffsetRef.current;
@@ -1453,7 +1438,7 @@ export default function Player({
   };
 
   const areTracksReady =
-    tracks.length > 0 && readyTrackIds.length === tracks.length;
+    engineReady && tracks.length > 0 && readyTrackIds.length === tracks.length;
   useEffect(() => {
     const update = () => {
       const context = audioCtxRef.current, gain = masterGain.current;
@@ -1467,33 +1452,34 @@ export default function Player({
     };
     update(); const timer = setInterval(update, 200); return () => clearInterval(timer);
   }, [masterVolume, transport]);
-  const observedTransport = useRef<{position:number;playing:boolean;at:number} | null>(null);
+  const observedTransport = useRef<{position:number;playing:boolean;at:number;rate:number} | null>(null);
   useEffect(() => {
     if (!transport || !areTracksReady || (transport.trackId && record.md5!==`spotify-${transport.trackId}`)) return;
     const previous = observedTransport.current;
-    const now = {position:transport.position,playing:transport.playing,at:transport.observedAt};
+    const now = {position:transport.position,playing:transport.playing,at:transport.observedAt,rate:transport.playbackRate ?? 1};
     observedTransport.current = now;
     if (!isRecording) return;
-    if (previous && Math.abs(now.position - previous.position - (previous.playing ? (now.at-previous.at)/1000 : 0)) > .6) emitRecordingEvent('seek_commit',{targetSeconds:now.position},now.position);
+    if (previous && Math.abs(now.position - previous.position - (previous.playing ? (now.at-previous.at)/1000 * previous.rate : 0)) > .6) emitRecordingEvent('seek_commit',{targetSeconds:now.position},now.position);
     if (!previous || previous.playing !== now.playing) emitRecordingEvent(now.playing ? 'transport_play' : 'transport_pause',undefined,now.position);
   }, [transport,areTracksReady,isRecording,emitRecordingEvent,record.md5]);
   useEffect(() => {
     if (!transport || !areTracksReady) return;
+    applyTempoPitch(transport.playbackRate ?? 1, pitchRef.current);
     const playing = transport.playing && Date.now() - transport.observedAt < 1800;
-    const position = Math.min(duration, transport.position + (playing ? Math.max(0, Date.now() - transport.observedAt) / 1000 : 0));
+    const position = Math.min(duration, transport.position + (playing ? Math.max(0, Date.now() - transport.observedAt) / 1000 * (transport.playbackRate ?? 1) : 0));
     if (!playing) {
       stopAllSources(); startOffsetRef.current = position; setCurrentTime(position); setIsPlaying(false); return;
     }
     if (syncBusy.current || (isPlaying && Math.abs(currentPlaybackTime() - position) < 0.5)) return;
     stopAllSources(); startOffsetRef.current = position; syncBusy.current = true;
     void schedulePlayback(position).catch(reason => setTransportError(String(reason))).finally(() => { syncBusy.current = false; });
-  }, [transport, areTracksReady, duration, isPlaying, currentPlaybackTime, schedulePlayback, stopAllSources]);
+  }, [transport, areTracksReady, duration, isPlaying, currentPlaybackTime, schedulePlayback, stopAllSources, applyTempoPitch]);
   useEffect(() => {
     if (transport && tracks.length && readyTrackIds.length < tracks.length && unavailableMessage) onPlaybackError?.(unavailableMessage);
   }, [transport, tracks.length, readyTrackIds.length, unavailableMessage, onPlaybackError]);
   useEffect(() => {
     if (isRecording && areTracksReady) onRecordingEventRef.current?.({type:'mixer_snapshot',trackTimeSeconds:currentPlaybackTime(),payload:{snapshot:snapshot()}});
-  }, [isRecording,areTracksReady,volumes,trackMuteStates,trackDeafenStates,effectValues,effectTypes,visualizerType,spotlightState,snapshot,currentPlaybackTime]);
+  }, [isRecording,areTracksReady,tempo,pitch,volumes,trackMuteStates,trackDeafenStates,effectValues,effectTypes,visualizerType,spotlightState,snapshot,currentPlaybackTime]);
 
   useEffect(() => {
     onControls?.({
@@ -1502,6 +1488,7 @@ export default function Player({
       pause:pausePlayback,
       seek:async position => { const resume = isPlaying; stopAllSources(); startOffsetRef.current = Math.max(0,Math.min(duration,position)); setCurrentTime(startOffsetRef.current); if (resume) await schedulePlayback(startOffsetRef.current); },
       apply:value => {
+        applyTempoPitch(value.tempo ?? 1, value.pitch ?? 0);
         if (!visualizerOptions.some(option => option.value === value.visualizer) || value.stems.length !== tracks.length) throw new Error('Recording requires an unsupported mixer layout.');
         const v: Record<string,number> = {}, m: Record<string,boolean> = {}, d: Record<string,boolean> = {}, e: Record<string,AudioEffectType> = {}, x: Record<string,number> = {};
         for (const track of tracks) {
@@ -1520,7 +1507,7 @@ export default function Player({
       },
     });
 
-  }, [onControls,record.md5,areTracksReady,currentPlaybackTime,snapshot,stopAllSources,schedulePlayback,pausePlayback,isPlaying,duration,tracks,applyEffectValue,getEffectiveVolumeFromRefs]);
+  }, [onControls,applyTempoPitch,record.md5,areTracksReady,currentPlaybackTime,snapshot,stopAllSources,schedulePlayback,pausePlayback,isPlaying,duration,tracks,applyEffectValue,getEffectiveVolumeFromRefs]);
 
   const recordingButtonDisabled = isRecording
     ? !onStopRecording
@@ -1760,6 +1747,15 @@ export default function Player({
                   {formatPlaybackTime(currentTime)} / {formatPlaybackTime(duration)}
                 </span>
               </div>
+              <div className="player-tuning" aria-label="Tempo and pitch">
+                <label>Tempo<input type="range" aria-label="Tempo" min="0.5" max="1.5" step="0.01" value={tempo}
+                  disabled={!areTracksReady || !tempoSupported || replaying} title={!tempoSupported ? 'Update the ktv420 extension to change tempo.' : 'Change tempo, preserve pitch'}
+                  onChange={event => { const rate = Number(event.target.value); if (onTransportCommand) onTransportCommand({action:'rate',rate}); else applyTempoPitch(rate,pitchRef.current); }} /></label>
+                <button type="button" className="player-tuning-reset" aria-label="Reset tempo" disabled={!tempoSupported || replaying} onClick={() => { if (onTransportCommand) onTransportCommand({action:'rate',rate:1}); else applyTempoPitch(1,pitchRef.current); }}>{tempo.toFixed(2)}×</button>
+                <label>Pitch<input type="range" aria-label="Pitch" min="-12" max="12" step="1" value={pitch} disabled={!areTracksReady || replaying}
+                  onChange={event => applyTempoPitch(tempoRef.current,Number(event.target.value))} /></label>
+                <button type="button" className="player-tuning-reset" aria-label="Reset pitch" disabled={replaying} onClick={() => applyTempoPitch(tempoRef.current,0)}>{pitch > 0 ? '+' : ''}{pitch} st</button>
+              </div>
               {transportError && <p role="status">{transportError}</p>}
               <h3 style={{ fontSize: "1em", margin: 0 }}>{playerTitle}</h3>
               <div
@@ -1784,7 +1780,7 @@ export default function Player({
                   }}
                   aria-label="Detected chord"
                 >
-                  <span style={{ fontWeight: 700, color: "var(--ww-text)" }}>Chord:</span>
+                  <span style={{ fontWeight: 700, color: "var(--ww-text)" }}>{pitch ? 'Source chord:' : 'Chord:'}</span>
                   <span
                     style={{ fontStyle: chordTimeline.length ? "normal" : "italic" }}
                   >

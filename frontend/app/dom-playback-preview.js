@@ -44,10 +44,11 @@ document.querySelector('#lose').onclick=()=>{audio.pause();audio.removeAttribute
 select(0,false);
 
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-const until=async(predicate,description,timeout=5000)=>{const start=Date.now();while(!predicate()){if(Date.now()-start>timeout)throw Error(description);await sleep(50);}};
+const until=async(predicate,description,timeout=5000)=>{const start=Date.now();while(!await predicate()){if(Date.now()-start>timeout)throw Error(description);await sleep(50);}};
 const results=[];
 function assert(value,message){if(!value)throw Error(message);results.push(message);report.textContent=JSON.stringify({running:true,results},null,2);}
 document.querySelector('#suite').onclick=async()=>{try{
+ results.length=0;
  audio.pause(); for(const id of ids)await deleteTrack(`spotify-${id}`); await document.querySelector('#seed').onclick();
  select(0,false);await sleep(2200);await audio.play();
  await until(()=>listening?.output==='stems','saved stems not selected');
@@ -55,12 +56,15 @@ document.querySelector('#suite').onclick=async()=>{try{
  await controller.command({action:'pause'});await until(()=>!listening.playing,'pause not reflected');assert(audio.paused,'App pause controls Spotify DOM');
  await controller.command({action:'seek',position:3,trackId:ids[0]});assert(Math.abs(audio.currentTime-3)<.2,'App seek controls Spotify DOM');
  await controller.command({action:'play'});await until(()=>listening.playing,'resume not reflected');assert(!audio.paused,'App play resumes Spotify DOM');
- suppressHeartbeat=true;await sleep(2200);
+ await controller.command({action:'rate',trackId:ids[0],rate:1.5});
+ assert(audio.playbackRate===1.5,'Prepared playback accepts tempo');
+ suppressHeartbeat=true;await sleep(2200);assert(audio.playbackRate===1,'Heartbeat loss restores normal speed');
  await controller.command({action:'next'});await until(()=>listening?.trackId===ids[1]&&listening.capturing,'cold player did not begin capture');
+ assert(audio.playbackRate===1,'Next uncaptured song uses original speed');
  assert(listening.output==='muted','Cold player captures immediately but stays silent until ready');suppressHeartbeat=false;
  await until(()=>listening?.trackId===ids[1]&&listening.output==='capture','unsaved capture not selected');
  await controller.command({action:'volume',volume:.37});assert(Math.abs(audio.volume-.37)<.001,'Listening volume preserves precise values on Spotify stepped sliders');
- await controller.command({action:'volume',volume:0});await until(()=>listening.volume===0,'volume not set');assert((await bridge.command('listening-state')).monitorGain===0,'Zero listening volume silences capture monitoring');
+ await controller.command({action:'volume',volume:0});await until(()=>listening.volume===0,'volume not set');await until(async()=>(await bridge.command('listening-state')).monitorGain===0,'Zero volume did not silence monitoring');assert(true,'Zero listening volume silences capture monitoring');
  await sleep(400);audio.pause();await sleep(1800);assert(!listening.playing&&listening.output==='muted','Remote DOM pause holds capture without adding silence');await audio.play();
  await until(()=>listening.trackId===ids[2], 'song did not finish',12000);await sleep(1500);
  const captured=(await listTracks()).find(t=>t.id===`spotify-${ids[1]}`);assert(captured?.status==='captured','Complete paused/resumed capture saved');
@@ -68,6 +72,9 @@ document.querySelector('#suite').onclick=async()=>{try{
  assert((await listTracks()).find(t=>t.id===`spotify-${ids[0]}`).status==='ready','Existing ready stems never overwritten');
  await controller.command({action:'pause'});select(1,false);await deleteTrack(`spotify-${ids[1]}`);await sleep(2200);await audio.play();await sleep(700);audio.currentTime=5;await sleep(400);select(2);await sleep(1300);
  assert(!(await listTracks()).some(t=>t.id===`spotify-${ids[1]}`),'Seeked/skipped partial recording rejected');
+ await controller.command({action:'rate',trackId:ids[2],rate:1.25});audio.playbackRate=1;
+ await until(()=>audio.paused&&!!listening.error,'Unexpected tempo reset was not detected');
+ assert(!!listening.error,'Rejected/reset tempo stops synchronized playback explicitly');
  audio.pause();audio.removeAttribute('src');audio.load();await until(()=>!listening.local,'local ownership not lost');assert(listening.output==='muted','Losing local media silences output');
  report.textContent=JSON.stringify({passed:true,results},null,2);
  }catch(error){audio.pause();report.textContent=JSON.stringify({passed:false,error:String(error),results,listening},null,2);}};
@@ -107,14 +114,20 @@ document.querySelector('#record-replay-suite').onclick=async()=>{try{
  if(!volumeInput)throw Error('mixer volume not found');
  const setter=Object.getOwnPropertyDescriptor(playerWindow().HTMLInputElement.prototype,'value').set;
  for(const value of [.9,.7,.5]) {setter.call(volumeInput,String(value));volumeInput.dispatchEvent(new (playerWindow().Event)('input',{bubbles:true}));await sleep(70);}
+ const tempoInput=playerDoc().querySelector('input[aria-label="Tempo"]'),pitchInput=playerDoc().querySelector('input[aria-label="Pitch"]');
+ setter.call(tempoInput,'1.25');tempoInput.dispatchEvent(new (playerWindow().Event)('input',{bubbles:true}));
+ await until(()=>listening?.playbackRate===1.25,'tempo did not reach Spotify');await sleep(250);
+ setter.call(pitchInput,'3');pitchInput.dispatchEvent(new (playerWindow().Event)('input',{bubbles:true}));await sleep(250);
+ assert(Math.abs(audio.playbackRate-1.25)<.001,'Spotify companion follows DJ tempo');
  await controller.command({action:'pause'});await sleep(350);
  await controller.command({action:'seek',trackId:ids[0],position:1});await controller.command({action:'play'});await sleep(350);
  select(2);await until(()=>playerDoc().querySelector('h3')?.textContent==='DOM song 3' && button('Stop and save recording')&&!button('Stop and save recording').disabled,'recording did not follow next song');
  await sleep(1800);
  button('Stop and save recording').click();await sleep(500);
  const recording=await loadPerformance('last');if(!recording)throw Error('recording did not save');
- assert(recording.version===2&&recording.spotifyPath===`playlist/${ids[0]}`,'record includes versioned Spotify context');
+ assert(recording.version===3&&recording.spotifyPath===`playlist/${ids[0]}`,'record includes versioned Spotify context');
  const values=recording.events.filter(e=>e.type==='mix').flatMap(e=>e.snapshot.stems.map(s=>s.volume));
+ assert(recording.events.some(e=>e.snapshot?.tempo===1.25)&&recording.events.some(e=>e.snapshot?.pitch===3),'tempo and independent pitch recorded');
  assert([.9,.7,.5].every(v=>values.includes(v)),'continuous fader samples retained');
  assert(recording.events.some(e=>e.type==='pause')&&recording.events.filter(e=>e.type==='play').length>=2,'remote pause and resume recorded');
  assert(recording.events.some(e=>e.type==='seek'),'remote seek recorded');
@@ -134,3 +147,28 @@ document.querySelector('#record-replay-suite').onclick=async()=>{try{
  assert(audio.paused,'recording stop pauses Spotify companion');
  report.textContent=JSON.stringify({ok:true,results,eventTypes:recording.events.map(e=>e.type)},null,2);
  }catch(error){report.textContent=JSON.stringify({ok:false,error:String(error),results},null,2);audio.pause();}};
+
+// Compare the actual visualizer/mixer renderer at neutral and worst-range settings.
+document.querySelector('#tempo-performance').onclick=async()=>{const rows=[];try{
+ await document.querySelector('#seed').onclick();select(0);await sleep(2600);
+ const win=()=>frame.contentDocument.querySelector('iframe').contentWindow,doc=()=>win().document;
+ const leave=[...doc().querySelectorAll('button')].find(b=>b.textContent==='Leave recording');if(leave)leave.click();
+ await until(()=>doc().querySelector('input[aria-label="Tempo"]'),'player not ready',12000);
+ await controller.command({action:'volume',volume:0});
+ const setter=Object.getOwnPropertyDescriptor(win().HTMLInputElement.prototype,'value').set;
+ for(const [rate,pitch] of [[1,0],[1.5,12],[.5,-12]]) {
+  await controller.command({action:'pause'});await controller.command({action:'seek',trackId:ids[0],position:.5});
+  await controller.command({action:'rate',trackId:ids[0],rate});
+  const input=doc().querySelector('input[aria-label="Pitch"]');setter.call(input,String(pitch));input.dispatchEvent(new (win().Event)('input',{bubbles:true}));
+  await controller.command({action:'play'});await sleep(450);
+  const gaps=[];let previous=performance.now(),last=previous;
+  await new Promise(resolve=>{const start=performance.now();const tick=()=>{const now=performance.now();gaps.push(now-previous);previous=now;last=now;if(now-start>=3000)resolve();else requestAnimationFrame(tick);};requestAnimationFrame(tick);});
+  gaps.sort((a,b)=>a-b);
+  const displayed=Number(doc().querySelector('input[aria-label="Playback position"]').value);
+  rows.push({rate,pitch,fps:Math.round(1000*gaps.length/gaps.reduce((a,b)=>a+b,0)),p95FrameMs:gaps[Math.floor(gaps.length*.95)],maxFrameMs:gaps.at(-1),driftSeconds:Math.abs(displayed-audio.currentTime),finishedAt:last});
+  report.textContent=JSON.stringify({running:true,rows},null,2);
+ }
+ await controller.command({action:'pause'});await controller.command({action:'rate',rate:1,trackId:ids[0]});
+ const passed=rows.every(row=>row.fps>=rows[0].fps*.9&&row.maxFrameMs<150&&row.driftSeconds<.5);
+ report.textContent=JSON.stringify({passed,rows},null,2);
+}catch(error){audio.pause();report.textContent=JSON.stringify({passed:false,error:String(error),rows,listening},null,2);}};

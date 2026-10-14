@@ -5,6 +5,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
   let busy = false, disposed = false, owner = false, lastLease = 0, catalogAt = 0;
   let catalog = new Map(), recording = null, last = null, generation = 0, lastSource = '';
   let volume = 0.7, volumeRevision = -1, output = 'muted', error = '', armed = false;
+  let desiredRate = 1, pendingRate = null, rateQueued = false;
   let batchPending = false, silentGeneration = -1, replayPreparation = false;
   let frameHeartbeat = 0, failedTrack = '', ignoreUntil = 0, commands = Promise.resolve();
   let lastVolumeDom = null;
@@ -57,7 +58,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       const changed = last && (dom.trackId !== last.trackId || (media?.source && lastSource && media.source !== lastSource));
       const delta = last ? dom.position - last.position : 0;
       const elapsed = last ? (now - last.observedAt) / 1000 : 0;
-      const seeked = !!last && !changed && (delta < -0.5 || delta > elapsed + 1.3);
+      const seeked = !!last && !changed && (delta < -0.5 || delta > elapsed * (last.playbackRate || 1) + 1.3);
       if (changed || seeked) { generation++; ignoreUntil = 0; }
       const runner = getRunner();
       const batch = runner?.isActive();
@@ -71,8 +72,18 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       if (changed) failedTrack = '';
       if (dom.playing && !dom.trackId) error = 'Open Spotify’s Now Playing view to identify this song.';
       else if (error === 'Open Spotify’s Now Playing view to identify this song.') error = '';
-      if (media && media.playbackRate !== 1) error = 'Use 1× playback speed for synchronized listening.';
-      const playing = !!(owner && local && dom.trackId && dom.playing && !media.paused && !media.ended && media.playbackRate === 1);
+      if (changed || batch || !ready || !owner || now - frameHeartbeat >= 2000) {
+        desiredRate = 1;
+        if (media && media.playbackRate !== 1) {
+          await bridge.command('listening-rate', {rate:1,reset:true});
+          media.playbackRate = 1;
+        }
+      }
+      if (media && media.playbackRate !== desiredRate) {
+        error = 'Spotify reset the tempo. Pause and choose the tempo again.';
+        if (dom.playing) await commandTransport({action:'pause'});
+      }
+      const playing = !!(owner && local && dom.trackId && dom.playing && !media.paused && !media.ended && media.playbackRate === desiredRate && !error);
       if (playing) { armed = true; ensurePlayer(); }
       // Start the PCM tap while the player loads, so a cold iframe does not
       // discard the beginning of a newly selected song. Monitoring still waits
@@ -94,7 +105,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       if (current.trackId !== dom.trackId || current.playing !== dom.playing) { await policy(0); return; }
       // Playback is acknowledged only after the capture output is silenced.
       await policy(output === 'capture' && silentGeneration === generation ? volume : 0);
-      last = { ...dom, observedAt: now };
+      last = { ...dom, playbackRate: media?.playbackRate ?? 1, observedAt: now };
       lastSource = media?.source || '';
       const playlist = [...new Set(getTrackIds())];
       const scope = playlist.includes(dom.trackId) ? playlist : [dom.trackId];
@@ -104,7 +115,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       const overallCaptureFraction = recording && scope.length ? (captured + saving + partial) / scope.length : null;
       emit({ ...dom, overallCaptureFraction, generation, position: local ? media.currentTime : dom.position, observedAt: Date.now(),
         playing: playing && connected, local: owner && local, output, volume, error,
-        capability: 1, capturing: !!recording || !!batch,
+        capability: 1, tempoSupported: true, playbackRate: media?.playbackRate ?? 1, capturing: !!recording || !!batch,
         captureProgress: recording ? { trackId: recording.trackId, fraction: dom.duration > 0 ? Math.min(.99, dom.position / dom.duration) : null } : null,
       });
     } catch (reason) {
@@ -120,12 +131,26 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
     isCapturing() { return output === 'capture'; },
     heartbeat() { frameHeartbeat = Date.now(); },
     command(command) {
+      if (command.action === 'rate') { pendingRate=command; if (rateQueued) return commands; rateQueued=true; }
       commands = commands.catch(() => {}).then(async () => {
+        if (command.action === 'rate') { command=pendingRate; pendingRate=null; rateQueued=false; }
         if (command.action === 'silenced') { if (command.generation === generation) silentGeneration = generation; return; }
         error = '';
         if (command.action === 'volume') { if (Number.isFinite(command.volume) && command.volume >= 0 && command.volume <= 1) { volume = command.volume; await commandTransport(command); } return; }
         if (command.action === 'stems-failed') { failedTrack = command.trackId; return; }
         if (command.action === 'enable') { armed = true; ensurePlayer(); return; }
+        if (command.action === 'rate') {
+          const dom = readTransportDom();
+          if (!Number.isFinite(command.rate) || command.rate < .5 || command.rate > 1.5 || dom.trackId !== command.trackId || catalog.get(dom.trackId) !== 'ready' || recording || getRunner()?.isActive()) throw new Error('Tempo changes require prepared stems. Capture stays at 1×.');
+          while (busy) await new Promise(resolve => setTimeout(resolve,20));
+          busy = true;
+          try {
+            if (readTransportDom().trackId !== command.trackId) throw new Error('The song changed before setting tempo.');
+            await policy(0); await bridge.command('listening-rate',{rate:command.rate}); desiredRate=command.rate;
+          }
+          finally { busy=false; }
+          return;
+        }
         getRunner()?.handoff();
         if (command.action !== 'pause' && command.action !== 'play') {
           await policy(0); generation++;
@@ -141,7 +166,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
     },
     async stopCapture() { await this.command({ action: 'pause' }); while (busy) await new Promise(resolve => setTimeout(resolve, 20)); await finish(false); },
     afterBatch() { batchPending = false; },
-    async beforeBatch() { batchPending = true; while (busy) await new Promise(resolve => setTimeout(resolve, 20)); await finish(false); },
-    dispose() { disposed = true; clearInterval(timer); void policy(0); },
+    async beforeBatch() { batchPending = true; desiredRate = 1; await bridge.command('listening-rate',{rate:1,reset:true}); while (busy) await new Promise(resolve => setTimeout(resolve, 20)); await finish(false); },
+    dispose() { disposed = true; void bridge.command('listening-rate',{rate:1,reset:true}).catch(() => {}); clearInterval(timer); void policy(0); },
   };
 }

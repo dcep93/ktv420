@@ -241,7 +241,7 @@ export default function LibraryPage() {
     if(!spotify.spotifyPath || !activeTrack) {setError(spotify.supported ? 'Update ktv420 to 6.2 or later, then reload Spotify to record.' : 'Open a Spotify playlist or album before recording.');return false;}
     const id=selected.replace(/^spotify-/,'');
     const position=request.trackTimeSeconds+captureOffset;
-    mix.current={version:2,name:`ktv420-mix-${new Date().toISOString().replaceAll(':','-')}`,createdAt:new Date().toISOString(),spotifyPath:spotify.spotifyPath,
+    mix.current={version:3,name:`ktv420-mix-${new Date().toISOString().replaceAll(':','-')}`,createdAt:new Date().toISOString(),spotifyPath:spotify.spotifyPath,
       tracks:[{id,title:activeTrack.title,duration:activeTrack.frames/activeTrack.sampleRate+captureOffset}],
       events:[{type:'track',at:0,trackId:id,position,snapshot:request.snapshot}]};
     recordingClock.current.reset();recordingClock.current.start();setRecording(true);setError('');return true;
@@ -268,8 +268,9 @@ export default function LibraryPage() {
     loadedRevision.current = ''; setRecord(null); setSelected(desiredTrack); setAutoPlay(false);
     viewScroll.current.player = 0; setViewMode('player');
   }, [desiredTrack, tracks, selected, recording, stopRecording, listening?.position, replay.active, spotify.replay, captureOffset]);
-  const onPlayerCommand = useCallback((command: { action: 'play' | 'pause' | 'seek'; position?: number }) => {
+  const onPlayerCommand = useCallback((command: { action: 'play' | 'pause' | 'seek' | 'rate'; position?: number; rate?: number }) => {
     if (command.action === 'seek') transportCommand({ action: 'seek', position: (command.position || 0) + captureOffset, trackId: selected.replace(/^spotify-/, '') });
+    else if (command.action === 'rate') transportCommand({action:'rate',rate:command.rate ?? 1,trackId:selected.replace(/^spotify-/, '')});
     else transportCommand({ action: command.action });
   }, [selected, transportCommand, captureOffset]);
   const onPlaybackError = useCallback((message: string) => {
@@ -417,6 +418,7 @@ export default function LibraryPage() {
       <button className="iframe-player-back" aria-label="Back to tracks" onClick={() => setViewMode('tracks')}><OverlayIcon name="back" /></button>
       <div className={replay.active ? "replay-mixer" : undefined} inert={!!spotify.replay}><Player key={record.md5} record={record} title={activeTrack.title} replaying={replay.active} onControls={onControls}
         masterVolume={listening ? (listening.output === 'stems' && selected === `spotify-${listening.trackId}` && listening.local ? listening.volume : 0) : 1}
+        tempoSupported={!listening || listening.tempoSupported === true}
         transport={!spotify.replay && listening ? { ...listening, position: Math.max(0, listening.position - captureOffset), playing: listening.playing && listening.output === 'stems' && selected === `spotify-${listening.trackId}` } : undefined}
         onTransportCommand={!spotify.replay && listening ? onPlayerCommand : undefined} onPlaybackError={onPlaybackError}
         hasPreviousTrack={listening ? listening.canPrevious : !recording && selectedIndex > 0} hasNextTrack={listening ? listening.canNext : !recording && selectedIndex >= 0 && selectedIndex < playbackTracks.length - 1}
