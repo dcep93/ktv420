@@ -1,3 +1,4 @@
+import { claimListeningLease, type ListeningLease } from './listeningLease';
 import { beginCapture, appendCapture, finishCapture } from './capture';
 import { listTracks } from '../features/local/library';
 
@@ -12,6 +13,7 @@ chrome.action.onClicked.addListener(tab => {
     } else await chrome.tabs.create({ url: 'https://open.spotify.com/' });
   })().catch(error => console.error('Reload Spotify to open ktv420.', error));
 });
+let leaseQueue = Promise.resolve();
 chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
   if (sender.id !== chrome.runtime.id || typeof sender.tab?.id !== 'number' || !sender.url?.startsWith('https://open.spotify.com/') ||
     !message || typeof message !== 'object' || !('type' in message)) return false;
@@ -19,6 +21,17 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
   const tabId = sender.tab.id;
   const handle = async () => {
     switch (request.type) {
+      case 'ktv420:listening-claim': {
+        let granted = false;
+        const operation = leaseQueue.then(async () => {
+          const stored = await chrome.storage.session.get('listeningLease');
+          const lease = claimListeningLease(stored.listeningLease as ListeningLease | undefined, tabId, Date.now());
+          await chrome.storage.session.set({ listeningLease: lease });
+          granted = lease.tabId === tabId;
+        });
+        leaseQueue = operation.catch(() => {}); await operation; return granted;
+      }
+      case 'ktv420:library-status': return (await listTracks()).filter(track => track.source === 'spotify').map(track => ({ trackId: track.metadata?.trackId, status: track.status }));
       case 'ktv420:cached': return (await listTracks()).filter(track => track.source === 'spotify').map(track => track.metadata);
       case 'ktv420:capture-begin': return beginCapture(tabId, request.metadata, request.bytes);
       case 'ktv420:capture-chunk': await appendCapture(tabId, request.id, request.index, request.base64); return null;

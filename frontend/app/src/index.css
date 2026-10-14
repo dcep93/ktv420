@@ -973,3 +973,11 @@
 .iframe-player-exports button { margin: 8px 8px 0 0; }
 .iframe-track-row:enabled { cursor: pointer; }
 .iframe-track-row:focus-visible { outline: 2px solid var(--ww-title-pink); outline-offset: 2px; }
+
+/* Equal side columns keep k centered when volume or source status changes. */
+.iframe-actions-shell { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; width: min(760px, 100%); }
+.iframe-actions-shell > .iframe-actions { grid-column: 2; }
+.iframe-master-volume { justify-self: end; display: grid; gap: 1px; width: 150px; color: var(--ww-text-muted); font-size: 11px; }
+.iframe-master-volume > span { display: flex; justify-content: space-between; }
+.iframe-master-volume input { width: 100%; margin: 3px 0; accent-color: var(--ww-title-pink); }
+.iframe-master-volume small { font-size: 10px; color: var(--ww-accent-cyan); }

@@ -77,6 +77,10 @@ export type VisualizerType =
   | "delay-pedal";
 
 export type PlayerProps = {
+  masterVolume?: number;
+  transport?: { position: number; playing: boolean; generation: number; observedAt: number };
+  onTransportCommand?: (command: { action: 'play' | 'pause' | 'seek'; position?: number }) => void;
+  onPlaybackError?: (message: string) => void;
   record: PlaybackRecord;
   title?: string;
   trackMetadata?: Record<string, unknown> | null;

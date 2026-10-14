@@ -1,3 +1,4 @@
+import { parseListeningState, parseTransportCommand } from '../features/local/listeningProtocol';
 import { createLibraryBrokerSession, LIBRARY_PROTOCOL_VERSION } from './libraryBroker';
 
 type MessageWindow = Pick<Window, 'postMessage'>;
@@ -47,6 +48,8 @@ export function createBrokerBridge(options: BridgeOptions) {
           const progress = data.captureProgress as { trackId: string; fraction: number | null } | null;
           state.captureProgress = progress === null ? null : { trackId: progress.trackId, fraction: progress.fraction };
         }
+        const listening = parseListeningState(data.listening);
+        if (listening) state.listening = listening;
         if (ready) options.player.postMessage(state, options.playerOrigin);
       }
       return;
@@ -70,6 +73,11 @@ export function createBrokerBridge(options: BridgeOptions) {
       options.onReady?.();
       options.parent.postMessage({ source: 'ktv420-overlay', version: LIBRARY_PROTOCOL_VERSION, type: 'ready' }, options.parentOrigin);
       if (state) options.player.postMessage(state, options.playerOrigin);
+    } else if (ready && data.type === 'listening-heartbeat') {
+      options.parent.postMessage({ source: 'ktv420-overlay', version: LIBRARY_PROTOCOL_VERSION, type: data.type }, options.parentOrigin);
+    } else if (ready && data.type === 'transport') {
+      const command = parseTransportCommand(data.command);
+      if (command) options.parent.postMessage({ source: 'ktv420-overlay', version: LIBRARY_PROTOCOL_VERSION, type: 'transport', command }, options.parentOrigin);
     } else if (ready && (data.type === 'close' || data.type === 'toggle-capture')) {
       options.parent.postMessage({ source: 'ktv420-overlay', version: LIBRARY_PROTOCOL_VERSION, type: data.type }, options.parentOrigin);
     }

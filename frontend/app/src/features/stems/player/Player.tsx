@@ -82,6 +82,7 @@ function getLogarithmicVolumeGain(volume: number) {
 
 export default function Player({
   record,
+  masterVolume = 1, transport, onTransportCommand, onPlaybackError,
   title,
   trackMetadata,
   unavailableMessage,
@@ -98,6 +99,12 @@ export default function Player({
   onRecordingEvent,
   onRegisterRecordingFlush,
 }: PlayerProps) {
+  const playbackErrorRef = useRef(onPlaybackError);
+  useEffect(() => { playbackErrorRef.current = onPlaybackError; }, [onPlaybackError]);
+  const [transportError, setTransportError] = useState('');
+  const playbackEpoch = useRef(0);
+  const syncBusy = useRef(false);
+  const masterGain = useRef<GainNode | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -392,12 +399,16 @@ export default function Player({
   const ensureAudioContext = useCallback(() => {
     if (!audioCtxRef.current) {
       audioCtxRef.current = new AudioContext();
+      masterGain.current = audioCtxRef.current.createGain();
+      masterGain.current.gain.value = 0;
+      masterGain.current.connect(audioCtxRef.current.destination);
     }
 
     return audioCtxRef.current;
   }, []);
 
   const stopAllSources = useCallback(() => {
+    playbackEpoch.current++;
     Object.values(sourcesRef.current).forEach((source) => {
       try {
         source.stop();
@@ -815,7 +826,7 @@ export default function Player({
         gain.connect(effectNodes.dryGain);
         effectNodes.wetGain.connect(analyser);
         effectNodes.dryGain.connect(analyser);
-        analyser.connect(context.destination);
+        analyser.connect(masterGain.current!);
 
         gainNodesRef.current[track.id] = gain;
         effectNodesRef.current[track.id] = effectNodes;
@@ -906,6 +917,7 @@ export default function Player({
           setCurrentChord("Press Analyze");
         }
       } catch (error) {
+        if (!isCancelled) playbackErrorRef.current?.(`Could not load ${track.name}. Playing the Spotify capture instead.`);
         console.error("Failed to analyze track envelope", track.name, error);
       }
     };
@@ -1198,7 +1210,11 @@ export default function Player({
       }
 
       const context = ensureAudioContext();
+      const epoch = playbackEpoch.current;
       await context.resume();
+      if (epoch !== playbackEpoch.current) return;
+      if (context.state !== 'running') { setTransportError('Click Play to enable sound.'); return; }
+      setTransportError('');
       const startAt = context.currentTime + 0.02;
       const newSources: Record<string, AudioBufferSourceNode> = {};
 
@@ -1227,6 +1243,7 @@ export default function Player({
 
   const commitSeek = useCallback(
     async (targetTime: number) => {
+      if (onTransportCommand) { onTransportCommand({ action: 'seek', position: targetTime }); return; }
       const clampedTime = Math.max(0, Math.min(targetTime, duration || 0));
 
       if (isPlaying) {
@@ -1238,7 +1255,7 @@ export default function Player({
         setCurrentTime(clampedTime);
       }
     },
-    [duration, isPlaying, schedulePlayback, stopAllSources]
+    [duration, isPlaying, schedulePlayback, stopAllSources, onTransportCommand]
   );
 
   const handleSeekChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -1326,6 +1343,10 @@ export default function Player({
   }, [stopAllSources]);
 
   const handlePlayPause = useCallback(async () => {
+    if (onTransportCommand) {
+      await ensureAudioContext().resume(); setTransportError('');
+      onTransportCommand({ action: isPlaying ? 'pause' : 'play' }); return;
+    }
     if (!tracks.length) {
       return;
     }
@@ -1352,7 +1373,7 @@ export default function Player({
     isPlaying,
     pausePlayback,
     schedulePlayback,
-    tracks.length,
+    tracks.length, onTransportCommand, ensureAudioContext,
   ]);
 
   const selectVisualizerType = useCallback(
@@ -1540,6 +1561,33 @@ export default function Player({
 
   const areTracksReady =
     tracks.length > 0 && readyTrackIds.length === tracks.length;
+  useEffect(() => {
+    const update = () => {
+      const context = audioCtxRef.current, gain = masterGain.current;
+      if (context && gain) {
+        const fresh = !transport || Date.now() - transport.observedAt < 1800;
+        const volume = fresh ? Math.max(0, Math.min(1, masterVolume)) : 0;
+        gain.gain.cancelScheduledValues(context.currentTime);
+        if (volume === 0) gain.gain.setValueAtTime(0, context.currentTime);
+        else gain.gain.setTargetAtTime(volume, context.currentTime, 0.005);
+      }
+    };
+    update(); const timer = setInterval(update, 200); return () => clearInterval(timer);
+  }, [masterVolume, transport]);
+  useEffect(() => {
+    if (!transport || !areTracksReady) return;
+    const playing = transport.playing && Date.now() - transport.observedAt < 1800;
+    const position = Math.min(duration, transport.position + (playing ? Math.max(0, Date.now() - transport.observedAt) / 1000 : 0));
+    if (!playing) {
+      stopAllSources(); startOffsetRef.current = position; setCurrentTime(position); setIsPlaying(false); return;
+    }
+    if (syncBusy.current || (isPlaying && Math.abs(currentPlaybackTime() - position) < 0.5)) return;
+    stopAllSources(); startOffsetRef.current = position; syncBusy.current = true;
+    void schedulePlayback(position).catch(reason => setTransportError(String(reason))).finally(() => { syncBusy.current = false; });
+  }, [transport, areTracksReady, duration, isPlaying, currentPlaybackTime, schedulePlayback, stopAllSources]);
+  useEffect(() => {
+    if (transport && tracks.length && readyTrackIds.length < tracks.length && unavailableMessage) onPlaybackError?.(unavailableMessage);
+  }, [transport, tracks.length, readyTrackIds.length, unavailableMessage, onPlaybackError]);
   const recordingButtonDisabled = isRecording
     ? !onStopRecording
     : !areTracksReady || isPlaying || !onStartRecording;
@@ -1689,6 +1737,7 @@ export default function Player({
               className={`player-transport-button${isPlaying ? " player-transport-button--active" : ""}`}
               onClick={() => void handlePlayPause()}
               disabled={!areTracksReady}
+              title={transportError || undefined}
               aria-label={isPlaying ? "Pause" : "Play"}
               style={{
                 fontSize: "20px",
@@ -1773,6 +1822,7 @@ export default function Player({
                   {formatPlaybackTime(currentTime)} / {formatPlaybackTime(duration)}
                 </span>
               </div>
+              {transportError && <p role="status">{transportError}</p>}
               <h3 style={{ fontSize: "1em", margin: 0 }}>{playerTitle}</h3>
               <div
                 style={{

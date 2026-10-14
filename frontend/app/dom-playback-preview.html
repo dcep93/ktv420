@@ -1,0 +1,7 @@
+<!doctype html><html><head><title>ktv420 DOM transport test</title></head><body style="background:#17110e;color:#eee;font:14px system-ui">
+<h1>DOM transport test</h1><p>Synthetic local audio only. No Spotify account or cloud processing.</p>
+<div data-testid="now-playing-bar"><div data-testid="now-playing-widget"><a data-testid="context-item-info-title"></a><span data-testid="context-item-info-subtitles">Test artist</span></div>
+<button data-testid="control-button-skip-back">Previous</button><button data-testid="control-button-playpause" aria-label="Play">Play</button><button data-testid="control-button-skip-forward">Next</button>
+<label>Change progress<input type="range" min="0" max="8000" step="1" value="0"></label><label>Change volume<input type="range" min="0" max="1" step=".01" value="1"></label></div>
+<button id="suite">Run routing tests</button><button id="seed">Prepare saved stems</button><button id="check">Check saved capture</button><button id="lose">Simulate losing local playback</button><button id="snapshot">Inspect audio state</button><pre id="report"></pre>
+<iframe title="ktv420 player" src="/broker.html" allow="autoplay" style="width:100%;height:780px;border:0"></iframe><script type="module" src="/dom-playback-preview.js"></script></body></html>

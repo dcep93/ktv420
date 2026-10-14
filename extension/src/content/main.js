@@ -1,3 +1,4 @@
+import { createListeningController } from './listening.js';
 import { createPageBridge } from "./pageBridge.js";
 import { mountButton } from "./ui.js";
 
@@ -6,6 +7,7 @@ bridge.inject().catch((error) => {
   console.warn("[ktv420] Failed to inject page hooks early", error);
 });
 
+let listening = null;
 let orchestrator = null;
 let orchestratorPromise = null;
 
@@ -37,10 +39,14 @@ async function getOrchestrator() {
 const ui = mountButton({
   isRunActive: () => Boolean(orchestrator?.isActive()),
   loadSpotifyTracks: () => loadSpotifyPlaylistTracks(),
+  onTransport: command => listening?.command(command),
+  onHeartbeat: () => listening?.heartbeat(),
   onToggleRun: async (options = {}) => {
     try {
       const runner = await getOrchestrator();
-      await runner.toggleRun(options);
+      if (!runner.isActive() && listening?.isCapturing()) { await listening.stopCapture(); return; }
+      if (!runner.isActive()) await listening?.beforeBatch();
+      try { await runner.toggleRun(options); } finally { listening?.afterBatch(); }
       ui.refresh();
     } catch (error) {
       console.log("[ktv420] Failed to run capture", error);
@@ -48,6 +54,9 @@ const ui = mountButton({
     }
   }
 });
+
+listening = createListeningController({ bridge, emit: state => ui.notifyListening(state), ensurePlayer: () => ui.prepare(), getRunner: () => orchestrator });
+window.addEventListener('pagehide', () => listening?.dispose(), { once: true });
 
 async function loadSpotifyPlaylistTracks() {
   const playlistUri = currentSpotifyPlaylistUri();

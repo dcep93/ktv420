@@ -15,7 +15,6 @@ import { formatSeconds, looselyMatches } from "./text.js";
 import { md5Hex } from "./md5.js";
 
 const START_TIMEOUT_MS = 3000;
-const PAUSE_TIMEOUT_MS = 1000;
 const END_TOLERANCE_SECONDS = 0.25;
 const PROGRESS_INTERVAL_MS = 250;
 
@@ -42,6 +41,8 @@ export class CaptureOrchestrator extends EventTarget {
     await this.run(options);
   }
 
+  handoff() { if (this.active) { this.stopRequested = true; this.handingOff = true; this.clearCaptureProgress(); } }
+
   async requestStop() {
     this.stopRequested = true;
     this.clearCaptureProgress();
@@ -59,6 +60,7 @@ export class CaptureOrchestrator extends EventTarget {
     });
 
     this.active = true;
+    this.handingOff = false;
     this.stopRequested = false;
     this.clearCaptureProgress();
     this.dispatchEvent(new Event("activechange"));
@@ -210,7 +212,7 @@ export class CaptureOrchestrator extends EventTarget {
       console.log("[ktv420] Capture run complete", summary);
     } catch (error) {
       this.clearCaptureProgress();
-      pausePlaybackCleanly();
+      if (!this.handingOff) pausePlaybackCleanly();
       await this.bridge.command("capture-abort").catch(() => {});
       markTiming(runTimingTrace, "orchestrator_run_error", {
         error: error?.message || String(error)
@@ -498,9 +500,7 @@ export class CaptureOrchestrator extends EventTarget {
 
       if (mediaState.paused && !mediaState.ended) {
         pauseStartedAt ??= now;
-        if (now - pauseStartedAt > PAUSE_TIMEOUT_MS) {
-          throw new Error(`Spotify paused unexpectedly for more than ${PAUSE_TIMEOUT_MS}ms during ${item.trackName}.`);
-        }
+        // A remote pause is ordinary transport, not a failed recording.
       } else {
         pauseStartedAt = null;
       }
@@ -590,11 +590,13 @@ export class CaptureOrchestrator extends EventTarget {
       byteLength: bytes.byteLength,
       sampleRate: capture.sampleRate,
       channelCount: capture.channelCount,
-      startMediaTime: capture.startMediaTime
+      startMediaTime: capture.startMediaTime,
+      invalid: capture.invalid
     };
   }
 
   async storeCapturedTrack(item, capture, captureEnd) {
+    if (capture.invalid) throw new Error('The song was seeked during capture. Listen from the beginning to capture it.');
     const captureWithHash = {
       ...capture,
       md5: md5Hex(capture.bytes)

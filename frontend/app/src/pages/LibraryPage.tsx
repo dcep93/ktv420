@@ -1,3 +1,4 @@
+import { captureStartSeconds } from '../features/local/listeningProtocol';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Player from '../features/stems/player/Player';
 import OverlayIcon from './OverlayIcon';
@@ -24,6 +25,11 @@ export default function LibraryPage() {
   useLayoutEffect(() => { if (content.current) content.current.scrollTop = viewScroll.current[viewMode]; }, [viewMode]);
   const [error, setError] = useState('');
   const spotify = useSpotifyOverlay();
+  const listening = spotify.listening;
+  const transportCommand = spotify.transport;
+  useEffect(() => {
+    if (listening && listening.output !== 'stems') transportCommand({ action: 'silenced', generation: listening.generation });
+  }, [listening, transportCommand]);
   const [autoProcessing, setAutoProcessing] = useState(false);
   const [active, setActive] = useState('');
   const [progress, setProgress] = useState<SeparationProgress | null>(null);
@@ -50,6 +56,7 @@ export default function LibraryPage() {
   const playbackTracks = savedSpotifyTracks.filter(track => track.status === 'ready');
   const selectedIndex = playbackTracks.findIndex(track => track.id === selected);
   const activeTrack = tracks.find(track => track.id === selected);
+  const captureOffset = captureStartSeconds(activeTrack?.metadata);
   const observedProcessingPreference = useRef<boolean | null>(null);
   const refresh = useCallback(async () => {
     const [savedTracks, cached, enabled] = await Promise.all([listTracks(), getModelCacheStatus(), getProcessingEnabled()]);
@@ -76,9 +83,9 @@ export default function LibraryPage() {
     if (recording || loadedRevision.current === revision) return;
     if (selected) void getPlaybackRecord(selected).then(next => {
       if (!disposed) { loadedRevision.current = revision; setRecord({ ...next, files: next.files.filter(file => file.name !== 'source') }); }
-    }).catch(reason => { if (!disposed) setError(errorText(reason)); });
+    }).catch(reason => { if (!disposed) { setError(errorText(reason)); transportCommand({ action: 'stems-failed', trackId: selected.replace(/^spotify-/, '') }); } });
     return () => { disposed = true; };
-  }, [selected, selectedReady, selectedCreatedAt, recording]);
+  }, [selected, selectedReady, selectedCreatedAt, recording, transportCommand]);
   const processTracks = useCallback(async (ids: string[], automatic = false) => {
     if (running.current || deleting.current || modelBusy.current) return;
     running.current = true; cancelled.current = false; setError('');
@@ -179,7 +186,22 @@ export default function LibraryPage() {
     downloadBlob(new Blob([JSON.stringify(mix.current, null, 2)], {type:'application/json'}), `${mix.current.name}.json`);
     mix.current = null; setRecording(false);
   }, []);
+  const desiredTrack = listening?.local && listening.output === 'stems' ? `spotify-${listening.trackId}` : '';
+  useEffect(() => {
+    if (!desiredTrack || !tracks.some(track => track.id === desiredTrack && track.status === 'ready') || selected === desiredTrack) return;
+    if (recording) void stopRecording({ type: 'transport_pause', trackTimeSeconds: listening?.position || 0 });
+    loadedRevision.current = ''; setRecord(null); setSelected(desiredTrack); setAutoPlay(false);
+    viewScroll.current.player = 0; setViewMode('player');
+  }, [desiredTrack, tracks, selected, recording, stopRecording, listening?.position]);
+  const onPlayerCommand = useCallback((command: { action: 'play' | 'pause' | 'seek'; position?: number }) => {
+    if (command.action === 'seek') transportCommand({ action: 'seek', position: (command.position || 0) + captureOffset, trackId: selected.replace(/^spotify-/, '') });
+    else transportCommand({ action: command.action });
+  }, [selected, transportCommand, captureOffset]);
+  const onPlaybackError = useCallback((message: string) => {
+    setError(message); transportCommand({ action: 'stems-failed', trackId: selected.replace(/^spotify-/, '') });
+  }, [selected, transportCommand]);
   const navigateTrack = (offset: number) => {
+    if (listening) { transportCommand({ action: offset > 0 ? 'next' : 'previous' }); return; }
     const next = playbackTracks[selectedIndex + offset];
     if (!next || recording) return;
     loadedRevision.current = ''; setRecord(null); setSelected(next.id); setAutoPlay(true);
@@ -204,12 +226,13 @@ export default function LibraryPage() {
   }, [close, spotify, viewMode, canCapture]);
   const openTrack = (id: string) => {
     if (tracks.find(track => track.id === id)?.status !== 'ready' || deleting.current || (recording && selected !== id)) return;
+    if (listening) { transportCommand({ action: 'select', trackId: id.replace(/^spotify-/, '') }); setViewMode('player'); return; }
     if (selected !== id) { loadedRevision.current = ''; setRecord(null); setSelected(id); setAutoPlay(false); viewScroll.current.player = 0; }
     setViewMode('player');
   };
   const stoppedByUser = !error && /^Capture run stopped by user\.?$/.test(spotify.error);
-  const statusError = !!error || (!!spotify.error && !stoppedByUser);
-  const statusMessage = error || (stoppedByUser ? 'Capture stopped.' : spotify.error) ||
+  const statusError = !!listening?.error || !!error || (!!spotify.error && !stoppedByUser);
+  const statusMessage = error || listening?.error || (stoppedByUser ? 'Capture stopped.' : spotify.error) ||
     (spotify.starting ? 'Starting capture…' : spotify.active ? 'Capturing songs as they play…' :
       spotify.notice.replace(' Local separation is queued automatically.', '').replace(' Separation continues here automatically.', ''));
   return <main className="iframe-page iframe-page--overlay" aria-label="ktv420 iframe controls">
@@ -218,7 +241,7 @@ export default function LibraryPage() {
         <OverlayIcon name={statusError ? 'alert' : 'music'} /><span>{statusMessage}</span>
       </p>}
     </div>
-    <div className="iframe-actions">
+    <div className="iframe-actions-shell"><div className="iframe-actions">
       <button type="button" className="iframe-close-button" aria-label="Close" title="Close" onClick={close}><OverlayIcon name="close" /></button>
       <button type="button" className="iframe-logo-button" aria-label="Start or stop ktv420 capture"
         title={spotify.active ? 'Stop capture' : 'Start capture'} aria-disabled={!canCapture} disabled={!canCapture}
@@ -226,6 +249,11 @@ export default function LibraryPage() {
       <button type="button" className="iframe-settings-button" aria-label="Toggle settings view" title={viewMode === 'settings' ? 'Back to music' : 'Settings'}
         aria-pressed={viewMode === 'settings'} onClick={toggleSettings}><OverlayIcon name="settings" /></button>
     </div>
+    <label className="iframe-master-volume"><span>Volume <output>{Math.round((listening?.volume ?? 0.7) * 100)}%</output></span>
+      <input type="range" min="0" max="1" step="0.01" aria-label="Listening volume" value={listening?.volume ?? 0.7}
+        disabled={!listening} onChange={event => transportCommand({ action: 'volume', volume: Number(event.target.value) })} />
+      <small>{!listening ? 'Update extension for volume' : listening.output === 'stems' ? 'Stems' : listening.output === 'capture' ? 'Capture' : 'Muted'}</small>
+    </label></div>
     <div className="iframe-content" ref={content} onScroll={event => { viewScroll.current[viewMode] = event.currentTarget.scrollTop; }}>
     {viewMode === 'settings' && <section className="iframe-settings-view" aria-label="Settings view">
       <section className="iframe-settings-source">
@@ -300,9 +328,12 @@ export default function LibraryPage() {
     </ol>}
     {activeTrack && record && record.md5 === selected && <section className="iframe-player-view" hidden={viewMode !== 'player'} aria-label="Player">
       <button className="iframe-player-back" aria-label="Back to tracks" onClick={() => setViewMode('tracks')}><OverlayIcon name="back" /></button>
-      <Player record={record} title={activeTrack.title}
-        hasPreviousTrack={!recording && selectedIndex > 0} hasNextTrack={!recording && selectedIndex >= 0 && selectedIndex < playbackTracks.length - 1}
-        onPreviousTrack={() => navigateTrack(-1)} onNextTrack={() => navigateTrack(1)} onTrackEnd={() => navigateTrack(1)}
+      <Player key={record.md5} record={record} title={activeTrack.title}
+        masterVolume={listening ? (listening.output === 'stems' && selected === `spotify-${listening.trackId}` && listening.local ? listening.volume : 0) : 1}
+        transport={listening ? { ...listening, position: Math.max(0, listening.position - captureOffset), playing: listening.playing && listening.output === 'stems' && selected === `spotify-${listening.trackId}` } : undefined}
+        onTransportCommand={listening ? onPlayerCommand : undefined} onPlaybackError={onPlaybackError}
+        hasPreviousTrack={listening ? listening.canPrevious : !recording && selectedIndex > 0} hasNextTrack={listening ? listening.canNext : !recording && selectedIndex >= 0 && selectedIndex < playbackTracks.length - 1}
+        onPreviousTrack={() => navigateTrack(-1)} onNextTrack={() => navigateTrack(1)} onTrackEnd={listening ? undefined : () => navigateTrack(1)}
         autoPlayOnReady={autoPlay} onAutoPlayOnReadyHandled={() => setAutoPlay(false)} trackMetadata={activeTrack.metadata} isRecording={recording}
         onStartRecording={startRecording} onStopRecording={stopRecording} onRecordingEvent={recordEvent} onRegisterRecordingFlush={callback => { flush.current = callback; }} />
       <details className="iframe-player-exports"><summary>Export audio</summary>{record.files.map(file => <button key={file.path}

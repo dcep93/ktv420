@@ -12,7 +12,7 @@ export default defineConfig(({ mode }) => {
     base: './', plugins: [react()],
     define: { 'import.meta.env.VITE_ORT_VERSION': JSON.stringify(runtimeVersion) },
     publicDir: extension ? false : 'public',
-    server: { host: '0.0.0.0', port: 5174, strictPort: true },
+    server: { fs: { allow: [fileURLToPath(new URL('../..', import.meta.url))] }, host: '0.0.0.0', port: 5174, strictPort: true },
     worker: { format: 'es' },
     build: {
       outDir: extension ? 'dist-extension' : 'dist',

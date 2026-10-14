@@ -72,3 +72,27 @@ test('bridge validates optional capture progress and forwards only its sanitized
   assert.equal(messages.length, count, 'malformed or untrusted progress never reaches the hosted player');
   await bridge.dispose();
 });
+
+
+test('transport and heartbeat require the ready hosted peer and sanitize commands', async () => {
+  const messages: Record<string, unknown>[] = [];
+  const parent = { postMessage: (data: Record<string, unknown>) => messages.push(data) } as unknown as Window;
+  const player = { postMessage() {} } as unknown as Window;
+  const bridge = createBrokerBridge({ parent, player, parentOrigin: 'https://open.spotify.com', playerOrigin: 'https://ktv420.web.app', showError() {},
+    createSession: () => ({ dispose: async () => {}, handle: async () => ({ source: 'ktv420-library', version: 2, id: 'test', ok: true }) }) as ReturnType<typeof createLibraryBrokerSession>,
+  });
+  const send = (type: string, command?: unknown, source = player, origin = 'https://ktv420.web.app') =>
+    bridge.receive({ source, origin, data: { source: 'ktv420-overlay', version: 2, type, command } });
+  await send('transport', { action: 'play' }); await send('listening-heartbeat');
+  assert.equal(messages.length, 0);
+  await send('ready');
+  await send('transport', { action: 'seek', trackId: 'abc', position: 12, script: 'stripped' });
+  assert.deepEqual(messages.at(-1)?.command, { action: 'seek', trackId: 'abc', position: 12 });
+  await send('listening-heartbeat');
+  const count = messages.length;
+  await send('transport', { action: 'volume', volume: Infinity });
+  await send('transport', { action: 'play' }, parent);
+  await send('listening-heartbeat', undefined, player, 'https://evil.example');
+  assert.equal(messages.length, count);
+  await bridge.dispose();
+});

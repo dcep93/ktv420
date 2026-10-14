@@ -7,7 +7,7 @@ const BUTTON_ID = 'ktv420-spotify-capture-button';
 const IFRAME_ID = 'ktv420-prepared-iframe';
 const STYLE_ID = 'ktv420-spotify-capture-style';
 
-export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks }) {
+export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTransport, onHeartbeat }) {
   const origin = chrome.runtime.getURL('').replace(/\/$/, '');
   const [major, minor] = chrome.runtime.getManifest().version.split('.').map(Number);
   const hostedBridge = major > 0 || minor >= 4;
@@ -19,7 +19,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks }) {
   overlay.id = IFRAME_ID; overlay.setAttribute('aria-label', 'ktv420 Spotify overlay'); overlay.setAttribute('aria-hidden', 'true');
   let iframe; let tracks = []; let notice = ''; let error = ''; let starting = false; let route = ''; let refreshing = false;
   let frameReady = false;
-  let captureProgress = null;
+  let captureProgress = null; let listening = null;
   function post() {
     // A new iframe starts as about:blank with Spotify's origin. Wait until the
     // extension document identifies itself before sending extension-only data.
@@ -30,7 +30,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks }) {
       trackId, trackName, trackArtist, trackArtworkSrc, rowIndex,
     }));
     iframe?.contentWindow?.postMessage({ source: PARENT, version: 2, type: 'state', tracks: trackData,
-      active: isRunActive(), starting, notice, error, captureProgress, supported: isSupportedRoute() }, origin);
+      active: isRunActive() || !!listening?.capturing, starting, notice, error, captureProgress: captureProgress || listening?.captureProgress || null, listening, supported: isSupportedRoute() }, origin);
   }
   async function updateTracks() {
     if (refreshing || isRunActive()) return;
@@ -43,7 +43,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks }) {
     } catch (reason) { error = reason?.message || String(reason); }
     finally { refreshing = false; post(); }
   }
-  async function show() {
+  function prepare() {
     if (!iframe) {
       iframe = document.createElement('iframe');
       iframe.title = 'ktv420 Spotify player';
@@ -52,6 +52,9 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks }) {
       Object.assign(iframe.style, { width: '100%', height: '100%', border: '0' });
       overlay.append(iframe);
     }
+  }
+  async function show() {
+    prepare();
     overlay.dataset.open = 'true'; overlay.setAttribute('aria-hidden', 'false');
     await updateTracks(); post();
   }
@@ -65,7 +68,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks }) {
     } else button.remove();
     if (document.body && !overlay.isConnected) document.body.append(overlay);
     button.dataset.active = String(isRunActive());
-    button.disabled = !isSupportedRoute() && !isRunActive();
+    button.disabled = !isSupportedRoute() && !isRunActive() && !listening;
     button.title = isRunActive() ? 'ktv420 capture active' : 'Open ktv420';
     post();
     if (iframe && route !== location.pathname && !isRunActive()) void updateTracks();
@@ -75,6 +78,8 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks }) {
     if (hostedBridge && event.data.version !== 2) return;
     if (event.data.type === 'close') { overlay.dataset.open = 'false'; overlay.setAttribute('aria-hidden', 'true'); return; }
     if (event.data.type === 'ready') { frameReady = true; post(); return; }
+    if (event.data.type === 'listening-heartbeat') { onHeartbeat?.(); return; }
+    if (event.data.type === 'transport') { await onTransport?.(event.data.command); return; }
     if (event.data.type !== 'toggle-capture' || starting) return;
     starting = true; error = ''; post();
     try {
@@ -98,7 +103,8 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks }) {
   window.addEventListener('pagehide', () => {
     clearInterval(timer); window.removeEventListener('message', handleMessage); chrome.runtime.onMessage.removeListener(toolbar);
   }, { once: true });
-  return { refresh,
+  return { refresh, prepare,
+    notifyListening(state) { listening = state; post(); },
     notifyCaptureProgress(progress) { captureProgress = progress; post(); },
     async notifyTrackCaptured(_id, metadata) { notice = `${metadata?.trackName || 'Track'} captured. Local separation is queued automatically.`; post(); },
     async notifyCaptureComplete(trackIds) { notice = `${trackIds?.length || 0} tracks captured. Separation continues here automatically.`; refresh(); },

@@ -10,6 +10,43 @@
   window[INSTALL_MARKER] = true;
 
   let lastPlaylistContentsRequest = null;
+  const audioGraphs = new WeakMap();
+  const graphPromises = new WeakMap();
+  const nativeVolume = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'volume');
+  const nativeMuted = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'muted');
+  const outputElements = new Map();
+  let monitor = { gain: 0, expires: 0 };
+  let volumeRevision = 0, requestedVolume = 1;
+  function guardOutput(element) {
+    if (outputElements.has(element)) return;
+    const state = { volume: nativeVolume.get.call(element), muted: nativeMuted.get.call(element) };
+    outputElements.set(element, state);
+    // Spotify's volume is a listening request; it must never scale captured PCM.
+    Object.defineProperty(element, 'volume', { configurable: true,
+      get: () => state.volume, set: value => {
+        if (!Number.isFinite(value) || value < 0 || value > 1) return;
+        state.volume = value; requestedVolume = state.muted ? 0 : value; volumeRevision++;
+      } });
+    Object.defineProperty(element, 'muted', { configurable: true,
+      get: () => state.muted, set: value => {
+        state.muted = Boolean(value); requestedVolume = state.muted ? 0 : state.volume; volumeRevision++;
+      } });
+    nativeVolume.set.call(element, 0);
+    nativeMuted.set.call(element, false);
+  }
+  function updateMonitor() {
+    const gain = performance.now() < monitor.expires ? monitor.gain : 0;
+    for (const element of outputElements.keys()) {
+      const graph = audioGraphs.get(element);
+      if (graph) {
+        graph.monitor.gain.cancelScheduledValues(graph.context.currentTime);
+        if (gain === 0) graph.monitor.gain.setValueAtTime(0, graph.context.currentTime);
+        else graph.monitor.gain.setTargetAtTime(gain, graph.context.currentTime, 0.005);
+      }
+    }
+  }
+  setInterval(updateMonitor, 250);
+
 
   const post = (event, payload, transfer = []) => {
     window.postMessage({ source: SOURCE, event, payload }, window.location.origin, transfer);
@@ -151,6 +188,17 @@
         let result;
         if (command === "media-targets") {
           result = controller.describeTargets();
+        } else if (command === "listening-state") {
+          const elements = mediaTracker.all().filter(element => getMediaSource(element) && Number.isFinite(element.duration) && element.duration > 0);
+          const playing = elements.filter(element => !element.paused && !element.ended);
+          const target = playing.length === 1 ? playing[0] : elements.length === 1 ? elements[0] : null;
+          if (target && !target.paused) await getOrCreateAudioGraph(target);
+          result = { media: target ? describeMediaElement(target) : null, volumeRevision, requestedVolume,
+            captureInvalid: controller.invalid(), captureEnded: controller.ended(), monitorGain: performance.now() < monitor.expires ? monitor.gain : 0 };
+        } else if (command === "listening-output") {
+          if (!Number.isFinite(payload?.gain) || payload.gain < 0 || payload.gain > 1) throw new Error('Invalid listening volume.');
+          monitor = { gain: payload.gain, expires: performance.now() + 2500 };
+          updateMonitor(); result = { ok: true };
         } else if (command === "capture-begin") {
           result = await controller.begin(payload || {});
         } else if (command === "capture-finish-and-begin") {
@@ -188,6 +236,7 @@
         return element;
       }
 
+      guardOutput(element);
       elements.add(element);
       return element;
     };
@@ -207,6 +256,7 @@
     const nativePlay = HTMLMediaElement.prototype.play;
     HTMLMediaElement.prototype.play = function ktv420Play() {
       remember(this);
+      void getOrCreateAudioGraph(this).then(graph => graph.context.resume()).catch(() => {});
       return nativePlay.apply(this, arguments);
     };
 
@@ -232,6 +282,8 @@
     let currentCapture = null;
 
     return {
+      invalid() { return !!currentCapture?.invalid; },
+      ended() { return !!currentCapture?.ended; },
       describeTargets() {
         return discoverUsableTargets(mediaTracker).map(describeMediaElement);
       },
@@ -273,6 +325,7 @@
         };
       },
       markAcceptedStart() {
+      this.invalid = false; this.ended = false;
         assertCapture(currentCapture);
         currentCapture.markAcceptedStart();
         return this.state();
@@ -311,6 +364,13 @@
       this.sampleRate = this.context.sampleRate;
       this.channelCount = 2;
       this.startMediaTime = 0;
+      this.invalid = false;
+      this.lastMediaTime = safeMediaTime(element);
+      this.onSeek = () => { if (this.capturing) this.invalid = true; };
+      this.ended = false;
+      this.onEnded = () => { this.capturing = false; this.ended = true; };
+      element.addEventListener('seeking', this.onSeek);
+      element.addEventListener('ended', this.onEnded);
       this.graph.consumers.add(this);
     }
 
@@ -327,6 +387,7 @@
     }
 
     markAcceptedStart() {
+      this.invalid = false; this.ended = false;
       this.chunks = [];
       this.byteLength = 0;
       this.startMediaTime = safeMediaTime(this.element);
@@ -337,11 +398,15 @@
       this.chunks = [];
       this.byteLength = 0;
       this.graph.consumers.delete(this);
+      this.element.removeEventListener('seeking', this.onSeek);
+      this.element.removeEventListener('ended', this.onEnded);
     }
 
     finish() {
       this.capturing = false;
       this.graph.consumers.delete(this);
+      this.element.removeEventListener('seeking', this.onSeek);
+      this.element.removeEventListener('ended', this.onEnded);
       const bytes = new Uint8Array(this.byteLength);
       let offset = 0;
 
@@ -355,25 +420,30 @@
         byteLength: bytes.byteLength,
         sampleRate: this.sampleRate,
         channelCount: this.channelCount,
-        startMediaTime: this.startMediaTime
+        startMediaTime: this.startMediaTime,
+        invalid: this.invalid
       };
     }
 
     handleAudioChunk(message) {
-      if (!this.capturing) {
+      if (!this.capturing || this.invalid || this.element.paused || this.element.seeking) {
         return;
       }
 
       const bytes = new Uint8Array(message.bytesBuffer || new ArrayBuffer(0));
       this.channelCount = Math.min(2, Math.max(1, Number(message.channelCount) || this.channelCount || 1));
+      if (this.byteLength + bytes.byteLength > 1024 * 1024 * 1024) { this.invalid = true; return; }
       this.chunks.push(bytes);
       this.byteLength += bytes.byteLength;
     }
   }
 
-  const audioGraphs = new WeakMap();
-
   async function getOrCreateAudioGraph(element) {
+    guardOutput(element);
+    if (!graphPromises.has(element)) graphPromises.set(element, createAudioGraph(element).catch(error => { graphPromises.delete(element); throw error; }));
+    return graphPromises.get(element);
+  }
+  async function createAudioGraph(element) {
     const existing = audioGraphs.get(element);
     if (existing && existing.context.state !== "closed") {
       return existing;
@@ -390,7 +460,9 @@
       numberOfInputs: 1,
       numberOfOutputs: 0
     });
+    const monitorNode = context.createGain(); monitorNode.gain.value = 0;
     const graph = {
+      monitor: monitorNode,
       context,
       source,
       worklet,
@@ -404,7 +476,10 @@
     };
 
     source.connect(worklet);
-    source.connect(context.destination);
+    source.connect(monitorNode);
+    monitorNode.connect(context.destination);
+    nativeVolume.set.call(element, 1);
+    nativeMuted.set.call(element, false);
     audioGraphs.set(element, graph);
     return graph;
   }
@@ -470,8 +545,6 @@
       Number.isFinite(element.duration) &&
       element.duration > 0 &&
       element.readyState >= 1 &&
-      element.muted === false &&
-      element.volume > 0 &&
       element.playbackRate > 0;
   }
 
