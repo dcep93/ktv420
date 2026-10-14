@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ktv420 player bridge</title>
+    <style>
+      html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #0c0907; color: #fff; font: 14px system-ui, sans-serif; }
+      iframe { width: 100%; height: 100%; border: 0; display: block; }
+      .status { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 12px; padding: 24px; background: #0c0907; }
+      .status[hidden] { display: none; }
+      button { padding: 8px 16px; cursor: pointer; }
+    </style>
+  </head>
+  <body><script type="module" src="/src/extension/broker.ts"></script></body>
+</html>

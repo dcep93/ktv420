@@ -5,10 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && vite build --mode extension",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "node --test ../../extension/tests/*.test.mjs && tsx --test src/features/local/**/*.test.ts src/features/local/*.test.ts src/extension/*.test.ts",
+    "test": "node --test ../../extension/tests/*.test.mjs ../../scripts/*.test.mjs && tsx --test src/features/local/**/*.test.ts src/features/local/*.test.ts src/extension/*.test.ts",
     "predev": "node ../../scripts/prepare-runtime.mjs",
     "prebuild": "node ../../scripts/prepare-runtime.mjs"
   },

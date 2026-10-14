@@ -28,7 +28,7 @@ export async function verifyModelBytes(bytes: ArrayBuffer): Promise<void> {
   if (hex !== MODEL.sha256) throw new Error('Model integrity verification failed. Please retry the download.')
 }
 
-/** Only immutable model data is fetched remotely; executable JS/WASM stays in the extension. */
+/** Only immutable model data is fetched remotely; executable JS/WASM is served with the hosted player. */
 export async function loadModelBytes(onDownload: (fraction: number) => void): Promise<ArrayBuffer> {
   let cache: Cache | undefined
   try { if ('caches' in globalThis) cache = await caches.open(MODEL_CACHE_NAME) } catch { /* Storage can be denied. */ }

@@ -9,3 +9,6 @@ __pycache__/
 
 /frontend/app/public/benchmark-reference.f32
 /site/ktv420-extension.zip*
+
+/frontend/app/dist-extension/
+/site/player/

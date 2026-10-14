@@ -1,5 +1,5 @@
 import { decodeWav, encodeFloat32Wav } from './audio/wav';
-import { getInput, saveStems, setTrackStatus, STEM_NAMES } from './library';
+import { getInput, saveStems, setTrackStatus, STEM_NAMES } from './libraryClient';
 import type { StereoAudio } from './audio/types';
 import type { ProgressCallback, SeparationResult } from './inference/types';
 

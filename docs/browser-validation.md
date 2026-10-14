@@ -36,3 +36,13 @@ Queue tests cover arrivals during processing, interrupted-track recovery, exclus
 The user confirmed that real Spotify capture → local separation → stem playback works in the installed Chrome extension. This satisfies the agreed cloud-retirement gate. The confirmation is a user-run functional check, separate from the synthetic numerical and timing measurements above; it does not establish performance or compatibility on other devices.
 
 The dedicated legacy cloud audio service and bucket were subsequently deleted, with new soft deletion disabled before removing storage. The post-deletion inventory showed neither resource. The repository's obsolete audio-cloud credential was removed and its one-time maintenance workflow disabled. The shared project's unrelated resources and the static installation website were preserved. No archive was created.
+
+## Hosted player split — local candidate, 2026-10-13
+
+The browser fixture now embeds the broker at localhost:5174 and the player at 127.0.0.1:5174, exercising a real cross-origin message boundary. Two one-second synthetic captures passed through the existing capture staging API, were automatically separated with the actual model, and returned as ready tracks through the storage broker. Stem playback advanced and the visualizer selector worked. Both tracks remained ready after a full page reload. Pause survived a reload and Resume restored automatic processing. This is a development browser test, not an installed-extension or production-hosting test.
+
+The candidate ZIP contains capture code, the storage broker and background worker; React, visualizers and ONNX runtime files are absent. The hosted build contains the player and runtime. Builds leave the currently installed extension/build intact. Production framing/CSP and the new installed-extension path require verification after publication is authorized. No push or deployment was performed for this candidate.
+
+RPC tests cover wrong peers/origins/versions, operation and size bounds, malformed or partial stems, exact Float32 values, existing database access, lock contention/disposal, shared pause state and multiline errors. Deployment tests verify retention and integrity of old hashed worker files and versioned runtimes so open sessions can continue to load their matching code.
+
+Final candidate checks: 45 tests passed; ESLint, TypeScript and both production builds passed. Reloaded client request IDs are unique across documents to reject delayed replies. Extension candidate totals 113,784 uncompressed bytes. The installed extension remains version 0.3.3 until the hosted player is published and the candidate is explicitly installed.

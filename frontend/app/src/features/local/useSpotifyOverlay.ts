@@ -1,20 +1,27 @@
 import { useEffect, useState } from 'react';
+import { brokerOrigin } from './libraryClient';
 
 export type SpotifyTrack = { trackId: string; trackName: string; trackArtist: string; trackArtworkSrc: string; rowIndex: number };
 type SpotifyState = { tracks: SpotifyTrack[]; active: boolean; starting: boolean; supported: boolean; notice: string; error: string };
 const initial: SpotifyState = { tracks: [], active: false, starting: false, supported: false, notice: '', error: '' };
 const embedded = window.parent !== window;
-// The development fixture uses the same protocol on localhost; production accepts only Spotify.
-const parentOrigin = import.meta.env.DEV ? window.location.origin : 'https://open.spotify.com';
+// The extension broker authenticates Spotify and relays only overlay controls.
+const parentOrigin = embedded ? brokerOrigin() : '';
 function send(type: string) {
-  if (embedded) window.parent.postMessage({ source: 'ktv420-overlay', type }, parentOrigin);
+  if (embedded) window.parent.postMessage({ source: 'ktv420-overlay', version: 1, type }, parentOrigin);
 }
 export function useSpotifyOverlay() {
   const [state, setState] = useState(initial);
   useEffect(() => {
     if (!embedded) return;
     const receive = (event: MessageEvent) => {
-      if (event.source !== window.parent || event.origin !== parentOrigin || event.data?.source !== 'ktv420-parent' || event.data.type !== 'state') return;
+      if (event.source !== window.parent || event.origin !== parentOrigin) return;
+      if (event.data?.source === 'ktv420-broker' && event.data.type === 'hello') {
+        if (event.data.version !== 1) setState(previous => ({ ...previous, error: 'Update the ktv420 extension to use this player.' }));
+        else send('ready');
+        return;
+      }
+      if (event.data?.source !== 'ktv420-parent' || event.data.type !== 'state' || event.data.version !== 1) return;
       const data = event.data;
       const tracks: SpotifyTrack[] = Array.isArray(data.tracks) ? data.tracks.slice(0, 10000)
         .filter((track: SpotifyTrack) => typeof track?.trackId === 'string' && /^[A-Za-z0-9]{1,100}$/.test(track.trackId) && typeof track.trackName === 'string')

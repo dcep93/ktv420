@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Player from '../features/stems/player/Player';
 import type { PlaybackRecord, PlaybackRecording, RecordingEvent, RecordingStartRequest } from '../features/stems/player/types';
-import { deleteTrack, getPlaybackRecord, listTracks, type LocalTrack } from '../features/local/library';
+import { deleteTrack, getPlaybackRecord, listTracks, getProcessingEnabled, setProcessingEnabled as saveProcessingEnabled, withProcessingLock, type LocalTrack } from '../features/local/libraryClient';
 import { downloadBlob } from '../features/local/importAudio';
 import { processLocalTrack } from '../features/local/processing';
 import { drainSpotifyQueue } from '../features/local/spotifyQueue';
@@ -19,7 +19,7 @@ export default function LibraryPage() {
   const [viewMode, setViewMode] = useState<'tracks' | 'settings' | 'player'>('tracks');
   const [error, setError] = useState('');
   const spotify = useSpotifyOverlay();
-  const [autoProcessing, setAutoProcessing] = useState(() => localStorage.getItem('ktv420-auto-processing') !== 'paused');
+  const [autoProcessing, setAutoProcessing] = useState(false);
   const [active, setActive] = useState('');
   const [progress, setProgress] = useState<SeparationProgress | null>(null);
   const [backend, setBackend] = useState<'auto' | 'wasm'>('auto');
@@ -36,11 +36,16 @@ export default function LibraryPage() {
     : tracks.filter(track => track.source === 'spotify').slice().reverse();
   const selectedIndex = playbackTracks.findIndex(track => track.id === selected);
   const activeTrack = tracks.find(track => track.id === selected);
-  const refresh = useCallback(async () => { setTracks(await listTracks()); setModelCached(await getModelCacheStatus()); }, []);
+  const observedProcessingPreference = useRef<boolean | null>(null);
+  const refresh = useCallback(async () => {
+    const [savedTracks, cached, enabled] = await Promise.all([listTracks(), getModelCacheStatus(), getProcessingEnabled()]);
+    setTracks(savedTracks); setModelCached(cached); setAutoProcessing(enabled);
+    if (observedProcessingPreference.current === true && !enabled) { cancelled.current = true; separator.current?.dispose(); }
+    observedProcessingPreference.current = enabled;
+  }, []);
   useEffect(() => {
     const update = () => { void refresh().catch(reason => setError(errorText(reason))); };
     update(); const timer = setInterval(update, 2500);
-    void navigator.storage.persist?.();
     return () => { clearInterval(timer); };
   }, [refresh]);
   useEffect(() => () => { cancelled.current = true; separator.current?.dispose(); }, []);
@@ -64,7 +69,7 @@ export default function LibraryPage() {
     if (running.current) return;
     running.current = true; cancelled.current = false; setError('');
     try {
-      await navigator.locks.request('ktv420-separation', { ifAvailable: true }, async lock => {
+      await withProcessingLock(async lock => {
         if (!lock) {
           if (!automatic) setError('Another ktv420 view is processing these captures.');
           return;
@@ -77,7 +82,7 @@ export default function LibraryPage() {
           finally { await refresh(); }
         };
         if (automatic) await drainSpotifyQueue({ list: listTracks, process,
-          cancelled: () => cancelled.current || localStorage.getItem('ktv420-auto-processing') === 'paused',
+          cancelled: () => cancelled.current,
           onError: reason => setError(errorText(reason)),
         });
         else for (const id of ids) { if (cancelled.current) break; await process(id); }
@@ -100,18 +105,9 @@ export default function LibraryPage() {
     void poll(); const timer = setInterval(() => { void poll(); }, 2500);
     return () => { disposed = true; clearInterval(timer); };
   }, [autoProcessing, processTracks]);
-  useEffect(() => {
-    const sync = () => {
-      const enabled = localStorage.getItem('ktv420-auto-processing') !== 'paused';
-      setAutoProcessing(enabled);
-      if (!enabled) { cancelled.current = true; separator.current?.dispose(); }
-    };
-    window.addEventListener('storage', sync);
-    return () => window.removeEventListener('storage', sync);
-  }, []);
   const setProcessingEnabled = (enabled: boolean) => {
-    localStorage.setItem('ktv420-auto-processing', enabled ? 'enabled' : 'paused'); setAutoProcessing(enabled);
     if (!enabled) { cancelled.current = true; separator.current?.dispose(); }
+    void saveProcessingEnabled(enabled).then(() => { observedProcessingPreference.current = enabled; setAutoProcessing(enabled); }).catch(reason => setError(errorText(reason)));
   };
   const remove = async (id: string) => {
     try { await deleteTrack(id); if (selected === id) { setSelected(''); loadedRevision.current = ''; setRecord(null); } setConfirmDelete(''); await refresh(); }

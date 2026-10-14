@@ -44,7 +44,7 @@ export class LocalSeparator {
     const left = new Float32Array(audio.left), right = new Float32Array(audio.right)
     const request: WorkerRequest = {
       id, audio: { left, right, sampleRate: audio.sampleRate }, backend: this.backend,
-      runtimeBaseUrl: new URL(`${import.meta.env.BASE_URL}ort/`, document.baseURI).href,
+      runtimeBaseUrl: new URL(`${import.meta.env.BASE_URL}ort/${import.meta.env.VITE_ORT_VERSION}/`, document.baseURI).href,
     }
     return new Promise((resolve, reject) => {
       this.pending = { id, resolve, reject, progress: onProgress }
