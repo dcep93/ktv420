@@ -211,8 +211,8 @@ export default function LibraryPage() {
         onPreviousTrack={() => navigateTrack(-1)} onNextTrack={() => navigateTrack(1)} onTrackEnd={() => navigateTrack(1)}
         autoPlayOnReady={autoPlay} onAutoPlayOnReadyHandled={() => setAutoPlay(false)} trackMetadata={activeTrack.metadata} isRecording={recording}
         onStartRecording={startRecording} onStopRecording={stopRecording} onRecordingEvent={recordEvent} onRegisterRecordingFlush={callback => { flush.current = callback; }} />
-      <details className="iframe-player-exports"><summary>Export WAV</summary>{record.files.map(file => <button key={file.path}
-        onClick={() => downloadBlob(file.blob, `${activeTrack.title}-${file.name}`)}>{file.name.replace('.wav', '')}</button>)}</details>
+      <details className="iframe-player-exports"><summary>Export audio</summary>{record.files.map(file => <button key={file.path}
+        onClick={() => downloadBlob(file.blob, `${activeTrack.title}-${file.name}`)}>{file.name.replace(/\.(wav|mp3)$/i, '')}</button>)}</details>
     </section>}
   </main>;
 }
