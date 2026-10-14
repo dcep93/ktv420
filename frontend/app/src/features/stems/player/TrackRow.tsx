@@ -46,7 +46,7 @@ export function TrackRow({
 }: TrackRowProps) {
   const label = track.isInput
     ? "Original"
-    : track.name.replace(/\.wav$/i, "").replace(/^./, (letter) => letter.toUpperCase());
+    : track.name.replace(/\.(wav|mp3)$/i, "").replace(/^./, (letter) => letter.toUpperCase());
   const selectedEffect = effectOptions.find(
     (option) => option.value === effectType
   );
