@@ -45,29 +45,29 @@ export function TrackRow({
   onCanvasSeek,
 }: TrackRowProps) {
   const label = track.isInput
-    ? `Input: ${track.name}`
-    : `Output: ${track.name}`;
+    ? "Original"
+    : track.name.replace(/\.wav$/i, "").replace(/^./, (letter) => letter.toUpperCase());
   const selectedEffect = effectOptions.find(
     (option) => option.value === effectType
   );
   const effectDescription = selectedEffect?.description ?? "";
 
   const controlButtonStyle = (isActive: boolean): CSSProperties => ({
-    borderRadius: "999px",
+    borderRadius: "99rem",
     border: isActive
-      ? "1px solid var(--ww-title-pink)"
-      : "1px solid var(--ww-border)",
+      ? "0.0625rem solid var(--ww-accent-amber)"
+      : "0.0625rem solid var(--ww-border)",
     background: isActive
-      ? "linear-gradient(135deg, rgba(255,123,195,0.34), rgba(201,156,107,0.26))"
+      ? "var(--ww-audio-bg)"
       : "var(--ktv-control-bg)",
     color: isActive ? "var(--ww-text-strong)" : "var(--ww-text)",
     padding: "0.38rem 0.77rem",
     letterSpacing: "0.02em",
     fontWeight: isActive ? 800 : 600,
-    minWidth: "78px",
+    minWidth: "4.875rem",
     boxShadow: isActive
-      ? "0 0 0 2px rgba(255,123,195,0.16), 0 8px 20px rgba(0,0,0,0.34)"
-      : "0 3px 10px rgba(0,0,0,0.22)",
+      ? "inset 0 0 0 0.0625rem var(--ww-audio-border)"
+      : "none",
     transition: "all 160ms ease",
     cursor: "pointer",
   });
@@ -77,10 +77,10 @@ export function TrackRow({
       key={track.id}
       className={`player-track-row${isSpotlighted ? " player-track-row--spotlight" : ""}`}
       style={{
-        background: "rgba(8, 6, 5, 0.72)",
-        border: "1px solid rgba(228, 193, 150, 0.34)",
-        borderRadius: "7px",
-        boxShadow: "0 9px 20px rgba(0, 0, 0, 0.24)",
+        background: "var(--ww-panel-strong)",
+        border: "0.0625rem solid var(--ww-border-strong)",
+        borderRadius: "0.4375rem",
+        boxShadow: "0 0.5625rem 1.25rem rgba(0, 0, 0, 0.24)",
         marginBottom: "0.72rem",
         padding: "0.64rem",
       }}

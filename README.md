@@ -2,6 +2,8 @@
 
 A small desktop Chrome extension captures Spotify as it plays and stores audio locally. The hosted ktv420 player separates four stems on your machine and lets you listen and DJ inside Spotify.
 
+[Architecture and update boundaries](docs/architecture.md)
+
 [Install ktv420](https://ktv420.web.app). No server or container is required. Audio stays in the extension's local library. The player, visualizers, inference runtime and model weights are downloaded; audio is never uploaded. GPU inference uses WebGPU with a CPU/WASM compatibility option.
 
 ## Develop

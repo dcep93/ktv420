@@ -1751,6 +1751,7 @@ export default function Player({
               >
                 <input
                   type="range"
+                  aria-label="Playback position"
                   min={0}
                   max={duration || 0}
                   step={0.1}
@@ -1879,7 +1880,7 @@ export default function Player({
                 display: "flex",
                 flexWrap: "wrap",
                 gap: "0.6rem",
-                justifyContent: "space-around",
+                justifyContent: "flex-start",
               }}
             >
               {visualizerOptions.map((option) => {
@@ -1892,19 +1893,10 @@ export default function Player({
                     onClick={() => selectVisualizerType(option.value)}
                     style={getVisualizerButtonStyle(isActive)}
                     aria-pressed={isActive}
+                    aria-label={`${option.label} ${option.hint}`}
+                    title={option.hint}
                   >
-                    <div style={{ fontWeight: 700, letterSpacing: "0.02em" }}>
-                      {option.label}
-                    </div>
-                    <div
-                      style={{
-                        color: isActive ? "var(--ww-text)" : "var(--ww-text-muted)",
-                        fontSize: "0.9rem",
-                        marginTop: "0.1rem",
-                      }}
-                    >
-                      {option.hint}
-                    </div>
+                    {option.label}
                   </button>
                 );
               })}

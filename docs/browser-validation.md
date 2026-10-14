@@ -50,3 +50,11 @@ Final candidate checks: 45 tests passed; ESLint, TypeScript and both production 
 ## Hosted release — 2026-10-13
 
 Published commit `75c1f3a` through successful GitHub Actions run 38501228397. Live player HTML, JavaScript, CSS, versioned WASM MIME type and extension ZIP checksum were verified. The production top-level player rendered its Spotify instructions in Chromium. Installed files at `ktv420/extension` were updated to 0.4.0 and matched the published broker/manifest byte-for-byte. Chrome still needs an extension Reload and Spotify refresh; real production embedded capture/playback is not yet confirmed.
+
+## Compact Multisport theme — 2026-10-13
+
+The homepage now has a pink title, one-line tagline, three installation steps and keyboard-operable collapsed help. Browser checks confirmed the canonical title color (`rgb(255, 123, 195)`) and native Comic Sans / locally bundled Comic Relief font stack. The font bytes match newapp's reference; Vite emits a hashed TTF retained by the player asset manifest. Shared theme assets are also packaged for the static guide.
+
+The cross-origin synthetic fixture retained both saved tracks, displayed concise stem names, played saved stems with advancing position, switched visualizers and opened the settings/device menu. The picker uses one-line labels with accessible descriptions/tooltips. Amber sliders, brown selects, keyboard focus and the compact close/k/settings header were checked visually. These are presentation/integration checks with synthetic audio, not a new real-Spotify capture confirmation.
+
+All 45 tests, ESLint and both builds passed. Independent spec and code reviews passed. All 28 installed extension files remained byte-for-byte identical; no extension release or reinstall is needed for this theme. A landing stylesheet URL change avoids reuse of the old cached CSS during the transition, and new HTML/theme responses revalidate thereafter.

@@ -1,87 +1,29 @@
-:root {
-  --ww-bg-top: #1a1411;
-  --ww-bg-bottom: #0c0907;
-  --ww-panel: rgba(28, 21, 18, 0.84);
-  --ww-panel-strong: rgba(20, 15, 12, 0.92);
-  --ww-panel-soft: rgba(36, 28, 24, 0.78);
-  --ww-panel-soft-reflection: rgba(102, 95, 32, 0.78);
-  --ww-border: rgba(201, 156, 107, 0.2);
-  --ww-border-soft: rgba(201, 156, 107, 0.12);
-  --ww-border-strong: rgba(228, 193, 150, 0.34);
-  --ww-text: #ffffff;
-  --ww-text-strong: #ffffff;
-  --ww-text-muted: rgba(255, 255, 255, 0.72);
-  --ww-text-soft: rgba(255, 255, 255, 0.84);
-  --ww-accent-cyan: #d8b38a;
-  --ww-accent-green: #b98d63;
-  --ww-accent-amber: #c99c6b;
-  --ww-title-pink: #ff7bc3;
-  --ww-danger: #ff9fb0;
-  --ktv-row-hover: rgba(232, 206, 171, 0.06);
-  --ktv-control-bg: rgba(232, 206, 171, 0.07);
-  font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
-  color: var(--ww-text);
-  background-color: var(--ww-bg-bottom);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-* {
-  box-sizing: border-box;
-}
-
-body {
-  margin: 0;
-  min-width: 320px;
-  min-height: 100vh;
-  background:
-    radial-gradient(circle at top left, rgba(255, 123, 195, 0.12), transparent 24%),
-    radial-gradient(circle at top right, rgba(201, 156, 107, 0.14), transparent 32%),
-    radial-gradient(circle at bottom center, rgba(185, 141, 99, 0.1), transparent 36%),
-    linear-gradient(180deg, var(--ww-bg-top) 0%, var(--ww-bg-bottom) 100%);
-}
-
 #root {
   min-height: 100vh;
   width: 100%;
 }
 
-a {
-  color: inherit;
+.direct-player-guide {
+  max-width: 30rem;
+  padding: 1.5rem;
+  border: 0.0625rem solid var(--ww-border);
+  border-radius: 1.375rem;
+  background: var(--ww-panel-soft);
 }
 
-button,
-select,
-input,
-textarea {
-  font: inherit;
+.direct-player-guide p { color: var(--ww-text-muted); }
+.direct-player-guide nav { display: flex; align-items: center; gap: 1rem; }
+
+.iframe-processing-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  font-size: 0.875rem;
 }
 
-button {
-  border-radius: 8px;
-  border: 1px solid var(--ww-border);
-  padding: 0.6em 1.1em;
-  background: var(--ktv-control-bg);
-  color: var(--ww-text);
-  cursor: pointer;
-  transition: transform 120ms ease, border-color 200ms ease, background 200ms ease;
-}
-
-button:hover {
-  border-color: var(--ww-border-strong);
-  background: linear-gradient(135deg, rgba(232, 206, 171, 0.14), rgba(217, 174, 119, 0.12));
-  transform: translateY(-1px);
-}
-
-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-  transform: none;
-}
+.iframe-processing-controls label { color: var(--ww-text-muted); }
+.iframe-processing-controls progress { flex-basis: 100%; }
 
 .player-transport-button {
   align-items: center;
@@ -328,7 +270,7 @@ button:disabled {
 
 .standalone-header h1 {
   color: var(--ww-title-pink);
-  font-family: "Comic Sans MS", "Comic Sans", cursive;
+  font-family: var(--app-title-font);
   font-size: 24px;
   font-weight: 400;
   margin: 0;
@@ -346,7 +288,7 @@ button:disabled {
 
 .play-spotify-link {
   color: var(--ww-title-pink);
-  font-family: "Comic Sans MS", "Comic Sans", cursive;
+  font-family: var(--app-title-font);
   font-size: 24px;
   font-weight: 400;
   overflow-wrap: anywhere;
@@ -432,7 +374,7 @@ button:disabled {
 }
 
 .iframe-settings-button[aria-pressed="true"] {
-  background: rgba(102, 95, 32, 0.58);
+  background: var(--ww-audio-bg);
   box-shadow: 0 0 0 3px rgba(201, 156, 107, 0.18);
 }
 

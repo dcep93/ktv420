@@ -167,12 +167,14 @@ export default function LibraryPage() {
     {viewMode === 'settings' && <section className="iframe-settings-view" aria-label="Settings view">
       <section className="iframe-settings-source">
         <header className="iframe-settings-source-header"><h2>Processing</h2><span>{modelCached ? 'Model cached' : 'Model: 181 MB'}</span></header>
-        <label>Device <select value={backend} disabled={!!active} onChange={event => setBackend(event.target.value as 'auto' | 'wasm')}>
-          <option value="auto">GPU preferred</option><option value="wasm">CPU compatibility</option>
-        </select></label>
-        <button onClick={() => setProcessingEnabled(!autoProcessing)}>{autoProcessing ? 'Pause separation' : 'Resume separation'}</button>
-        {active && <progress max={1} value={progress?.fraction || 0} aria-label="Separation progress" title={progress?.message} />}
-        <button disabled={!!active} onClick={() => void clearModelCache().then(refresh).catch(reason => setError(errorText(reason)))}>Remove cached model</button>
+        <div className="iframe-processing-controls">
+          <label>Device <select value={backend} disabled={!!active} onChange={event => setBackend(event.target.value as 'auto' | 'wasm')}>
+            <option value="auto">GPU preferred</option><option value="wasm">CPU compatibility</option>
+          </select></label>
+          <button onClick={() => setProcessingEnabled(!autoProcessing)}>{autoProcessing ? 'Pause separation' : 'Resume separation'}</button>
+          {active && <progress max={1} value={progress?.fraction || 0} aria-label="Separation progress" title={progress?.message} />}
+          <button disabled={!!active} onClick={() => void clearModelCache().then(refresh).catch(reason => setError(errorText(reason)))}>Clear model cache</button>
+        </div>
       </section>
       <section className="iframe-settings-source">
         <header className="iframe-settings-source-header"><h2>Local audio</h2><span>{size(tracks.reduce((total, track) => total + track.bytes, 0))}</span></header>

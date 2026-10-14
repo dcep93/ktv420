@@ -1,0 +1,165 @@
+@import "./fonts.css";
+
+/* Canonical palette: multisport420/app/src/app_x/styles/multisport.css. */
+:root {
+  --ww-bg-top: #1a1411;
+  --ww-bg-bottom: #0c0907;
+  --ww-panel: rgba(28, 21, 18, 0.84);
+  --ww-panel-strong: rgba(20, 15, 12, 0.92);
+  --ww-panel-soft: rgba(36, 28, 24, 0.78);
+  --ww-panel-soft-reflection: rgba(102, 95, 32, 0.78);
+  --ww-border: rgba(201, 156, 107, 0.2);
+  --ww-border-soft: rgba(201, 156, 107, 0.12);
+  --ww-border-strong: rgba(228, 193, 150, 0.34);
+  --ww-text: #ffffff;
+  --ww-text-strong: #ffffff;
+  --ww-text-muted: rgba(255, 255, 255, 0.72);
+  --ww-text-soft: rgba(255, 255, 255, 0.84);
+  --ww-accent-cyan: #d8b38a;
+  --ww-accent-green: #b98d63;
+  --ww-accent-amber: #c99c6b;
+  --ww-title-pink: #ff7bc3;
+  --ww-danger: #ff9fb0;
+  --ww-audio-bg: #3b2c21;
+  --ww-audio-border: #95704f;
+  --ktv-row-hover: rgba(232, 206, 171, 0.06);
+  --ktv-control-bg: rgba(232, 206, 171, 0.07);
+  color-scheme: dark;
+  font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color: var(--ww-text);
+  background-color: var(--ww-bg-bottom);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-width: 20rem;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, rgba(255, 123, 195, 0.12), transparent 24%),
+    radial-gradient(circle at top right, rgba(201, 156, 107, 0.14), transparent 32%),
+    radial-gradient(circle at bottom center, rgba(185, 141, 99, 0.1), transparent 36%),
+    linear-gradient(180deg, var(--ww-bg-top) 0%, var(--ww-bg-bottom) 100%);
+}
+
+a { color: var(--ww-accent-cyan); }
+
+.app-title {
+  margin: 0;
+  color: var(--ww-title-pink);
+  font-family: var(--app-title-font);
+  font-size: 2.2rem;
+  font-weight: 400;
+  line-height: 1.1;
+  letter-spacing: -0.06em;
+}
+
+button, select, input, textarea { font: inherit; }
+
+button, .primary-button {
+  border-radius: 0.5rem;
+  border: 0.0625rem solid var(--ww-border);
+  padding: 0.6em 1.1em;
+  background: var(--ktv-control-bg);
+  color: var(--ww-text);
+  cursor: pointer;
+  transition: border-color 200ms ease, background 200ms ease;
+}
+
+button:hover, .primary-button:hover {
+  border-color: var(--ww-border-strong);
+  background: var(--ww-audio-bg);
+}
+
+button:disabled, select:disabled, input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.primary-button {
+  display: inline-block;
+  border-color: var(--ww-audio-border);
+  background: var(--ww-accent-amber);
+  color: #21150e;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.primary-button:hover { background: var(--ww-accent-cyan); }
+
+select {
+  border: 0.0625rem solid var(--ww-border);
+  border-radius: 0.4rem;
+  padding: 0.25em 0.5em;
+  color: var(--ww-text);
+  background: var(--ww-panel-strong);
+}
+
+option { background: var(--ww-bg-top); color: var(--ww-text); }
+input, progress { accent-color: var(--ww-accent-amber); }
+
+input[type="range"] {
+  appearance: none;
+  height: 1.25rem;
+  background: transparent;
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 0.3rem;
+  border-radius: 1rem;
+  background: var(--ww-audio-bg);
+  box-shadow: inset 0 0 0 0.0625rem var(--ww-audio-border);
+}
+
+input[type="range"]::-moz-range-track {
+  height: 0.3rem;
+  border-radius: 1rem;
+  background: var(--ww-audio-bg);
+  box-shadow: inset 0 0 0 0.0625rem var(--ww-audio-border);
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 0.9rem;
+  height: 0.9rem;
+  margin-top: -0.3rem;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ww-accent-amber);
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 0.9rem;
+  height: 0.9rem;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ww-accent-amber);
+}
+
+progress {
+  appearance: none;
+  border: 0;
+  border-radius: 1rem;
+  height: 0.5rem;
+  overflow: hidden;
+  background: var(--ww-audio-bg);
+}
+
+progress::-webkit-progress-bar { background: var(--ww-audio-bg); }
+progress::-webkit-progress-value { background: var(--ww-accent-amber); }
+progress::-moz-progress-bar { background: var(--ww-accent-amber); }
+
+:focus-visible {
+  outline: 0.125rem solid var(--ww-accent-amber);
+  outline-offset: 0.2rem;
+}
+
+summary { cursor: pointer; color: var(--ww-text-soft); }

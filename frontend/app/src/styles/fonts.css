@@ -1,0 +1,12 @@
+/* Keep native Comic Sans; serve Comic Relief locally when it is unavailable. */
+@font-face {
+  font-family: "Comic Relief";
+  src: url("./fonts/ComicRelief-Regular.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+}
+
+:root {
+  --app-title-font: "Comic Sans MS", "Comic Sans", "Comic Relief", sans-serif;
+}
