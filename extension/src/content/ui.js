@@ -47,9 +47,10 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks }) {
   function refresh() {
     if (isRunActive()) starting = false;
     const parent = document.querySelector(SELECTORS.spotifyLogo)?.closest('a')?.parentElement;
-    const target = parent || document.body;
-    if (target && button.parentElement !== target) target.append(button);
-    Object.assign(button.style, parent ? { position: 'static' } : { position: 'fixed', top: '12px', right: '20px' });
+    // Wait for Spotify's logo instead of briefly rendering in a fallback position.
+    if (parent) {
+      if (button.parentElement !== parent) parent.append(button);
+    } else button.remove();
     if (document.body && !overlay.isConnected) document.body.append(overlay);
     button.textContent = isRunActive() ? 'ktv420 · capturing' : 'ktv420';
     post();
