@@ -1,7 +1,7 @@
 import { transaction, saveInput, type CaptureSession } from '../features/local/library';
 import { encodeFloat32Wav } from '../features/local/audio/wav';
 
-const MAX_BYTES = 512 * 1024 * 1024;
+const MAX_BYTES = 1024 * 1024 * 1024;
 const MAX_CHUNK = 256 * 1024;
 function requireMetadata(metadata: Record<string, unknown>, expectedBytes: number) {
   if (!metadata || typeof metadata !== 'object' || typeof metadata.trackId !== 'string' ||
@@ -10,7 +10,7 @@ function requireMetadata(metadata: Record<string, unknown>, expectedBytes: numbe
     ![1, 2].includes(Number(metadata.audioChannelCount)) || metadata.audioSampleFormat !== 'PCM_F32LE' ||
     !Number.isInteger(expectedBytes) || expectedBytes <= 0 || expectedBytes > MAX_BYTES ||
     expectedBytes % (Number(metadata.audioChannelCount) * 4) !== 0 || metadata.audioByteLength !== expectedBytes) {
-    throw new Error('Invalid Float32 capture format or size (maximum 512 MiB per track).');
+    throw new Error('Invalid Float32 capture format or size (maximum 1 GiB per track).');
   }
 }
 export async function beginCapture(tabId: number, metadata: Record<string, unknown>, expectedBytes: number): Promise<string> {

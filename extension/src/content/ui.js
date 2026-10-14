@@ -28,7 +28,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks }) {
     const trackData = tracks.map(({ trackId, trackName, trackArtist, trackArtworkSrc, rowIndex }) => ({
       trackId, trackName, trackArtist, trackArtworkSrc, rowIndex,
     }));
-    iframe?.contentWindow?.postMessage({ source: PARENT, version: 1, type: 'state', tracks: trackData,
+    iframe?.contentWindow?.postMessage({ source: PARENT, version: 2, type: 'state', tracks: trackData,
       active: isRunActive(), starting, notice, error, supported: isSupportedRoute() }, origin);
   }
   async function updateTracks() {
@@ -71,7 +71,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks }) {
   }
   const handleMessage = async event => {
     if (!iframe || event.source !== iframe.contentWindow || event.origin !== origin || event.data?.source !== FRAME) return;
-    if (hostedBridge && event.data.version !== 1) return;
+    if (hostedBridge && event.data.version !== 2) return;
     if (event.data.type === 'close') { overlay.dataset.open = 'false'; overlay.setAttribute('aria-hidden', 'true'); return; }
     if (event.data.type === 'ready') { frameReady = true; post(); return; }
     if (event.data.type !== 'toggle-capture' || starting) return;

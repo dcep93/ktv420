@@ -5,6 +5,7 @@ export type PlaybackFile = {
 };
 
 export type PlaybackRecord = {
+  playbackGain?: number;
   md5: string;
   files: PlaybackFile[];
 };

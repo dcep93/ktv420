@@ -40,7 +40,7 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
     window: { location: { pathname: '/playlist/example' },
       addEventListener(name, listener) { listeners[name] = listener; }, removeEventListener() {} },
     location: { pathname: '/playlist/example' },
-    chrome: { runtime: { getManifest: () => ({ version: '0.4.0' }), getURL: path => `chrome-extension://test/${path}`, onMessage: { addListener() {}, removeListener() {} } } },
+    chrome: { runtime: { getManifest: () => ({ version: '0.5.0' }), getURL: path => `chrome-extension://test/${path}`, onMessage: { addListener() {}, removeListener() {} } } },
     setInterval: callback => { timers.push(callback); return 1; },
   };
   for (const [key, value] of Object.entries(globals)) {
@@ -56,11 +56,11 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
   ui.refresh();
   timers[0]();
   assert.equal(messages.length, 0, 'loading/about:blank frames must receive no state messages');
-  const ready = { source: frame.contentWindow, origin: 'chrome-extension://test', data: { source: 'ktv420-overlay', version: 1, type: 'ready' } };
+  const ready = { source: frame.contentWindow, origin: 'chrome-extension://test', data: { source: 'ktv420-overlay', version: 2, type: 'ready' } };
   await listeners.message({ ...ready, origin: 'https://open.spotify.com' });
   await listeners.message({ ...ready, source: {} });
   await listeners.message({ ...ready, data: { source: 'untrusted', type: 'ready' } });
-  await listeners.message({ ...ready, data: { ...ready.data, version: 2 } });
+  await listeners.message({ ...ready, data: { ...ready.data, version: 1 } });
   ui.refresh();
   assert.equal(messages.length, 0, 'a different origin or window cannot unlock state delivery');
   await listeners.message(ready);

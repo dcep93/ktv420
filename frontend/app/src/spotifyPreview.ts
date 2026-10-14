@@ -9,7 +9,7 @@ const tracks = [
   { trackId: 'overlayTestTwo', trackName: 'Synthetic capture two', trackArtist: 'Browser validation', rowIndex: 1 },
 ];
 let active = false;
-const post = () => frame.contentWindow!.postMessage({ source: 'ktv420-parent', version: 1, type: 'state', tracks, active, starting: false, supported: true }, location.origin);
+const post = () => frame.contentWindow!.postMessage({ source: 'ktv420-parent', version: 2, type: 'state', tracks, active, starting: false, supported: true }, location.origin);
 window.addEventListener('message', async event => {
   if (event.source !== frame.contentWindow || event.origin !== location.origin || event.data?.source !== 'ktv420-overlay') return;
   if (event.data.type === 'ready') post();

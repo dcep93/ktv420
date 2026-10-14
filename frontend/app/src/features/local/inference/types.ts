@@ -3,7 +3,7 @@ import type { StereoAudio } from '../audio/types.ts'
 export const STEM_NAMES = ['drums', 'bass', 'other', 'vocals'] as const
 export type StemName = typeof STEM_NAMES[number]
 export interface SeparationProgress {
-  phase: 'download' | 'loading' | 'resampling' | 'separating' | 'complete'
+  phase: 'download' | 'loading' | 'resampling' | 'separating' | 'encoding' | 'complete'
   fraction: number
   message: string
   chunk?: number

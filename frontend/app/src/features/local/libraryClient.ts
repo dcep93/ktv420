@@ -1,3 +1,4 @@
+import type { Mp3Files, Mp3Encoding } from './audio/mp3Types';
 import type { PlaybackRecord } from '../stems/player/types';
 import type { LocalTrack, TrackStatus } from './library';
 import { STEM_NAMES } from './library';
@@ -5,7 +6,7 @@ export { STEM_NAMES };
 export type { LocalTrack };
 
 const SOURCE = 'ktv420-library';
-const VERSION = 1;
+const VERSION = 2;
 type Envelope = { source: string; version: number; id: string; ok: boolean; result?: unknown; error?: string };
 type Transport = {
   send: (message: unknown) => void;
@@ -83,7 +84,7 @@ export const getInput = (id: string) => request<Blob>('getInput', [id]);
 export const getPlaybackRecord = (id: string) => request<PlaybackRecord>('getPlaybackRecord', [id]);
 export const deleteTrack = (id: string) => request<void>('deleteTrack', [id]);
 export const setTrackStatus = (id: string, status: TrackStatus, error?: string) => request<void>('setTrackStatus', [id, status, error]);
-export const saveStems = (id: string, stems: Record<typeof STEM_NAMES[number], Blob>, metadata: Record<string, unknown>) => request<void>('saveStems', [id, stems, metadata]);
+export const saveMp3 = (id: string, files: Mp3Files, metadata: Record<string, unknown>, encoding: Mp3Encoding) => request<void>('saveMp3', [id, files, metadata, encoding]);
 export const getProcessingEnabled = () => request<boolean>('getProcessingEnabled');
 export const setProcessingEnabled = (enabled: boolean) => request<void>('setProcessingEnabled', [enabled]);
 export async function withProcessingLock(run: (acquired: boolean) => Promise<void>) {

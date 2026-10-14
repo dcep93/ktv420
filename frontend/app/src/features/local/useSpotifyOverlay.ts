@@ -8,7 +8,7 @@ const embedded = window.parent !== window;
 // The extension broker authenticates Spotify and relays only overlay controls.
 const parentOrigin = embedded ? brokerOrigin() : '';
 function send(type: string) {
-  if (embedded) window.parent.postMessage({ source: 'ktv420-overlay', version: 1, type }, parentOrigin);
+  if (embedded) window.parent.postMessage({ source: 'ktv420-overlay', version: 2, type }, parentOrigin);
 }
 export function useSpotifyOverlay() {
   const [state, setState] = useState(initial);
@@ -17,11 +17,11 @@ export function useSpotifyOverlay() {
     const receive = (event: MessageEvent) => {
       if (event.source !== window.parent || event.origin !== parentOrigin) return;
       if (event.data?.source === 'ktv420-broker' && event.data.type === 'hello') {
-        if (event.data.version !== 1) setState(previous => ({ ...previous, error: 'Update the ktv420 extension to use this player.' }));
+        if (event.data.version !== 2) setState(previous => ({ ...previous, error: 'Update the ktv420 extension to use this player.' }));
         else send('ready');
         return;
       }
-      if (event.data?.source !== 'ktv420-parent' || event.data.type !== 'state' || event.data.version !== 1) return;
+      if (event.data?.source !== 'ktv420-parent' || event.data.type !== 'state' || event.data.version !== 2) return;
       const data = event.data;
       const tracks: SpotifyTrack[] = Array.isArray(data.tracks) ? data.tracks.slice(0, 10000)
         .filter((track: SpotifyTrack) => typeof track?.trackId === 'string' && /^[A-Za-z0-9]{1,100}$/.test(track.trackId) && typeof track.trackName === 'string')

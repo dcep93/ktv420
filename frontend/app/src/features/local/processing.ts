@@ -1,14 +1,15 @@
-import { decodeWav, encodeFloat32Wav } from './audio/wav';
-import { getInput, saveStems, setTrackStatus, STEM_NAMES } from './libraryClient';
+import { encodeMp3InWorker } from './audio/mp3Client';
+import { decodeWav } from './audio/wav';
+import { getInput, saveMp3, setTrackStatus } from './libraryClient';
 import type { StereoAudio } from './audio/types';
 import type { ProgressCallback, SeparationResult } from './inference/types';
 
 type Separator = { separateStereo(audio: StereoAudio, progress?: ProgressCallback): Promise<SeparationResult> };
-const defaultStorage = { getInput, saveStems, setTrackStatus };
+const defaultStorage = { getInput, saveMp3, setTrackStatus };
 /** A commit is the point of no return: cancellation must never downgrade completed stems. */
 export async function processLocalTrack(id: string, separator: Separator,
   cancelled: () => boolean, onProgress: ProgressCallback,
-  storage = defaultStorage): Promise<void> {
+  storage = defaultStorage, encode = encodeMp3InWorker): Promise<void> {
   let committed = false;
   try {
     await storage.setTrackStatus(id, 'processing');
@@ -17,10 +18,12 @@ export async function processLocalTrack(id: string, separator: Separator,
     if (cancelled()) return;
     const bytes = await input.arrayBuffer();
     if (cancelled()) return;
-    const result = await separator.separateStereo(decodeWav(bytes), onProgress);
+    const original = decodeWav(bytes);
+    const result = await separator.separateStereo(original, onProgress);
     if (cancelled()) return;
-    const stems = Object.fromEntries(STEM_NAMES.map(name => [name, new Blob([encodeFloat32Wav(result[name])], {type:'audio/wav'})])) as Record<typeof STEM_NAMES[number], Blob>;
-    await storage.saveStems(id, stems, result.metadata);
+    const encoded = await encode(original, result, cancelled, onProgress);
+    if (cancelled()) return;
+    await storage.saveMp3(id, encoded.files, result.metadata, encoded.encoding);
     committed = true;
   } catch (error) {
     if (!cancelled()) {

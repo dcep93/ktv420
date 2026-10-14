@@ -1,3 +1,4 @@
+import { MP3_NAMES, type Mp3Files, type Mp3Encoding } from './audio/mp3Types';
 import type { PlaybackFile, PlaybackRecord } from '../stems/player/types';
 
 export const LIBRARY_DB = 'ktv420-library';
@@ -6,7 +7,7 @@ export type TrackStatus = 'captured' | 'processing' | 'ready' | 'error';
 export type LocalTrack = {
   id: string; title: string; artist: string; createdAt: number;
   sampleRate: number; frames: number; status: TrackStatus; bytes: number;
-  error?: string; source: 'file' | 'spotify'; metadata?: Record<string, unknown>;
+  error?: string; source: 'file' | 'spotify'; metadata?: Record<string, unknown>; playbackGain?: number;
 };
 export type StoredAudio = { key: string; trackId: string; name: string; blob: Blob };
 export type CaptureSession = {
@@ -64,10 +65,11 @@ export function getInput(id: string): Promise<Blob> {
   });
 }
 export function getPlaybackRecord(id: string): Promise<PlaybackRecord> {
-  return transaction(['audio'], 'readonly', (tx, done) => {
+  return transaction(['audio', 'tracks'], 'readonly', (tx, done) => {
+    const track = tx.objectStore('tracks').get(id);
     const request = tx.objectStore('audio').index('trackId').getAll(id);
-    request.onsuccess = () => done({ md5: id, files: (request.result as StoredAudio[]).map((file): PlaybackFile => ({
-      name: file.name, path: `${id}/${file.name === 'input.wav' ? 'input' : 'output'}/${file.name}`, blob: file.blob,
+    request.onsuccess = () => done({ md5: id, playbackGain: track.result?.playbackGain, files: (request.result as StoredAudio[]).map((file): PlaybackFile => ({
+      name: file.name, path: `${id}/${(file.name === 'input.wav' || file.name === 'input.mp3') ? 'input' : 'output'}/${file.name}`, blob: file.blob,
     })) });
   });
 }
@@ -89,24 +91,27 @@ export function setTrackStatus(id: string, status: TrackStatus, error?: string):
     request.onsuccess = () => { if (request.result) store.put({ ...request.result, status, error }); };
   });
 }
-export function saveStems(id: string, stems: Record<typeof STEM_NAMES[number], Blob>, metadata: Record<string, unknown>): Promise<void> {
-  return transaction(['tracks', 'audio'], 'readwrite', (tx) => {
-    const store = tx.objectStore('tracks'); const request = store.get(id);
+/** Called only after broker validation; the transaction retains raw audio on every failure. */
+export function saveMp3(id: string, files: Mp3Files, metadata: Record<string, unknown>, encoding: Mp3Encoding): Promise<void> {
+  return transaction(['tracks', 'audio'], 'readwrite', tx => {
+    const store = tx.objectStore('tracks'), audio = tx.objectStore('audio');
+    const request = store.get(id);
     request.onsuccess = () => {
       const track = request.result as LocalTrack | undefined;
-      if (!track) { tx.abort(); return; }
-      let outputBytes = 0;
-      for (const name of STEM_NAMES) {
-        if (!(stems[name] instanceof Blob) || stems[name].size <= 44) { tx.abort(); return; }
-        outputBytes += stems[name].size;
-        tx.objectStore('audio').put({ key: `${id}/${name}.wav`, trackId: id, name: `${name}.wav`, blob: stems[name] });
-      }
-      const input = tx.objectStore('audio').index('trackId').getAll(id);
-      input.onsuccess = () => {
-        const originals = (input.result as StoredAudio[]).filter(file => file.name === 'input.wav' || file.name === 'source');
+      if (!track || !Number.isFinite(encoding.gain) || encoding.gain <= 0 || encoding.gain > 1) { tx.abort(); return; }
+      const existing = audio.index('trackId').getAll(id);
+      existing.onsuccess = () => {
+        const originals = existing.result as StoredAudio[];
         if (!originals.some(file => file.name === 'input.wav')) { tx.abort(); return; }
-        store.put({ ...track, status: 'ready', error: undefined, bytes: originals.reduce((total, file) => total + file.blob.size, 0) + outputBytes,
-          metadata: { ...track.metadata, separation: metadata } });
+        let bytes = 0;
+        for (const name of MP3_NAMES) {
+          if (!(files[name] instanceof Blob) || files[name].size < 417) { tx.abort(); return; }
+          bytes += files[name].size;
+        }
+        for (const file of originals) audio.delete(file.key);
+        for (const name of MP3_NAMES) audio.put({ key: `${id}/${name}.mp3`, trackId: id, name: `${name}.mp3`, blob: files[name] });
+        store.put({ ...track, status: 'ready', error: undefined, bytes, playbackGain: encoding.gain,
+          metadata: { ...track.metadata, separation: metadata, encoding } });
       };
     };
   });

@@ -793,6 +793,12 @@ export default function Player({
         const audioBuffer = await context.decodeAudioData(
           (await track.blob.arrayBuffer()).slice(0)
         );
+        if (record.playbackGain && record.playbackGain !== 1) {
+          for (let channel = 0; channel < audioBuffer.numberOfChannels; channel++) {
+            const samples = audioBuffer.getChannelData(channel);
+            for (let i = 0; i < samples.length; i++) samples[i] /= record.playbackGain;
+          }
+        }
 
         if (isCancelled || !activeTrackIds.has(track.id)) {
           return;
@@ -917,6 +923,7 @@ export default function Player({
     getEffectiveVolumeFromRefs,
     inputTrackId,
     record.md5,
+    record.playbackGain,
     tracks,
   ]);
 

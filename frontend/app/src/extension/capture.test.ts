@@ -38,3 +38,10 @@ test('starting a replacement capture never sweeps up its new session', async () 
  assert.equal((await getTrack('spotify-testCapture'))?.status,'captured');
  await deleteTrack('spotify-testCapture');
 });
+
+// Only capture metadata is staged: no GiB-sized allocation is needed for these boundaries.
+test('capture accepts the exact 1 GiB boundary and rejects one frame above it', async () => {
+ const limit=1024**3;
+ await beginCapture(999,{...meta,audioByteLength:limit},limit);
+ await assert.rejects(beginCapture(999,{...meta,audioByteLength:limit+8},limit+8),/maximum 1 GiB/);
+});

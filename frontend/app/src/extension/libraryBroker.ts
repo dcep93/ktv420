@@ -1,13 +1,12 @@
+import { validateMp3 } from './mp3Validation';
+import { MP3_NAMES, mp3Layout, type Mp3Files, type Mp3Encoding } from '../features/local/audio/mp3Types';
 import * as library from '../features/local/library';
 
-export const LIBRARY_PROTOCOL_VERSION = 1;
+export const LIBRARY_PROTOCOL_VERSION = 2;
 export const SEPARATION_LOCK = 'ktv420-separation';
 export const PROCESSING_PREFERENCE = 'ktv420-auto-processing';
-// Capture accepts 512 MiB of mono samples; stereo stems can double that payload.
-// Reserve bounded WAV header space in addition to the largest stereo payload.
-const MAX_AUDIO_BYTES = 1024 * 1024 * 1024 + 65536;
 export type BrokerResponse = {
-  source: 'ktv420-library'; version: 1; id: string; ok: boolean; result?: unknown; error?: string;
+  source: 'ktv420-library'; version: 2; id: string; ok: boolean; result?: unknown; error?: string;
 };
 export type BrokerLocks = Pick<LockManager, 'request'>;
 type Preferences = Pick<Storage, 'getItem' | 'setItem'>;
@@ -39,39 +38,6 @@ function metadataValue(value: unknown, depth = 0, budget = { remaining: 4096 }):
   throw new Error('Invalid metadata value.');
 }
 
-/** Validate in place without decoding, quantizing, or copying Float32 samples into channels. */
-async function validateStem(blob: unknown, sampleRate: number, frames: number): Promise<void> {
-  if (!(blob instanceof Blob) || blob.size < 44 || blob.size > Math.min(MAX_AUDIO_BYTES, frames * 8 + 65536)) throw new Error('Invalid or oversized stem Blob.');
-  const bytes = await blob.arrayBuffer();
-  const view = new DataView(bytes);
-  const tag = (offset: number) => String.fromCharCode(...new Uint8Array(bytes, offset, 4));
-  if (tag(0) !== 'RIFF' || tag(8) !== 'WAVE' || view.getUint32(4, true) + 8 !== bytes.byteLength) throw new Error('Invalid stem WAV container.');
-  let fmt = -1, fmtSize = 0, data = -1, dataSize = 0;
-  for (let offset = 12; offset < bytes.byteLength;) {
-    if (offset + 8 > bytes.byteLength) throw new Error('Truncated stem WAV chunk.');
-    const size = view.getUint32(offset + 4, true), next = offset + 8 + size + size % 2;
-    if (next > bytes.byteLength) throw new Error('Truncated stem WAV data.');
-    if (tag(offset) === 'fmt ') {
-      if (fmt !== -1) throw new Error('Duplicate stem WAV format.');
-      fmt = offset + 8; fmtSize = size;
-    }
-    if (tag(offset) === 'data') {
-      if (data !== -1) throw new Error('Duplicate stem WAV data.');
-      data = offset + 8; dataSize = size;
-    }
-    offset = next;
-  }
-  if (fmt < 0 || fmtSize < 16 || data < 0 || view.getUint16(fmt, true) !== 3 ||
-    view.getUint16(fmt + 2, true) !== 2 || view.getUint16(fmt + 14, true) !== 32 ||
-    view.getUint16(fmt + 12, true) !== 8 || view.getUint32(fmt + 8, true) !== sampleRate * 8 ||
-    view.getUint32(fmt + 4, true) !== sampleRate || dataSize !== frames * 8) {
-    throw new Error('Stems must be stereo Float32 WAV with the original sample rate and frame count.');
-  }
-  for (let offset = data; offset < data + dataSize; offset += 4) {
-    if (!Number.isFinite(view.getFloat32(offset, true))) throw new Error('Stem contains non-finite samples.');
-  }
-}
-
 /** One trusted hosted frame owns one serialized session. Its lock never crosses origins. */
 export function createLibraryBrokerSession(options: { locks: BrokerLocks; preferences: Preferences }) {
   let closed = false, release: (() => void) | undefined, holding: Promise<unknown> | undefined, pending = 0;
@@ -98,7 +64,7 @@ export function createLibraryBrokerSession(options: { locks: BrokerLocks; prefer
     assertOpen();
     const counts: Record<string, number[]> = {
       listTracks: [0], getTrack: [1], getInput: [1], getPlaybackRecord: [1],
-      setTrackStatus: [2, 3], saveStems: [3], deleteTrack: [1], getProcessingEnabled: [0],
+      setTrackStatus: [2, 3], saveMp3: [4], deleteTrack: [1], getProcessingEnabled: [0],
       setProcessingEnabled: [1], acquireLock: [0], releaseLock: [0],
     };
     if (!Object.hasOwn(counts, method)) throw new Error(`Unsupported library operation: ${method}.`);
@@ -132,33 +98,36 @@ export function createLibraryBrokerSession(options: { locks: BrokerLocks; prefer
       assertOwner();
       return library.setTrackStatus(id, status, error);
     }
-    const stems = args[1], metadata = args[2];
-    if (!record(stems) || Object.keys(stems).length !== 4 || !library.STEM_NAMES.every(name => Object.hasOwn(stems, name))) throw new Error('Exactly four stems are required: drums, bass, other, vocals.');
+    const files = args[1], metadata = args[2], encoding = args[3];
+    if (!record(files) || Object.keys(files).length !== 5 || !MP3_NAMES.every(name => Object.hasOwn(files, name))) throw new Error('Exactly five MP3 files are required: input, drums, bass, other, vocals.');
     if (!record(metadata)) throw new Error('Invalid separation metadata.');
     metadataValue(metadata);
     if (JSON.stringify(metadata).length > 16384) throw new Error('Separation metadata is too large.');
     if (metadata.inputSampleRate !== track.sampleRate || metadata.inputFrames !== track.frames) throw new Error('Separation metadata does not match the original audio.');
-    if (!Number.isInteger(track.sampleRate) || track.sampleRate < 8000 || track.sampleRate > 384000 || !Number.isSafeInteger(track.frames) || track.frames <= 0) throw new Error('Original audio metadata is invalid.');
-    // Validate sequentially to bound peak memory to one stem, then commit all four atomically.
-    for (const name of library.STEM_NAMES) await validateStem(stems[name], track.sampleRate, track.frames);
+    if (!Number.isInteger(track.sampleRate) || track.sampleRate < 8000 || track.sampleRate > 384000 || !Number.isSafeInteger(track.frames) || track.frames <= 0 || track.frames * 4 > 1024 ** 3) throw new Error('Original audio metadata is invalid.');
+    const expected = mp3Layout(track.sampleRate, track.frames);
+    if (!record(encoding) || Object.keys(encoding).length !== 3 || encoding.sampleRate !== expected.sampleRate || encoding.frames !== expected.frames ||
+      typeof encoding.gain !== 'number' || !Number.isFinite(encoding.gain) || encoding.gain <= 0 || encoding.gain > 1) throw new Error('Invalid MP3 encoding metadata or gain.');
+    // One bounded file at a time; storage is untouched until all five validate.
+    for (const name of MP3_NAMES) await validateMp3(files[name], expected.sampleRate, expected.frames);
     assertOwner();
-    return library.saveStems(id, stems as Record<typeof library.STEM_NAMES[number], Blob>, metadata);
+    return library.saveMp3(id, files as Mp3Files, metadata, encoding as Mp3Encoding);
   }
   async function dispatch(value: unknown): Promise<BrokerResponse> {
     const id = record(value) && typeof value.id === 'string' && value.id.length <= 128 ? value.id : '';
-    const base = { source: 'ktv420-library' as const, version: 1 as const, id };
+    const base = { source: 'ktv420-library' as const, version: 2 as const, id };
     try {
       if (!record(value) || value.source !== 'ktv420-library') throw new Error('Invalid library request.');
       if (value.version !== LIBRARY_PROTOCOL_VERSION) throw new Error('Library bridge version mismatch. Update the extension and reload the player.');
       boundedString(value.id, 'request ID', 128);
       const method = boundedString(value.method, 'operation', 64);
-      if (!Array.isArray(value.args) || value.args.length > 3) throw new Error('Invalid request arguments.');
+      if (!Array.isArray(value.args) || value.args.length > 4) throw new Error('Invalid request arguments.');
       return { ...base, ok: true, result: await execute(method, value.args) };
     } catch (error) { return { ...base, ok: false, error: error instanceof Error ? error.message : 'Local library operation failed.' }; }
   }
   return {
     handle(value: unknown): Promise<BrokerResponse> {
-      if (pending >= 16) return Promise.resolve({ source: 'ktv420-library', version: 1,
+      if (pending >= 16) return Promise.resolve({ source: 'ktv420-library', version: 2,
         id: record(value) && typeof value.id === 'string' && value.id.length <= 128 ? value.id : '',
         ok: false, error: 'Too many pending library requests. Try again after the current operation.' });
       pending++;
