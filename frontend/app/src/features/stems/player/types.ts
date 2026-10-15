@@ -45,6 +45,9 @@ export type RecordingStartRequest = {
 };
 
 export type VisualizerType =
+  | "stem-weather"
+  | "spectrogram"
+  | "stereo-bloom"
   | "laser-ladders"
   | "spectrum-safari"
   | "time-ribbon"

@@ -5,6 +5,8 @@ import { type Track } from "./types";
 
 type TrackRowProps = {
   track: Track;
+  hideCanvas?: boolean;
+  seekable?: boolean;
   volume: number;
   isMuted: boolean;
   isDeafened: boolean;
@@ -26,6 +28,8 @@ type TrackRowProps = {
 
 export function TrackRow({
   track,
+  hideCanvas = false,
+  seekable = false,
   volume,
   isMuted,
   isDeafened,
@@ -100,8 +104,9 @@ export function TrackRow({
           type="button"
           className="player-track-row__name"
           onClick={onToggleSpotlight}
+          disabled={hideCanvas}
           aria-pressed={isSpotlighted}
-          title={isSpotlighted ? "Exit spotlight view" : "Spotlight track"}
+          title={hideCanvas ? "Stem Weather shows the whole mix" : isSpotlighted ? "Exit spotlight view" : "Spotlight track"}
           style={{ minWidth: "187px", fontWeight: 600, color: "var(--ww-text)" }}
         >
           {label}
@@ -195,21 +200,22 @@ export function TrackRow({
           </label>
         </div>
       </div>
-      <div className="player-track-row__canvas" style={{ marginTop: "0.34rem" }}>
+      {!hideCanvas && <div className="player-track-row__canvas" style={{ marginTop: "0.34rem" }}>
         <canvas
           ref={registerCanvas}
           width={520}
           height={102}
-          onPointerDown={onCanvasSeek}
+          aria-label={`${label} visualization`}
+          onPointerDown={seekable ? onCanvasSeek : undefined}
           style={{
             border: "1px solid var(--ww-border)",
             background: "linear-gradient(90deg, #120d0b, #1a1411)",
             width: "100%",
             display: "block",
-            cursor: "pointer",
+            cursor: seekable ? "pointer" : "default",
           }}
         />
-      </div>
+      </div>}
     </div>
   );
 }

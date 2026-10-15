@@ -6,6 +6,9 @@ export const visualizerOptions: Array<{
   hint: string;
 }> = [
   { value: "time-ribbon", label: "Time Ribbon", hint: "Amplitude Timeline" },
+  { value: "stem-weather", label: "Stem Weather", hint: "The whole mix" },
+  { value: "spectrogram", label: "Spectrogram", hint: "Frequency history" },
+  { value: "stereo-bloom", label: "Stereo Bloom", hint: "Left / right image" },
   { value: "laser-ladders", label: "Laser Ladders", hint: "Graphic EQ" },
   { value: "spectrum-safari", label: "Spectrum Safari", hint: "Analyzer" },
   {

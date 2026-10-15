@@ -113,3 +113,24 @@ A five-minute synthetic performance with five stereo inputs, repeated seeks, tem
 The real React saved-recording card exported an MP3 through its new button and showed progress/Cancel while disabling conflicting operations. Temporary PCM is written to OPFS and removed after success/cancellation; a stale file is removed under an exclusive lock before the next export. Preflight checks cover song availability/duration, available disk quota and a 1.5 GiB estimated per-section buffer ceiling. The broker processing lock excludes separation/deletion. Export requires no capture, Spotify transport commands, model inference, network audio or new extension permissions.
 
 Automated release checks: 87 tests, ESLint and hosted/extension production builds passed. The existing DOM record/replay fixture also passed all 13 assertions after the shared audio refactor, including tempo/pitch, remote controls, two-song replay and Escape during preparation. The export fixture is development-only and excluded from deployment. The installed extension remains 6.3.1; the feature is delivered by the hosted player.
+
+## Visualizer additions and rendering polish — 2026-10-14
+
+Added Stem Weather, Spectrogram and Stereo Bloom while retaining all 24 previous choices. Weather combines post-effect stem signals into one canvas and keeps the existing mixer controls below it; mute/solo excludes contributions and original playback receives a separate ambient glow. Spectrogram uses bounded 480×128 history with logarithmic frequency mapping, freezes on pause, and clears on seeks or return from a hidden view. Bloom reads separate stereo channels through silent side taps; those branches do not add to the audible output.
+
+Shared rendering uses CSS-pixel coordinates with backing resolution capped at 2× and approximately 1.5 million pixels per canvas. Canvas backgrounds/fonts inherit the app theme and repeated per-panel timestamps were removed. Analyser arrays are reused. Intersection/document visibility gate painting; paused canvases settle for 1.5 seconds, then stop redundant painting. Existing artwork retains its palettes.
+
+The actual React player / Spotify DOM fixture passed 26 assertions, including independent stereo levels, unchanged output samples with stereo taps attached, canvas counts and resolution bounds, proof that visible canvases actually paint, preserved spectrogram frequencies after pause, frozen history, seek reset, hidden/paused painting suppression, muted Weather, and recording/replaying all three new visualizer selections. The new fixture report sits below the player so growing test output cannot move the tested canvases offscreen. Earlier background measurements were 30 FPS; the final foreground run was 60 FPS in every mode.
+
+With five synthetic stems loaded and visible panels rendering at 1.5× tempo / +12 semitones on the Apple M5 MacBook Air:
+
+| Mode | FPS | 95th percentile frame | Maximum frame |
+| --- | --- | --- | --- |
+| Time Ribbon baseline | 60 | 17.4 ms | 18.4 ms |
+| Stem Weather | 60 | 17.2 ms | 17.8 ms |
+| Spectrogram | 60 | 17.3 ms | 17.8 ms |
+| Stereo Bloom | 60 | 17.1 ms | 17.9 ms |
+
+These are short, synthetic, local-browser measurements with the viewport's visible panels; they do not guarantee performance on every device or fullscreen size. The separate minified synthetic visual preview rendered all three modes under the exact Firebase player CSP with no console errors, and was visually inspected for theme, stereo shape and frequency history. Both preview fixtures are excluded from deployment.
+
+91 automated tests (10 Node / 81 TypeScript), lint, TypeScript, and hosted/extension production builds passed. Extension APIs, permissions and installed files remain unchanged. Existing recordings continue using their original visualizer IDs; new IDs use the existing recording format.

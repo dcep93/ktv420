@@ -1,3 +1,8 @@
+import { resizeVisualizer, canvasVisible } from './visuals/canvas';
+import { createStereoTap, type StereoTap } from './visuals/analysis';
+import { drawSpectrogram, resetSpectrogram } from './visuals/spectrogram';
+import { drawStereoBloom } from './visuals/stereoBloom';
+import { drawStemWeather, resetWeather } from './visuals/stemWeather';
 import { getLogarithmicVolumeGain } from './mixerGain';
 import { connectStemEffects } from './stemGraph';
 import { TempoEngine } from './tempoEngine';
@@ -150,6 +155,9 @@ export default function Player({
   const gainNodesRef = useRef<Record<string, GainNode>>({});
   const effectNodesRef = useRef<Record<string, EffectNodes>>({});
   const analyserNodesRef = useRef<Record<string, AnalyserNode>>({});
+  const weatherCanvas = useRef<HTMLCanvasElement | null>(null);
+  const visualRevision = useRef(0);
+  useEffect(() => { visualRevision.current++; }, [volumes, trackMuteStates, trackDeafenStates, effectValues, effectTypes]);
   const canvasRefs = useRef<Record<string, HTMLCanvasElement | null>>({});
   const drawAnimationFrameRef = useRef<number | null>(null);
   const timeAnimationFrameRef = useRef<number | null>(null);
@@ -214,7 +222,7 @@ export default function Player({
       ) ?? null
     );
   }, [inputTrack, spotlightState, tracks]);
-  const spotlightTrackId = spotlightTrack?.id ?? null;
+  const spotlightTrackId = visualizerType === "stem-weather" ? null : spotlightTrack?.id ?? null;
   const spotlightModeKey = spotlightTrackId
     ? `${spotlightTrackId}:${spotlightState?.level ?? "track"}`
     : "default";
@@ -816,108 +824,77 @@ export default function Player({
   }, [applyEffectiveVolume, getEffectiveVolume, tracks]);
 
   useEffect(() => {
-    const resizeCanvases = () => {
-      Object.values(canvasRefs.current).forEach((canvas) => {
-        if (!canvas) {
-          return;
-        }
-
-        const rect = canvas.getBoundingClientRect();
-        const parentRect = canvas.parentElement?.getBoundingClientRect();
-        const nextWidth = Math.max(
-          0,
-          Math.floor(rect.width || parentRect?.width || window.innerWidth)
-        );
-        const nextHeight = Math.max(
-          0,
-          Math.floor(rect.height || parentRect?.height || 102)
-        );
-
-        if (nextWidth && canvas.width !== nextWidth) {
-          canvas.width = nextWidth;
-        }
-
-        if (nextHeight && canvas.height !== nextHeight) {
-          canvas.height = nextHeight;
-        }
-      });
-    };
-    const resizeObserver =
-      typeof ResizeObserver === "undefined"
-        ? null
-        : new ResizeObserver(() => resizeCanvases());
-
-    resizeCanvases();
-    const animationFrame = window.requestAnimationFrame(resizeCanvases);
-    Object.values(canvasRefs.current).forEach((canvas) => {
-      if (canvas) {
-        resizeObserver?.observe(canvas);
-        if (canvas.parentElement) {
-          resizeObserver?.observe(canvas.parentElement);
-        }
-      }
-    });
-    window.addEventListener("resize", resizeCanvases);
-
-    return () => {
-      window.cancelAnimationFrame(animationFrame);
-      resizeObserver?.disconnect();
-      window.removeEventListener("resize", resizeCanvases);
-    };
-  }, [shouldShowVisualizerPicker, spotlightTrackId, tracks]);
+    const canvases = [...Object.values(canvasRefs.current), weatherCanvas.current].filter((c): c is HTMLCanvasElement => !!c);
+    const resize = () => { canvases.forEach(resizeVisualizer); visualRevision.current++; };
+    const observer = new ResizeObserver(resize);
+    canvases.forEach(canvas => observer.observe(canvas));
+    resize(); window.addEventListener('resize', resize);
+    return () => { observer.disconnect(); window.removeEventListener('resize', resize); };
+  }, [shouldShowVisualizerPicker, spotlightTrackId, tracks, visualizerType]);
 
   useEffect(() => {
-    const draw = () => {
-      const sampleRate = audioCtxRef.current?.sampleRate ?? 44100;
-      const playbackTime = currentPlaybackTime();
+    const canvases = [...Object.values(canvasRefs.current), weatherCanvas.current].filter((c): c is HTMLCanvasElement => !!c);
+    canvases.forEach(canvas => { resetVisualizerState(canvas); resetSpectrogram(canvas); resetWeather(canvas); });
+    return () => canvases.forEach(canvas => { resetVisualizerState(canvas); resetSpectrogram(canvas); resetWeather(canvas); });
+  }, [tracks, visualizerType]);
 
-      tracks.forEach((track) => {
-        const analyser = analyserNodesRef.current[track.id];
-        const canvas = canvasRefs.current[track.id];
-
-        if (!analyser || !canvas) {
-          return;
-        }
-
-        try {
-          const effectiveVolume = getEffectiveVolumeFromRefs(track.id);
-          drawVisualizer({
-            analyser,
-            canvas,
-            visualizerType,
-            amplitudeEnvelope: amplitudeEnvelopes[track.id],
-            amplitudeMaximum: amplitudeMaximums[track.id],
-            sampleRate,
-            currentTime: playbackTime,
-            duration: duration || 0,
-            isPlaying,
-            effectiveVolume,
-          });
-        } catch (error) {
-          console.error("Failed to draw visualizer", track.name, error);
-        }
+  useEffect(() => {
+    const taps = new Map<string, StereoTap>();
+    const canvases = [...Object.values(canvasRefs.current), weatherCanvas.current].filter((c): c is HTMLCanvasElement => !!c);
+    const visible = new Set(canvases.filter(canvasVisible));
+    const observer = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        const canvas = entry.target as HTMLCanvasElement;
+        if (entry.isIntersecting) { if (!visible.has(canvas)) resetSpectrogram(canvas); visible.add(canvas); }
+        else visible.delete(canvas);
       });
-
-      drawAnimationFrameRef.current = requestAnimationFrame(draw);
+      visualRevision.current++;
+    });
+    canvases.forEach(canvas => observer.observe(canvas));
+    const visibilityChanged = () => {
+      if (!document.hidden) { canvases.forEach(resetSpectrogram); visualRevision.current++; }
     };
-
-    drawAnimationFrameRef.current = requestAnimationFrame(draw);
-
-    return () => {
-      if (drawAnimationFrameRef.current !== null) {
-        cancelAnimationFrame(drawAnimationFrameRef.current);
+    document.addEventListener('visibilitychange', visibilityChanged);
+    let revision = -1, settleUntil = performance.now() + 1500, lastPosition = -1;
+    const draw = (now: number) => {
+      drawAnimationFrameRef.current = requestAnimationFrame(draw);
+      if (document.hidden) return;
+      const playbackTime = currentPlaybackTime();
+      if (visualRevision.current !== revision || playbackTime !== lastPosition) {
+        revision = visualRevision.current; lastPosition = playbackTime; settleUntil = now + 1500;
+      }
+      if (!isPlaying && now > settleUntil) return;
+      const canDraw = (canvas: HTMLCanvasElement) => visible.has(canvas) && canvas.checkVisibility();
+      if (visualizerType === 'stem-weather') {
+        const canvas = weatherCanvas.current;
+        if (canvas && canDraw(canvas)) drawStemWeather(canvas, tracks.flatMap(track => {
+          const analyser = analyserNodesRef.current[track.id];
+          return analyser ? [{name: track.name, input: track.isInput, analyser, audible: getEffectiveVolumeFromRefs(track.id) > 0}] : [];
+        }), playbackTime, isPlaying);
+        return;
+      }
+      const sampleRate = audioCtxRef.current?.sampleRate ?? 44100;
+      for (const track of tracks) {
+        const analyser = analyserNodesRef.current[track.id], canvas = canvasRefs.current[track.id];
+        if (!analyser || !canvas || !canDraw(canvas)) {
+          taps.get(track.id)?.dispose(); taps.delete(track.id); continue;
+        }
+        if (visualizerType === 'spectrogram') drawSpectrogram(canvas, analyser, playbackTime, isPlaying);
+        else if (visualizerType === 'stereo-bloom') {
+          let tap = taps.get(track.id);
+          if (!tap) { tap = createStereoTap(analyser); taps.set(track.id, tap); }
+          drawStereoBloom(canvas, tap);
+        } else drawVisualizer({ analyser, canvas, visualizerType, amplitudeEnvelope: amplitudeEnvelopes[track.id],
+          amplitudeMaximum: amplitudeMaximums[track.id], sampleRate, currentTime: playbackTime, duration: duration || 0,
+          isPlaying, effectiveVolume: getEffectiveVolumeFromRefs(track.id) });
       }
     };
-  }, [
-    amplitudeEnvelopes,
-    amplitudeMaximums,
-    currentPlaybackTime,
-    duration,
-    getEffectiveVolumeFromRefs,
-    isPlaying,
-    tracks,
-    visualizerType,
-  ]);
+    drawAnimationFrameRef.current = requestAnimationFrame(draw);
+    return () => {
+      if (drawAnimationFrameRef.current !== null) cancelAnimationFrame(drawAnimationFrameRef.current);
+      observer.disconnect(); document.removeEventListener("visibilitychange", visibilityChanged); taps.forEach(tap => tap.dispose());
+    };
+  }, [amplitudeEnvelopes, amplitudeMaximums, currentPlaybackTime, duration, getEffectiveVolumeFromRefs, isPlaying, tracks, visualizerType]);
 
   useEffect(() => {
     const updateTime = () => {
@@ -1098,6 +1075,7 @@ export default function Player({
 
   const commitSeek = useCallback(
     async (targetTime: number) => {
+      Object.values(canvasRefs.current).forEach(canvas => { if (canvas) resetSpectrogram(canvas); });
       if (onTransportCommand) { onTransportCommand({ action: 'seek', position: targetTime }); return; }
       const clampedTime = Math.max(0, Math.min(targetTime, duration || 0));
 
@@ -1238,6 +1216,7 @@ export default function Player({
         previous: visualizerType,
         next: nextVisualizerType,
       });
+      if (nextVisualizerType === "stem-weather") setSpotlightState(null);
       setVisualizerType(nextVisualizerType);
     },
     [emitRecordingEvent, visualizerType]
@@ -1461,7 +1440,7 @@ export default function Player({
       trackId:record.md5,ready:areTracksReady,position:currentPlaybackTime,snapshot,
       play:async () => { stopAllSources(); await schedulePlayback(startOffsetRef.current); },
       pause:pausePlayback,
-      seek:async position => { const resume = isPlaying; stopAllSources(); startOffsetRef.current = Math.max(0,Math.min(duration,position)); setCurrentTime(startOffsetRef.current); if (resume) await schedulePlayback(startOffsetRef.current); },
+      seek:async position => { Object.values(canvasRefs.current).forEach(canvas => { if (canvas) resetSpectrogram(canvas); }); const resume = isPlaying; stopAllSources(); startOffsetRef.current = Math.max(0,Math.min(duration,position)); setCurrentTime(startOffsetRef.current); if (resume) await schedulePlayback(startOffsetRef.current); },
       apply:value => {
         applyTempoPitch(value.tempo ?? 1, value.pitch ?? 0);
         if (!visualizerOptions.some(option => option.value === value.visualizer) || value.stems.length !== tracks.length) throw new Error('Recording requires an unsupported mixer layout.');
@@ -1794,11 +1773,17 @@ export default function Player({
       </div>
       {tracks.length ? (
         <>
+          {visualizerType === 'stem-weather' && <section className="stem-weather" aria-label="Stem Weather">
+            <canvas ref={weatherCanvas} aria-label="Combined stem visualization" />
+            <div className="stem-weather__legend" aria-hidden="true"><span>Drums · rain</span><span>Bass · waves</span><span>Vocals · thread</span><span>Other · atmosphere</span></div>
+          </section>}
           <div className="player-track-list" style={{ marginTop: "1rem" }}>
             {tracks.map((track) => (
               <TrackRow
                 key={track.id}
                 track={track}
+                hideCanvas={visualizerType === "stem-weather"}
+                seekable={visualizerType === "time-ribbon" || visualizerType === "super-time-ribbon"}
                 volume={volumes[track.id] ?? 1}
                 isMuted={!!trackMuteStates[track.id]}
                 isDeafened={!!trackDeafenStates[track.id]}
@@ -1816,7 +1801,7 @@ export default function Player({
                 onToggleMute={toggleTrackMute}
                 onToggleDeafen={toggleTrackDeafen}
                 isSpotlighted={spotlightTrackId === track.id}
-                onToggleSpotlight={() => toggleTrackSpotlight(track)}
+                onToggleSpotlight={() => { if (visualizerType !== "stem-weather") toggleTrackSpotlight(track); }}
                 registerCanvas={(ref) => {
                   canvasRefs.current[track.id] = ref;
                 }}

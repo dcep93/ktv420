@@ -1,3 +1,4 @@
+import {createStereoTap,waveform,signalRms} from './src/features/stems/player/visuals/analysis.ts';
 import {loadPerformance,savePerformance} from './src/features/local/performanceFiles.ts';
 import hookUrl from '../../extension/src/page/spotifyHooks.js?url';
 import workletUrl from '../../extension/src/page/pcmWorklet.js?url';
@@ -184,3 +185,78 @@ document.querySelector('#tempo-performance').onclick=async()=>{const rows=[];try
  const passed=rows.every(row=>row.fps>=rows[0].fps*.9&&row.maxFrameMs<150&&row.driftSeconds<.5);
  report.textContent=JSON.stringify({passed,rows},null,2);
 }catch(error){audio.pause();report.textContent=JSON.stringify({passed:false,error:String(error),rows,listening},null,2);}};
+
+// Exercise production React controls, real audio nodes and mode selection at Retina density.
+document.querySelector('#visual-suite').onclick=async()=>{const rows=[];try{
+ results.length=0;
+ const offline=new OfflineAudioContext(2,4410,44100),buffer=offline.createBuffer(2,4410,44100);
+ for(let i=0;i<4410;i++){buffer.getChannelData(0)[i]=.2*Math.sin(i*2*Math.PI*440/44100);buffer.getChannelData(1)[i]=.1*Math.sin(i*2*Math.PI*660/44100);}
+ const source=offline.createBufferSource();source.buffer=buffer;source.connect(offline.destination);const tap=createStereoTap(source);
+ const suspended=offline.suspend(.05);source.start();const rendered=offline.startRendering();await suspended;
+ const left=waveform(tap.left),right=waveform(tap.right);
+ assert(Math.abs(signalRms(left)/signalRms(right)-2)<.08,'Stereo taps preserve independent left/right levels');
+ await offline.resume();const output=await rendered;let error=0;
+ for(let c=0;c<2;c++)for(let i=0;i<4410;i++)error=Math.max(error,Math.abs(output.getChannelData(c)[i]-buffer.getChannelData(c)[i]));
+ assert(error<1e-7,'Stereo analysis adds no audio to the output');tap.dispose();
+ await document.querySelector('#seed').onclick();select(0);await sleep(2600);
+ const win=()=>frame.contentDocument.querySelector('iframe').contentWindow,doc=()=>win().document;
+ const leave=[...doc().querySelectorAll('button')].find(b=>b.textContent==='Leave recording');if(leave)leave.click();
+ await until(()=>doc().querySelector('input[aria-label="Tempo"]'),'player not ready',12000);
+ await controller.command({action:'volume',volume:0});
+ const textButton=label=>[...doc().querySelectorAll('button')].find(b=>b.textContent.trim()===label);
+ const setter=Object.getOwnPropertyDescriptor(win().HTMLInputElement.prototype,'value').set;
+ const playerContent=()=>doc().querySelector('.iframe-content');
+ frame.scrollIntoView({block:'start'});
+ const paintCount={count:0};const proto=win().CanvasRenderingContext2D.prototype,fill=proto.fillRect;
+ proto.fillRect=function(...args){paintCount.count++;return fill.apply(this,args);};
+ try {
+ for(const name of ['Time Ribbon','Stem Weather','Spectrogram','Stereo Bloom']) {
+  await controller.command({action:'pause'});await controller.command({action:'seek',trackId:ids[0],position:.3});
+  await controller.command({action:'rate',trackId:ids[0],rate:1.5});
+  const input=doc().querySelector('input[aria-label="Pitch"]');setter.call(input,'12');input.dispatchEvent(new (win().Event)('input',{bubbles:true}));
+  textButton(name).click();playerContent().scrollTop=0;await controller.command({action:'play'});await sleep(250);
+  const canvases=[...doc().querySelectorAll('canvas')];
+  assert(canvases.length===(name==='Stem Weather'?1:5),name+' uses the intended canvas count');
+  assert(canvases.every(c=>c.width*c.height<=1505000&&c.width>=c.clientWidth),name+' has bounded Retina resolution');
+  const paintedBefore=paintCount.count;
+  const gaps=[];let previous=performance.now();const start=previous;
+  await new Promise(resolve=>{const tick=()=>{const now=performance.now();gaps.push(now-previous);previous=now;if(now-start>=2200)resolve();else requestAnimationFrame(tick);};requestAnimationFrame(tick);});
+  gaps.sort((a,b)=>a-b);rows.push({name,fps:Math.round(1000*gaps.length/gaps.reduce((a,b)=>a+b,0)),p95FrameMs:gaps[Math.floor(gaps.length*.95)],maxFrameMs:gaps.at(-1)});
+  assert(paintCount.count>paintedBefore,name+' actually paints visible canvases');
+  assert(!doc().querySelector('[role="alert"]'),name+' keeps playback healthy');
+  if(name==='Spectrogram') {
+   await controller.command({action:'pause'});await sleep(150);
+   const canvas=canvases[0],before=canvas.toDataURL();
+   const pixels=canvas.getContext('2d').getImageData(Math.round(canvas.width*.6),20,Math.round(canvas.width*.3),canvas.height-40).data;
+   assert(pixels.some((v,i)=>i%4===0&&v>120),'Paused spectrogram retains captured frequencies');await sleep(250);
+   assert(canvas.toDataURL()===before,'Spectrogram history freezes while paused');
+   const seekInput=doc().querySelector('input[aria-label="Playback position"]');setter.call(seekInput,'1');seekInput.dispatchEvent(new (win().Event)('input',{bubbles:true}));await sleep(250);
+   assert(canvas.toDataURL()!==before,'Seeking clears stale spectrogram history');
+  }
+
+ }
+ const playerView=doc().querySelector('.iframe-player-view');playerView.hidden=true;await sleep(150);const hiddenPaint=paintCount.count;await sleep(300);
+ assert(paintCount.count===hiddenPaint,'Hidden canvases skip painting during playback');playerView.hidden=false;
+ await controller.command({action:'pause'});await sleep(1900);const stopped=paintCount.count;await sleep(400);
+ assert(paintCount.count===stopped,'Paused canvases stop redundant painting');
+ textButton('Stem Weather').click();playerContent().scrollTop=0;await sleep(150);
+ const muteButtons=[...doc().querySelectorAll('.player-track-row button[aria-label="Mute"]')];muteButtons.forEach(button=>button.click());
+ await sleep(200);const canvas=doc().querySelector('.stem-weather canvas'),pixels=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
+ let uniform=true;for(let i=4;i<pixels.length;i+=4)if(pixels[i]!==pixels[0]||pixels[i+1]!==pixels[1]||pixels[i+2]!==pixels[2]){uniform=false;break;}
+ assert(uniform,'All muted stems leave no Weather contribution');
+ // Select a new mode while recording, then ensure its snapshot can be replayed.
+ const recordButton=doc().querySelector('button[aria-label="Start recording"]');recordButton.click();await sleep(250);
+ textButton('Stereo Bloom').click();await sleep(100);textButton('Spectrogram').click();await sleep(100);textButton('Stem Weather').click();await sleep(100);
+ win().HTMLAnchorElement.prototype.click=function(){};
+ doc().querySelector('button[aria-label="Stop and save recording"]').click();await sleep(400);
+ const recording=await loadPerformance('last');
+ assert(['stem-weather','spectrogram','stereo-bloom'].every(mode=>recording.events.some(e=>e.snapshot?.visualizer===mode)),'Recording retains all new visualizer selections');
+ frame.contentWindow.postMessage({source:'ktv420-parent',version:2,type:'replay',recording},location.origin);
+ await until(()=>textButton('Play recording')&&!textButton('Play recording').disabled,'replay not ready');textButton('Play recording').click();
+ await until(()=>textButton('Stop replay'),'replay did not start');await until(()=>textButton('Play recording')&&!textButton('Stop replay'),'replay did not finish');
+ assert(!doc().querySelector('[role="alert"]'),'New visualizer snapshots replay successfully');
+ textButton('Leave recording').click();
+ }finally{proto.fillRect=fill;}
+ await controller.command({action:'pause'});await controller.command({action:'rate',rate:1,trackId:ids[0]});
+ report.textContent=JSON.stringify({passed:rows.every(row=>row.fps>=rows[0].fps*.9&&row.maxFrameMs<150),results,rows},null,2);
+ }catch(error){audio.pause();report.textContent=JSON.stringify({passed:false,error:String(error),results,rows},null,2);}};

@@ -1,3 +1,5 @@
+import { analysisBytes } from './visuals/analysis';
+import { beginVisualizer, surfaceFor } from './visuals/canvas';
 import {
   AMPLITUDE_WINDOW_SECONDS,
   FUTURE_WINDOW_SECONDS,
@@ -107,11 +109,10 @@ export type VisualizerInputs = {
   sampleRate: number;
 };
 
-export function drawVisualizer({
+function drawLegacyVisualizer({
   analyser,
   canvas,
   currentTime,
-  duration,
   visualizerType,
   isPlaying,
   amplitudeEnvelope,
@@ -125,24 +126,16 @@ export function drawVisualizer({
     return;
   }
 
-  const { width, height } = canvas;
+  const { width, height, background, font, text } = surfaceFor(canvas);
   const performanceMode = isLowPowerMode();
   context.clearRect(0, 0, width, height);
 
-  const timeDisplay = `${currentTime.toFixed(2)}s / ${Math.max(
-    duration,
-    0
-  ).toFixed(2)}s`;
-
-  context.fillStyle = "#0a0a0a";
+  context.fillStyle = background;
   context.fillRect(0, 0, width, height);
-  context.fillStyle = "#999";
-  context.font = "12px sans-serif";
-  context.fillText(timeDisplay, 10, 16);
 
   if (visualizerType === "laser-ladders") {
     const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
+    const dataArray = analysisBytes(analyser, bufferLength);
     analyser.getByteFrequencyData(dataArray);
     const barWidth = (width / bufferLength) * 2.5;
 
@@ -164,7 +157,7 @@ export function drawVisualizer({
     }
   } else if (visualizerType === "spectrum-safari") {
     const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
+    const dataArray = analysisBytes(analyser, bufferLength);
     analyser.getByteFrequencyData(dataArray);
     const sliceWidth = width / bufferLength;
     let peakIndex = 0;
@@ -205,10 +198,10 @@ export function drawVisualizer({
     context.fill();
   } else if (visualizerType === "waveform-waterline") {
     const bufferLength = analyser.fftSize;
-    const dataArray = new Uint8Array(bufferLength);
+    const dataArray = analysisBytes(analyser, bufferLength);
     analyser.getByteTimeDomainData(dataArray);
 
-    context.fillStyle = "#0b1c2d";
+    context.fillStyle = background;
     context.fillRect(0, 0, width, height);
 
     const centerY = height / 2;
@@ -235,10 +228,10 @@ export function drawVisualizer({
     context.fillRect(0, centerY, width, centerY);
   } else if (visualizerType === "aurora-radar") {
     const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
+    const dataArray = analysisBytes(analyser, bufferLength);
     analyser.getByteFrequencyData(dataArray);
 
-    context.fillStyle = "#06090f";
+    context.fillStyle = background;
     context.fillRect(0, 0, width, height);
     const centerX = width / 2;
     const centerY = height / 2;
@@ -275,10 +268,10 @@ export function drawVisualizer({
     context.setTransform(1, 0, 0, 1, 0, 0);
   } else if (visualizerType === "mirror-peaks") {
     const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
+    const dataArray = analysisBytes(analyser, bufferLength);
     analyser.getByteFrequencyData(dataArray);
 
-    context.fillStyle = "#0f0d18";
+    context.fillStyle = background;
     context.fillRect(0, 0, width, height);
 
     const halfWidth = width / 2;
@@ -307,10 +300,10 @@ export function drawVisualizer({
     context.fillRect(halfWidth - 1, 0, 2, height);
   } else if (visualizerType === "pulse-grid") {
     const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
+    const dataArray = analysisBytes(analyser, bufferLength);
     analyser.getByteFrequencyData(dataArray);
 
-    context.fillStyle = "#050712";
+    context.fillStyle = background;
     context.fillRect(0, 0, width, height);
 
     const columns = 16;
@@ -401,14 +394,14 @@ export function drawVisualizer({
     }
   } else if (visualizerType === "luminous-orbit") {
     const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
+    const dataArray = analysisBytes(analyser, bufferLength);
     analyser.getByteFrequencyData(dataArray);
 
     const centerX = width / 2;
     const centerY = height / 2;
     const maxRadius = Math.min(width, height) / 2 - 12;
 
-    context.fillStyle = "#06080f";
+    context.fillStyle = background;
     context.fillRect(0, 0, width, height);
 
     context.save();
@@ -462,10 +455,10 @@ export function drawVisualizer({
     context.restore();
   } else if (visualizerType === "prism-bloom") {
     const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
+    const dataArray = analysisBytes(analyser, bufferLength);
     analyser.getByteFrequencyData(dataArray);
 
-    context.fillStyle = "#03040b";
+    context.fillStyle = background;
     context.fillRect(0, 0, width, height);
 
     const centerX = width / 2;
@@ -529,10 +522,10 @@ export function drawVisualizer({
     context.restore();
   } else if (visualizerType === "cascade-horizon") {
     const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
+    const dataArray = analysisBytes(analyser, bufferLength);
     analyser.getByteFrequencyData(dataArray);
 
-    context.fillStyle = "#02060f";
+    context.fillStyle = background;
     context.fillRect(0, 0, width, height);
 
     const layers = 8;
@@ -582,7 +575,7 @@ export function drawVisualizer({
     }
   } else if (visualizerType === "nebula-trails") {
     const bufferLength = analyser.fftSize;
-    const dataArray = new Uint8Array(bufferLength);
+    const dataArray = analysisBytes(analyser, bufferLength);
     analyser.getByteTimeDomainData(dataArray);
 
     context.fillStyle = "rgba(6, 10, 20, 0.6)";
@@ -623,10 +616,10 @@ export function drawVisualizer({
     }
   } else if (visualizerType === "ember-mandala") {
     const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
+    const dataArray = analysisBytes(analyser, bufferLength);
     analyser.getByteFrequencyData(dataArray);
 
-    context.fillStyle = "#0a060e";
+    context.fillStyle = background;
     context.fillRect(0, 0, width, height);
 
     const centerX = width / 2;
@@ -711,8 +704,8 @@ export function drawVisualizer({
     context.restore();
   } else if (visualizerType === "hippie-mirage") {
     const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
-    const waveformArray = new Uint8Array(analyser.fftSize);
+    const dataArray = analysisBytes(analyser, bufferLength);
+    const waveformArray = analysisBytes(analyser, analyser.fftSize);
     analyser.getByteFrequencyData(dataArray);
     analyser.getByteTimeDomainData(waveformArray);
 
@@ -855,10 +848,10 @@ export function drawVisualizer({
     context.globalCompositeOperation = "source-over";
   } else if (visualizerType === "hollow-echoes") {
     const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
+    const dataArray = analysisBytes(analyser, bufferLength);
     analyser.getByteFrequencyData(dataArray);
 
-    context.fillStyle = "#0a0c10";
+    context.fillStyle = background;
     context.fillRect(0, 0, width, height);
 
     const columns = 24;
@@ -906,14 +899,14 @@ export function drawVisualizer({
     }
 
     context.fillStyle = "rgba(255, 255, 255, 0.08)";
-    context.font = "11px sans-serif";
+    context.font = font;
     context.fillText("Harmonic cavities", 10, 18);
   } else if (visualizerType === "opal-current") {
     const bufferLength = analyser.fftSize;
-    const timeData = new Uint8Array(bufferLength);
+    const timeData = analysisBytes(analyser, bufferLength);
     analyser.getByteTimeDomainData(timeData);
 
-    context.fillStyle = "#04070f";
+    context.fillStyle = background;
     context.fillRect(0, 0, width, height);
 
     const ribbonCount = 5;
@@ -972,10 +965,10 @@ export function drawVisualizer({
     context.globalCompositeOperation = "source-over";
   } else if (visualizerType === "solstice-waves") {
     const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
+    const dataArray = analysisBytes(analyser, bufferLength);
     analyser.getByteFrequencyData(dataArray);
 
-    context.fillStyle = "#08090f";
+    context.fillStyle = background;
     context.fillRect(0, 0, width, height);
 
     const horizon = height * 0.62;
@@ -1030,10 +1023,10 @@ export function drawVisualizer({
     context.fillRect(0, horizon, width, height - horizon);
   } else if (visualizerType === "ripple-weave") {
     const bufferLength = analyser.fftSize;
-    const timeData = new Uint8Array(bufferLength);
+    const timeData = analysisBytes(analyser, bufferLength);
     analyser.getByteTimeDomainData(timeData);
 
-    context.fillStyle = "#060a11";
+    context.fillStyle = background;
     context.fillRect(0, 0, width, height);
 
     const ribbonCount = 3;
@@ -1074,14 +1067,14 @@ export function drawVisualizer({
     }
   } else if (visualizerType === "echo-lantern") {
     const frequencyBins = analyser.frequencyBinCount;
-    const frequencyData = new Uint8Array(frequencyBins);
+    const frequencyData = analysisBytes(analyser, frequencyBins);
     analyser.getByteFrequencyData(frequencyData);
 
     const timeBufferLength = analyser.fftSize;
-    const timeDomainData = new Uint8Array(timeBufferLength);
+    const timeDomainData = analysisBytes(analyser, timeBufferLength);
     analyser.getByteTimeDomainData(timeDomainData);
 
-    context.fillStyle = "#03060e";
+    context.fillStyle = background;
     context.fillRect(0, 0, width, height);
 
     const centerX = width / 2;
@@ -1166,11 +1159,11 @@ export function drawVisualizer({
     context.restore();
   } else if (visualizerType === "ectoplasm") {
     const freqLength = analyser.frequencyBinCount;
-    const frequencyData = new Uint8Array(freqLength);
+    const frequencyData = analysisBytes(analyser, freqLength);
     analyser.getByteFrequencyData(frequencyData);
 
     const timeLength = analyser.fftSize;
-    const timeData = new Uint8Array(timeLength);
+    const timeData = analysisBytes(analyser, timeLength);
     analyser.getByteTimeDomainData(timeData);
 
     const detailScale = performanceMode ? 0.6 : 1;
@@ -1296,8 +1289,8 @@ export function drawVisualizer({
     const ribbonHeight = height - 40;
 
     if (!amplitudeEnvelope || !amplitudeEnvelope.length) {
-      context.fillStyle = "#ccc";
-      context.font = "12px sans-serif";
+      context.fillStyle = text;
+      context.font = font;
       context.fillText(
         "Analyzing track envelope for ribbon view...",
         10,
@@ -1321,8 +1314,8 @@ export function drawVisualizer({
 
     const centerX = (PAST_WINDOW_SECONDS / totalWindowSeconds) * width;
     const frequencyBins = analyser.frequencyBinCount;
-    const frequencyData = new Uint8Array(frequencyBins);
-    const timeDomain = new Uint8Array(analyser.fftSize);
+    const frequencyData = analysisBytes(analyser, frequencyBins);
+    const timeDomain = analysisBytes(analyser, analyser.fftSize);
 
     analyser.getByteFrequencyData(frequencyData);
     analyser.getByteTimeDomainData(timeDomain);
@@ -1357,7 +1350,7 @@ export function drawVisualizer({
 
     context.save();
     context.translate(shakeX, shakeY);
-    context.fillStyle = "#070b14";
+    context.fillStyle = background;
     context.fillRect(
       -Math.abs(shakeX),
       -Math.abs(shakeY),
@@ -1411,7 +1404,7 @@ export function drawVisualizer({
     context.restore();
   } else if (visualizerType === "prismatic-turbine") {
     const bufferLength = analyser.frequencyBinCount;
-    const frequencyData = new Uint8Array(bufferLength);
+    const frequencyData = analysisBytes(analyser, bufferLength);
     analyser.getByteFrequencyData(frequencyData);
 
     const energy =
@@ -1593,7 +1586,7 @@ export function drawVisualizer({
         cached.image.width === 0 ||
         cached.image.height === 0
       ) {
-        context.fillStyle = "#000";
+        context.fillStyle = background;
         context.fillRect(0, 0, width, height);
         return;
       }
@@ -1620,7 +1613,7 @@ export function drawVisualizer({
         energy = amplitudeMaximum > 0 ? amplitude / amplitudeMaximum : 0;
       } else {
         const bufferLength = analyser.frequencyBinCount;
-        const frequencyData = new Uint8Array(bufferLength);
+        const frequencyData = analysisBytes(analyser, bufferLength);
         analyser.getByteFrequencyData(frequencyData);
 
         if (bufferLength > 0) {
@@ -1718,7 +1711,7 @@ export function drawVisualizer({
         return initialState;
       })();
     const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
+    const dataArray = analysisBytes(analyser, bufferLength);
     analyser.getByteFrequencyData(dataArray);
     const slice = Math.max(1, Math.floor(bufferLength * 0.15));
     const midSlice = Math.max(slice + 1, Math.floor(bufferLength * 0.5));
@@ -2310,10 +2303,10 @@ export function drawVisualizer({
     });
   } else if (visualizerType === "delay-pedal") {
     const bufferLength = analyser.fftSize;
-    const timeData = new Uint8Array(bufferLength);
+    const timeData = analysisBytes(analyser, bufferLength);
     analyser.getByteTimeDomainData(timeData);
 
-    context.fillStyle = "#06060c";
+    context.fillStyle = background;
     context.fillRect(0, 0, width, height);
 
     const rows = 16;
@@ -2393,7 +2386,7 @@ export function drawVisualizer({
     const baseY = height - 24;
     const ribbonHeight = height - 40;
 
-    context.fillStyle = "#070b14";
+    context.fillStyle = background;
     context.fillRect(0, 0, width, height);
 
     context.strokeStyle = "rgba(255, 255, 255, 0.08)";
@@ -2407,8 +2400,8 @@ export function drawVisualizer({
     }
 
     if (!amplitudeEnvelope || !amplitudeEnvelope.length) {
-      context.fillStyle = "#ccc";
-      context.font = "12px sans-serif";
+      context.fillStyle = text;
+      context.font = font;
       context.fillText(
         "Analyzing track envelope for ribbon view...",
         10,
@@ -2432,7 +2425,7 @@ export function drawVisualizer({
 
     const centerX = (PAST_WINDOW_SECONDS / totalWindowSeconds) * width;
     const frequencyBins = analyser.frequencyBinCount;
-    const frequencyData = new Uint8Array(frequencyBins);
+    const frequencyData = analysisBytes(analyser, frequencyBins);
 
     analyser.getByteFrequencyData(frequencyData);
 
@@ -2489,4 +2482,11 @@ export function drawVisualizer({
     context.lineTo(centerX, height);
     context.stroke();
   }
+}
+
+/** Isolate canvas state and draw existing artwork in logical CSS pixels on Retina. */
+export function drawVisualizer(inputs: VisualizerInputs) {
+  const view = beginVisualizer(inputs.canvas);
+  if (!view) return;
+  try { drawLegacyVisualizer(inputs); } finally { view.context.restore(); }
 }
