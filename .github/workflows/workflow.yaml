@@ -30,7 +30,6 @@ jobs:
           path: |
             dist/ktv420-extension.zip
             dist/ktv420-extension.zip.sha256
-      - run: cp dist/ktv420-extension.zip dist/ktv420-extension.zip.sha256 site/
       - uses: google-github-actions/auth@v2
         with:
           credentials_json: '${{ secrets.SA_KEY }}'

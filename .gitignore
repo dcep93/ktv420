@@ -15,3 +15,5 @@ __pycache__/
 /site/theme/
 
 /frontend/app/dist-tempo-validation/
+
+.DS_Store

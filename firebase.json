@@ -4,7 +4,9 @@
     "ignore": [
       "firebase.json",
       "**/.*",
-      "**/node_modules/**"
+      "**/node_modules/**",
+      "ktv420-extension.zip",
+      "ktv420-extension.zip.sha256"
     ],
     "rewrites": [
       {
@@ -71,15 +73,6 @@
           {
             "key": "Cache-Control",
             "value": "no-cache"
-          }
-        ]
-      },
-      {
-        "source": "*.zip",
-        "headers": [
-          {
-            "key": "Cache-Control",
-            "value": "public,max-age=300"
           }
         ]
       },

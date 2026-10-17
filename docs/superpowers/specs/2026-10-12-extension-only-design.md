@@ -20,7 +20,7 @@ Keep the iframe mounted when hidden so capture and separation continue. Origin/s
 
 ## Release and retirement
 
-Build an unpacked extension ZIP and a small installation website at ktv420.web.app. Instructions explain load-unpacked, model download, local disk usage and keeping the library tab open during separation. CI validates, builds and publishes those artifacts without deploying audio infrastructure. Remove obsolete backend code and old naming from the repository. Keep existing cloud resources until the replacement is proven in the installed extension with real Spotify capture, local separation and playback; only then delete dedicated legacy cloud resources; do not create archives. Preserve unrelated resources and the hosting project. Credentials/ownership that cannot be verified are reported as blockers, never assumed.
+Current distribution: users install through the Chrome Web Store linked from ktv420.web.app. CI validates and builds the Store upload ZIP as a GitHub Actions artifact, and deploys only the installation website and hosted player. Unpacked loading is for development. Keep Spotify open during separation. Remove obsolete backend code and old naming from the repository. Keep existing cloud resources until the replacement is proven in the installed extension with real Spotify capture, local separation and playback; only then delete dedicated legacy cloud resources; do not create archives. Preserve unrelated resources and the hosting project. Credentials/ownership that cannot be verified are reported as blockers, never assumed.
 
 ## Acceptance
 
