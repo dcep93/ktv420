@@ -18,7 +18,6 @@
   let listeningEnabled = false;
   let monitor = { gain: 0, expires: 0 };
   const rateElements = new Set();
-  let volumeRevision = 0, requestedVolume = 1;
   function guardOutput(element) {
     if (!listeningEnabled || outputElements.has(element)) return;
     const state = { volume: nativeVolume.get.call(element), muted: nativeMuted.get.call(element) };
@@ -27,12 +26,12 @@
     Object.defineProperty(element, 'volume', { configurable: true,
       get: () => state.volume, set: value => {
         if (!Number.isFinite(value) || value < 0 || value > 1) return;
-        state.volume = value; requestedVolume = state.muted ? 0 : value; volumeRevision++;
+        state.volume = value;
         if (!listeningEnabled) nativeVolume.set.call(element, value);
       } });
     Object.defineProperty(element, 'muted', { configurable: true,
       get: () => state.muted, set: value => {
-        state.muted = Boolean(value); requestedVolume = state.muted ? 0 : state.volume; volumeRevision++;
+        state.muted = Boolean(value);
         if (!listeningEnabled) nativeMuted.set.call(element, state.muted);
       } });
     nativeVolume.set.call(element, 0);
@@ -212,7 +211,7 @@
           const elements = discoverUsableTargets(mediaTracker);
           const target = selectMediaTarget(elements);
           if (listeningEnabled && target && !target.paused) await getOrCreateAudioGraph(target);
-          result = { media: target ? describeMediaElement(target) : null, volumeRevision, requestedVolume,
+          result = { media: target ? describeMediaElement(target) : null,
             captureInvalid: controller.invalid(), captureEnded: controller.ended(), monitorGain: performance.now() < monitor.expires ? monitor.gain : 0 };
         } else if (command === "listening-rate") {
           if (!listeningEnabled) throw new Error('Open ktv420 before changing playback.');

@@ -145,3 +145,52 @@ test('inherits Spotify volume and coalesces a drag without delaying pause or rev
   assert.equal(updates.at(-1).volume, 0, 'reopening inherits zero too');
   await controller.setEnabled(false); controller.dispose();
 });
+
+test('media handoff mute does not reset listening volume, but Spotify slider changes still do', async t => {
+  const ticks = [], calls = [], updates = [];
+  let trackId = '5EGTNEoUpibGgMWf6ECe0X', source = 'first', volumeRevision = 0;
+  const slider = { max: '1', value: '0.43' };
+  const seek = { max: '180000', value: '0', getAttribute: () => '0:00/3:00' };
+  const link = { getAttribute: () => `/track/${trackId}` };
+  for (const [key, value] of Object.entries({
+    document: {
+      querySelector: selector => selector.includes('control-button-playpause') ? { disabled: false, getAttribute: () => 'Pause' }
+        : selector.includes('now-playing-widget') ? { contains: () => true, querySelector: () => null } : null,
+      querySelectorAll: selector => selector.includes('input[type="range"]') ? [seek, slider] : [link],
+    },
+    location: { origin: 'https://open.spotify.com' },
+    chrome: { runtime: { async sendMessage(message) { return { ok: true, result: message.type === 'ktv420:listening-claim' ? true : [] }; } } },
+    setInterval(callback) { ticks.push(callback); return 0; }, clearInterval() {},
+  })) {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, key);
+    Object.defineProperty(globalThis, key, { value, writable: true, configurable: true });
+    t.after(() => previous ? Object.defineProperty(globalThis, key, previous) : delete globalThis[key]);
+  }
+  const controller = createListeningController({
+    bridge: { async command(command, payload) {
+      calls.push({ command, payload });
+      return command === 'listening-state' ? {
+        media: { source, readyState: 4, paused: false, currentTime: 0, playbackRate: 1 },
+        volumeRevision, requestedVolume: 0,
+      } : {};
+    } }, emit: state => updates.push(state), ensurePlayer() {}, getRunner: () => ({ isActive: () => true }),
+  });
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  const tick = async () => { controller.heartbeat(); ticks[0](); await settle(); };
+  controller.heartbeat(); await controller.setEnabled(true); await settle();
+  await controller.command({ action: 'silenced', generation: updates.at(-1).generation }); await tick();
+  assert.equal(calls.at(-1).payload.gain, 0.43);
+  source = 'second'; trackId = '6EGTNEoUpibGgMWf6ECe0X'; volumeRevision++;
+  await tick();
+  assert.equal(updates.at(-1).volume, 0.43, 'old media muted during transition is not user intent');
+  assert.equal(calls.at(-1).payload.gain, 0, 'handoff still waits for player silence acknowledgment');
+  await controller.command({ action: 'silenced', generation: updates.at(-1).generation }); await tick();
+  assert.equal(calls.at(-1).payload.gain, 0.43, 'next capture resumes at the chosen volume');
+  volumeRevision++; await tick();
+  assert.equal(updates.at(-1).volume, 0.43, 'late background-video mute cannot replace the volume either');
+  slider.value = '0'; await tick();
+  assert.equal(updates.at(-1).volume, 0, 'explicit Spotify mute is still respected');
+  slider.value = '0.65'; await tick();
+  assert.equal(updates.at(-1).volume, 0.65);
+  await controller.setEnabled(false); controller.dispose();
+});

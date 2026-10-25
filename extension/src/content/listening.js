@@ -7,7 +7,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
   let enabled = false, activation = Promise.resolve();
   let halted = false;
   let catalog = new Map(), recording = null, last = null, generation = 0, lastSource = '';
-  let volume = 0, volumeRevision = -1, output = 'muted', error = '', armed = false;
+  let volume = 0, output = 'muted', error = '', armed = false;
   let volumeTimer = null, volumeEdit = 0, volumeSettlesAt = 0, latestState = null;
   let desiredRate = 1, pendingRate = null, rateQueued = false;
   let batchPending = false, silentGeneration = -1, replayPreparation = false;
@@ -80,10 +80,10 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
         catalog = new Map(list.map(item => [item.trackId, item.status])); catalogAt = now;
       }
       if (observedVolumeEdit === volumeEdit && now >= volumeSettlesAt) {
-        if (volumeRevision >= 0 && page.volumeRevision !== volumeRevision) volume = page.requestedVolume;
+        // Media-element mutes also come from Spotify's track handoff and Canvas
+        // videos. Only the visible Spotify volume control represents user intent.
         if (dom.volume !== null && dom.volume !== lastVolumeDom) volume = dom.volume;
       }
-      volumeRevision = page.volumeRevision;
       lastVolumeDom = dom.volume;
       const changed = last && (dom.trackId !== last.trackId || (media?.source && lastSource && media.source !== lastSource));
       const delta = last ? dom.position - last.position : 0;
@@ -175,7 +175,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
         owner = false; lastLease = 0; last = null; lastSource = ''; error = '';
         lastVolumeDom = readTransportDom().volume;
         volume = replayPreparation ? 0 : lastVolumeDom ?? 0;
-        volumeRevision = -1; volumeSettlesAt = 0; latestState = null;
+        volumeSettlesAt = 0; latestState = null;
         output = 'muted'; armed = false; desiredRate = 1; silentGeneration = -1; generation++;
         halted = false;
         enabled = value && !disposed;
