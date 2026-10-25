@@ -365,7 +365,6 @@
         };
       },
       markAcceptedStart() {
-      this.invalid = false; this.ended = false;
         assertCapture(currentCapture);
         currentCapture.markAcceptedStart();
         return this.state();

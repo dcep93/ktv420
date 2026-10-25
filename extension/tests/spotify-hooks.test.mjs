@@ -79,6 +79,31 @@ test('capture, listening and tempo select playing audio over a preloaded paused 
   assert.equal(h.elements[1].playbackRate, 1.25);
 });
 
+test('accepting capture starts preserves status polling through finish, restart and abort', async () => {
+  const h = harness([{ src: 'song' }]);
+  async function checkStatus() {
+    const state = await h.command('listening-state');
+    assert.equal(state.ok, true, state.error);
+    assert.equal(state.result.captureInvalid, false);
+    assert.equal(state.result.captureEnded, false);
+  }
+  await checkStatus();
+  assert.equal((await h.command('capture-begin')).ok, true);
+  assert.equal((await h.command('capture-mark-start')).ok, true);
+  await checkStatus();
+  assert.equal((await h.command('capture-finish-and-begin')).ok, true);
+  assert.equal((await h.command('capture-mark-start')).ok, true);
+  await checkStatus();
+  assert.equal((await h.command('capture-finish')).ok, true);
+  await checkStatus();
+  assert.equal((await h.command('capture-begin')).ok, true);
+  assert.equal((await h.command('capture-mark-start')).ok, true);
+  assert.equal((await h.command('capture-abort')).ok, true);
+  await checkStatus();
+  assert.equal((await h.command('capture-mark-start')).ok, false);
+  await checkStatus();
+});
+
 test('ordinary Spotify playback stays untouched until explicit activation and is restored on release', async () => {
   const h = harness([{ src: 'song', _volume: 0.42, _muted: false }], undefined, null, false);
   const song = h.elements[0];
