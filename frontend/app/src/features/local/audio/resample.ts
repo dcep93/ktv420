@@ -13,12 +13,16 @@ function reflect(index: number, length: number): number {
  * Output sample i is at exactly i/outputRate seconds; there is no filter delay.
  * Resampling necessarily changes values; equal-rate input bypasses the filter.
  */
-export function resampleStereo(audio: StereoAudio, outputRate: number, outputFrames?: number): StereoAudio {
+export function resampleStereo(audio: StereoAudio, outputRate: number, outputFrames?: number, onProgress?: (fraction: number) => void): StereoAudio {
   validateStereo(audio)
   if (!Number.isInteger(outputRate) || outputRate < 8000 || outputRate > 384000) throw new Error('Invalid resampling rate.')
   const frames = outputFrames ?? Math.round(audio.left.length * outputRate / audio.sampleRate)
   if (!Number.isSafeInteger(frames) || frames < 0) throw new Error('Invalid resampling length.')
-  if (audio.sampleRate === outputRate && frames === audio.left.length) return audio
+  onProgress?.(0)
+  if (audio.sampleRate === outputRate && frames === audio.left.length) {
+    onProgress?.(1)
+    return audio
+  }
   if (!audio.left.length && frames) throw new Error('Cannot resample empty audio to nonempty audio.')
   const left = new Float32Array(frames), right = new Float32Array(frames)
   const ratio = audio.sampleRate / outputRate
@@ -33,12 +37,16 @@ export function resampleStereo(audio: StereoAudio, outputRate: number, outputFra
       const sinc = Math.abs(x) < 1e-12 ? 1 : Math.sin(x) / x
       const window = 0.42 + 0.5 * Math.cos(Math.PI * distance / radius) + 0.08 * Math.cos(2 * Math.PI * distance / radius)
       const coefficient = cutoff * sinc * window
-      const index = reflect(j, audio.left.length)
+      const index = j >= 0 && j < audio.left.length ? j : reflect(j, audio.left.length)
       l += audio.left[index] * coefficient
       r += audio.right[index] * coefficient
       weight += coefficient
     }
     left[i] = l / weight; right[i] = r / weight
+    // Worker messages can reach the UI while this synchronous calculation runs.
+    // Report actual completed samples without callbacks in the filter tap loop.
+    if ((i + 1) % 32768 === 0 && i + 1 < frames) onProgress?.((i + 1) / frames)
   }
+  onProgress?.(1)
   return { left, right, sampleRate: outputRate }
 }

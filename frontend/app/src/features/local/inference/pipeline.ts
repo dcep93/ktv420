@@ -24,8 +24,9 @@ export async function separateWithRunner(
 ): Promise<StemAudio> {
   validateStereo(input)
   if (!input.left.length) throw new Error('The recording is empty.')
-  onProgress({ phase: 'resampling', fraction: 0, message: input.sampleRate === MODEL.sampleRate ? 'Preparing samples' : 'Resampling to 44,100 Hz for Demucs' })
-  const atModelRate = resampleStereo(input, MODEL.sampleRate, Math.max(1, Math.round(input.left.length * MODEL.sampleRate / input.sampleRate)))
+  const atModelRate = resampleStereo(input, MODEL.sampleRate, Math.max(1, Math.round(input.left.length * MODEL.sampleRate / input.sampleRate)), fraction => {
+    onProgress({ phase: 'resampling', fraction, message: input.sampleRate === MODEL.sampleRate ? 'Preparing samples' : `Preparing audio: ${Math.floor(fraction * 100)}%` })
+  })
   const conditioning = useConditioning ? conditionAudio(atModelRate) : { audio: atModelRate, mean: 0, scale: 1 }
   const audio = conditioning.audio
   // Finite source PCM can still overflow Float32 during resampling/conditioning.
@@ -62,6 +63,7 @@ export async function separateWithRunner(
   }
   const output = {} as StemAudio
   for (let stem = 0; stem < STEM_NAMES.length; stem++) {
+    onProgress({ phase: 'restoring', fraction: stem / STEM_NAMES.length, message: `Preparing ${STEM_NAMES[stem]}` })
     const left = new Float32Array(total), right = new Float32Array(total)
     for (let i = 0; i < total; i++) {
       if (!(weights[i] > 0)) throw new Error('Missing overlap-add coverage.')
@@ -72,8 +74,9 @@ export async function separateWithRunner(
       restoreConditioning(left, conditioning.mean, conditioning.scale)
       restoreConditioning(right, conditioning.mean, conditioning.scale)
     }
-    onProgress({ phase: 'resampling', fraction: stem / 4, message: input.sampleRate === MODEL.sampleRate ? 'Preparing Float32 stems' : 'Restoring original sample rate and length' })
-    output[STEM_NAMES[stem]] = resampleStereo({ left, right, sampleRate: MODEL.sampleRate }, input.sampleRate, input.left.length)
+    output[STEM_NAMES[stem]] = resampleStereo({ left, right, sampleRate: MODEL.sampleRate }, input.sampleRate, input.left.length, fraction => {
+      onProgress({ phase: 'restoring', fraction: (stem + fraction) / STEM_NAMES.length, message: `Restoring ${STEM_NAMES[stem]}: ${Math.floor(fraction * 100)}%` })
+    })
   }
   return output
 }

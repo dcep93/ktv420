@@ -5,12 +5,14 @@ import { nextSeparationFraction } from './rowProgress.ts';
 test('row progress remains monotonic through model loading, separation, resampling, and MP3 saving', () => {
   let value: number | null = null;
   for (const [phase, fraction, expected] of [
-    ['download', 1, null], ['loading', 0, null], ['resampling', 0, null],
-    ['separating', 0.5, 0.45], ['separating', 1, 0.9], ['resampling', 0, 0.9],
+    ['download', 1, null], ['loading', 0, null], ['resampling', 0, 0], ['resampling', 0.5, 0.025], ['resampling', 1, 0.05],
+    ['separating', 0.5, 0.425], ['separating', 1, 0.8],
+    ['restoring', 0, 0.8], ['restoring', 0.5, 0.85], ['restoring', 1, 0.9],
     ['complete', 1, 0.9], ['encoding', 0, 0.9], ['encoding', 1, 0.99],
   ] as const) {
     value = nextSeparationFraction(value, { phase, fraction, message: '' });
-    assert.equal(value, expected);
+    if (expected === null) assert.equal(value, null);
+    else assert.ok(Math.abs(value! - expected) < 1e-12);
   }
 });
 

@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { separateWithRunner } from './pipeline.ts'
-import { STEM_NAMES } from './types.ts'
+import { STEM_NAMES, type SeparationProgress } from './types.ts'
 
 test('overlap-add preserves endpoints, seams, stereo order and arbitrary tail length', async () => {
   for (const length of [1, 7, 23, 24, 31, 32, 33, 48, 65, 97]) {
@@ -46,4 +46,23 @@ test('finite input whose conditioning overflows is rejected before calling the m
     return new Float32Array(256)
   }, undefined, 32), /non-finite/)
   assert.equal(calls, 0)
+})
+
+
+test('preparation and restoration report intermediate progress across all four stems', async () => {
+  const progress: SeparationProgress[] = []
+  const input = { left: new Float32Array(72000), right: new Float32Array(72000), sampleRate: 48000 }
+  const output = await separateWithRunner(input, async (_packed, frames) => new Float32Array(frames * 8), value => progress.push(value), 32768, false)
+  const preparing = progress.filter(value => value.phase === 'resampling')
+  assert.ok(preparing.some(value => value.fraction > 0 && value.fraction < 1))
+  assert.equal(preparing.at(-1)?.fraction, 1)
+  const restoring = progress.filter(value => value.phase === 'restoring')
+  assert.equal(restoring[0].fraction, 0)
+  assert.equal(restoring.at(-1)?.fraction, 1)
+  for (let i = 1; i < restoring.length; i++) assert.ok(restoring[i].fraction >= restoring[i - 1].fraction)
+  STEM_NAMES.forEach((name, stem) => {
+    assert.ok(restoring.some(value => value.fraction > stem / 4 && value.fraction < (stem + 1) / 4 && value.message.includes(name)))
+    assert.equal(output[name].sampleRate, input.sampleRate)
+    assert.equal(output[name].left.length, input.left.length)
+  })
 })

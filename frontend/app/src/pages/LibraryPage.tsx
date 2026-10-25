@@ -421,7 +421,7 @@ export default function LibraryPage() {
         const progressKind = !ready && capture ? 'capture' : separating ? 'separation' : undefined;
         const fraction = progressKind === 'capture' ? capture!.fraction : active === track.id ? separationFraction : null;
         const label = ready ? 'Ready' : progressKind === 'capture' ? `Capturing${fraction === null ? '' : ` ${Math.floor(fraction * 100)}%`}`
-          : separating ? `${active === track.id && progress?.phase === 'encoding' ? 'Saving MP3' : 'Separating'}${fraction === null ? '' : ` ~${Math.floor(fraction * 100)}%`}`
+          : separating ? `${active === track.id && progress?.phase === 'encoding' ? 'Saving MP3' : active === track.id && progress?.phase === 'restoring' ? 'Restoring audio' : active === track.id && progress?.phase === 'resampling' ? 'Preparing audio' : 'Separating'}${fraction === null ? '' : ` ~${(fraction * 100).toFixed(1)}%`}`
           : track.status === 'error' ? 'Failed' : track.status === 'missing' ? 'Not captured' : 'Queued';
         const icon = ready ? 'play' : track.status === 'error' ? 'alert' : progressKind ? 'processing' : 'clock';
         const artwork = (typeof track.metadata?.trackArtworkSrc === 'string' ? track.metadata.trackArtworkSrc : '') ||

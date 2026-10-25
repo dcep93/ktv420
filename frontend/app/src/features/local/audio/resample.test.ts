@@ -29,3 +29,22 @@ test('downsampling suppresses frequencies beyond the lower Nyquist and preserves
   assert.ok(Math.sqrt(energy / (output.left.length - 400)) < 0.001)
   assert.ok(output.right.every(value => Math.abs(value - 2) < 1e-6))
 })
+
+
+test('resampling reports sample-based intermediate progress without changing output', () => {
+  const left = Float32Array.from({ length: 70000 }, (_, i) => Math.sin(i * 0.13))
+  const input = { left, right: left.slice(), sampleRate: 44100 }
+  const progress: number[] = []
+  const actual = resampleStereo(input, 48000, 76000, fraction => progress.push(fraction))
+  assert.deepEqual(progress, [0, 32768 / 76000, 65536 / 76000, 1])
+  assert.deepEqual(actual, resampleStereo(input, 48000, 76000))
+})
+
+test('bypassed and empty resampling still report completion', () => {
+  for (const frames of [0, 3]) {
+    const progress: number[] = []
+    const input = { left: new Float32Array(frames), right: new Float32Array(frames), sampleRate: 44100 }
+    assert.equal(resampleStereo(input, 44100, undefined, fraction => progress.push(fraction)), input)
+    assert.deepEqual(progress, [0, 1])
+  }
+})
