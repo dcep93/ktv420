@@ -191,23 +191,21 @@
         if (command === "media-targets") {
           result = controller.describeTargets();
         } else if (command === "listening-state") {
-          const elements = mediaTracker.all().filter(element => getMediaSource(element) && Number.isFinite(element.duration) && element.duration > 0);
-          const playing = elements.filter(element => !element.paused && !element.ended);
-          const target = playing.length === 1 ? playing[0] : elements.length === 1 ? elements[0] : null;
+          const elements = discoverUsableTargets(mediaTracker);
+          const target = selectMediaTarget(elements);
           if (target && !target.paused) await getOrCreateAudioGraph(target);
           result = { media: target ? describeMediaElement(target) : null, volumeRevision, requestedVolume,
             captureInvalid: controller.invalid(), captureEnded: controller.ended(), monitorGain: performance.now() < monitor.expires ? monitor.gain : 0 };
         } else if (command === "listening-rate") {
           const rate = payload?.rate;
           if (!Number.isFinite(rate) || rate < .5 || rate > 1.5) throw new Error('Invalid playback tempo.');
-          const elements = mediaTracker.all().filter(element => getMediaSource(element) && Number.isFinite(element.duration) && element.duration > 0);
+          const elements = discoverUsableTargets(mediaTracker);
           if (rate === 1 && payload.reset) {
             for (const element of new Set([...rateElements,...elements])) element.playbackRate = 1;
             if (elements.some(element => element.playbackRate !== 1)) throw new Error('Spotify could not restore normal capture speed.');
             rateElements.clear(); result = {rate:1};
           } else {
-            const playing = elements.filter(element => !element.paused && !element.ended);
-            const target = playing.length === 1 ? playing[0] : elements.length === 1 ? elements[0] : null;
+            const target = selectMediaTarget(elements);
             if (!target) throw new Error('Spotify local playback is unavailable.');
             for (const element of rateElements) if (element !== target) element.playbackRate = 1;
             rateElements.clear(); target.playbackRate = rate; rateElements.add(target);
@@ -539,6 +537,7 @@
   async function waitForSingleCaptureTarget(mediaTracker, timeoutMs) {
     const deadline = performance.now() + timeoutMs;
     let lastCount = 0;
+    let lastPlayingCount = 0;
     let lastSeen = [];
 
     while (performance.now() <= deadline) {
@@ -546,20 +545,29 @@
       lastSeen = mediaTracker.all().map(describeMediaElement);
       lastCount = targets.length;
 
-      if (targets.length === 1) {
-        return targets[0];
-      }
+      const target = selectMediaTarget(targets);
+      if (target) return target;
+      lastPlayingCount = targets.filter(element => !element.paused).length;
 
-      if (targets.length > 1) {
-        throw new Error(`Expected one Spotify media element, found ${targets.length}.`);
-      }
-
+      // Spotify can briefly overlap players during a transition. Give it the
+      // same bounded wait as a not-yet-loaded player, without guessing a source.
       await delay(50);
     }
 
+    if (lastCount > 1) {
+      throw new Error(`Could not identify Spotify's current audio: ${lastPlayingCount} playing elements out of ${lastCount} loaded. Pause other audio and retry.`);
+    }
     throw new Error(
       `No usable Spotify media element found after ${timeoutMs}ms. Last page-world target count: ${lastCount}. Seen: ${JSON.stringify(lastSeen)}`
     );
+  }
+
+  // Capture, transport state and tempo must agree on the source. Muted media
+  // remains eligible: monitoring volume must never determine capture identity.
+  function selectMediaTarget(elements) {
+    const playing = elements.filter(element => !element.paused);
+    if (playing.length === 1) return playing[0];
+    return playing.length === 0 && elements.length === 1 ? elements[0] : null;
   }
 
   function discoverUsableTargets(mediaTracker) {
@@ -568,6 +576,7 @@
 
   function isUsableCaptureTarget(element) {
     return isMediaElement(element) &&
+      !element.ended &&
       Boolean(getMediaSource(element)) &&
       Number.isFinite(element.duration) &&
       element.duration > 0 &&
