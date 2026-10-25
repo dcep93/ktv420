@@ -17,7 +17,7 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
   assert.throws(() => structuredClone(row), { name: 'DataCloneError' });
   const makeElement = tag => {
     const element = { tag, dataset: {}, style: {}, children: [], listeners: {},
-      setAttribute() {}, remove() {},
+      setAttribute() {}, remove() {}, hasAttribute(name) { return name === 'srcdoc' && this.srcdoc !== undefined; },
       addEventListener(name, listener) { this.listeners[name] = listener; },
       append(child) { this.children.push(child); child.parentElement = this; child.isConnected = true; },
     };
@@ -41,7 +41,7 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
     window: { location: { pathname: '/playlist/example' },
       addEventListener(name, listener) { listeners[name] = listener; }, removeEventListener() {} },
     location: { pathname: '/playlist/example' },
-    chrome: { runtime: { sendMessage(_message, respond) { pendingReply=respond;respond({ok:true,result:null}); }, getManifest: () => ({ version: '0.5.0' }), getURL: path => `chrome-extension://test/${path}`, onMessage: { addListener() {}, removeListener() {} } } },
+    chrome: { runtime: { id: 'test', sendMessage(_message, respond) { pendingReply=respond;respond({ok:true,result:null}); }, getManifest: () => ({ version: '0.5.0' }), getURL: path => `chrome-extension://test/${path}`, onMessage: { addListener() {}, removeListener() {} } } },
     setInterval: callback => { timers.push(callback); return 1; },
   };
   for (const [key, value] of Object.entries(globals)) {
@@ -100,4 +100,27 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
   await listeners.message({...ready,data:{...ready.data,type:'close'}});
   assert.equal(overlay.dataset.open,'false');
   assert.deepEqual(transportRequests.at(-1),{action:'pause'},'close button has the same pause behavior');
+
+  for (const invalidate of [
+    () => { frame.srcdoc = '<p>replaced frame</p>'; },
+    () => { frame.contentDocument = { URL: 'about:blank' }; },
+    () => { frame.src = 'https://open.spotify.com/'; },
+    () => { chrome.runtime.id = undefined; },
+  ]) {
+    const before = messages.length;
+    invalidate();
+    frame.listeners.load?.();
+    await listeners.message(ready); // A queued ready from the old document.
+    ui.refresh(); timers[0]();
+    pendingReply({ok:true,result:{tracks:[{id:trackId,title:'Common Enemy'}]}});
+    await new Promise(resolve=>setImmediate(resolve));
+    listeners.keydown({key:'Escape',preventDefault(){},stopPropagation(){}});
+    assert.equal(messages.length, before, 'state, replay and close must not target a replaced frame');
+    delete frame.srcdoc; frame.contentDocument = null;
+    frame.src = 'chrome-extension://test/build/index.html?overlay=1'; chrome.runtime.id = 'test';
+    ui.refresh();
+    assert.equal(messages.length, before, 'restored broker must handshake again');
+    await listeners.message(ready);
+    assert.ok(messages.length > before, 'fresh trusted handshake restores delivery');
+  }
 });
