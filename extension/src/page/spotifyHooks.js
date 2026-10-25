@@ -15,11 +15,12 @@
   const nativeVolume = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'volume');
   const nativeMuted = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'muted');
   const outputElements = new Map();
+  let listeningEnabled = false;
   let monitor = { gain: 0, expires: 0 };
   const rateElements = new Set();
   let volumeRevision = 0, requestedVolume = 1;
   function guardOutput(element) {
-    if (outputElements.has(element)) return;
+    if (!listeningEnabled || outputElements.has(element)) return;
     const state = { volume: nativeVolume.get.call(element), muted: nativeMuted.get.call(element) };
     outputElements.set(element, state);
     // Spotify's volume is a listening request; it must never scale captured PCM.
@@ -27,10 +28,12 @@
       get: () => state.volume, set: value => {
         if (!Number.isFinite(value) || value < 0 || value > 1) return;
         state.volume = value; requestedVolume = state.muted ? 0 : value; volumeRevision++;
+        if (!listeningEnabled) nativeVolume.set.call(element, value);
       } });
     Object.defineProperty(element, 'muted', { configurable: true,
       get: () => state.muted, set: value => {
         state.muted = Boolean(value); requestedVolume = state.muted ? 0 : state.volume; volumeRevision++;
+        if (!listeningEnabled) nativeMuted.set.call(element, state.muted);
       } });
     nativeVolume.set.call(element, 0);
     nativeMuted.set.call(element, false);
@@ -42,7 +45,7 @@
     for (const element of outputElements.keys()) {
       const graph = audioGraphs.get(element);
       if (graph) {
-        const elementGain = element === target ? gain : 0;
+        const elementGain = !listeningEnabled ? 1 : element === target ? gain : 0;
         graph.monitor.gain.cancelScheduledValues(graph.context.currentTime);
         if (elementGain === 0) graph.monitor.gain.setValueAtTime(0, graph.context.currentTime);
         else graph.monitor.gain.setTargetAtTime(elementGain, graph.context.currentTime, 0.005);
@@ -190,15 +193,29 @@
       const { command, commandId, payload } = event.data;
       try {
         let result;
-        if (command === "media-targets") {
+        if (command === 'listening-enable') {
+          listeningEnabled = payload?.enabled === true;
+          monitor = { gain: 0, expires: 0 };
+          if (!listeningEnabled) controller.abort();
+          for (const element of mediaTracker.all()) {
+            guardOutput(element);
+            const state = outputElements.get(element);
+            if (!state) continue;
+            nativeVolume.set.call(element, listeningEnabled ? audioGraphs.has(element) ? 1 : 0 : state.volume);
+            nativeMuted.set.call(element, listeningEnabled ? false : state.muted);
+          }
+          updateMonitor();
+          result = { enabled: listeningEnabled };
+        } else if (command === "media-targets") {
           result = controller.describeTargets();
         } else if (command === "listening-state") {
           const elements = discoverUsableTargets(mediaTracker);
           const target = selectMediaTarget(elements);
-          if (target && !target.paused) await getOrCreateAudioGraph(target);
+          if (listeningEnabled && target && !target.paused) await getOrCreateAudioGraph(target);
           result = { media: target ? describeMediaElement(target) : null, volumeRevision, requestedVolume,
             captureInvalid: controller.invalid(), captureEnded: controller.ended(), monitorGain: performance.now() < monitor.expires ? monitor.gain : 0 };
         } else if (command === "listening-rate") {
+          if (!listeningEnabled) throw new Error('Open ktv420 before changing playback.');
           const rate = payload?.rate;
           if (!Number.isFinite(rate) || rate < .5 || rate > 1.5) throw new Error('Invalid playback tempo.');
           const elements = discoverUsableTargets(mediaTracker);
@@ -216,12 +233,15 @@
             result = {rate:target.playbackRate};
           }
         } else if (command === "listening-output") {
+          if (!listeningEnabled) throw new Error('Open ktv420 before controlling audio.');
           if (!Number.isFinite(payload?.gain) || payload.gain < 0 || payload.gain > 1) throw new Error('Invalid listening volume.');
           monitor = { gain: payload.gain, expires: performance.now() + 2500 };
           updateMonitor(); result = { ok: true };
         } else if (command === "capture-begin") {
+          if (!listeningEnabled) throw new Error('Open ktv420 before capturing audio.');
           result = await controller.begin(payload || {});
         } else if (command === "capture-finish-and-begin") {
+          if (!listeningEnabled) throw new Error('Open ktv420 before capturing audio.');
           result = await controller.finishAndBegin(payload || {});
         } else if (command === "capture-mark-start") {
           result = controller.markAcceptedStart();
@@ -276,7 +296,7 @@
     const nativePlay = HTMLMediaElement.prototype.play;
     HTMLMediaElement.prototype.play = function ktv420Play() {
       remember(this);
-      void getOrCreateAudioGraph(this).then(graph => graph.context.resume()).catch(() => {});
+      if (listeningEnabled) void getOrCreateAudioGraph(this).then(graph => graph.context.resume()).catch(() => {});
       return nativePlay.apply(this, arguments);
     };
 
@@ -370,9 +390,11 @@
 
   class PagePcmCapture {
     static async create(element) {
+      if (!listeningEnabled) throw new Error('ktv420 capture was closed.');
       element.playbackRate = 1; rateElements.delete(element);
       if (element.playbackRate !== 1) throw new Error('Capture requires normal playback speed.');
       const graph = await getOrCreateAudioGraph(element);
+      if (!listeningEnabled) throw new Error('ktv420 capture was closed.');
       return new PagePcmCapture(element, graph);
     }
 
@@ -402,6 +424,7 @@
       if (this.context.state === "suspended") {
         await this.context.resume();
       }
+      if (!listeningEnabled) { this.abort(); throw new Error('ktv420 capture was closed.'); }
 
       this.chunks = [];
       this.byteLength = 0;
@@ -505,9 +528,11 @@
     source.connect(worklet);
     source.connect(monitorNode);
     monitorNode.connect(context.destination);
-    nativeVolume.set.call(element, 1);
-    nativeMuted.set.call(element, false);
+    const state = outputElements.get(element);
+    nativeVolume.set.call(element, listeningEnabled ? 1 : state?.volume ?? 1);
+    nativeMuted.set.call(element, listeningEnabled ? false : state?.muted ?? false);
     audioGraphs.set(element, graph);
+    updateMonitor();
     return graph;
   }
 

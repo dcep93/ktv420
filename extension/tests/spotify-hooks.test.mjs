@@ -7,7 +7,7 @@ const hookSource = readFileSync(new URL('../src/page/spotifyHooks.js', import.me
 
 // Run the shipped page script through its real command bridge. Browser audio
 // primitives are mocked, but source selection and capture lifecycle are not.
-function harness(definitions, onWait = () => {}, timeline = null) {
+function harness(definitions, onWait = () => {}, timeline = null, activate = true) {
   class Media {
     constructor(values) { Object.assign(this, { src: 'song', currentSrc: '', currentTime: 0, duration: 180,
       readyState: 4, playbackRate: 1, paused: false, ended: false, tagName: 'AUDIO', _volume: 1, _muted: false }, values); }
@@ -55,6 +55,8 @@ function harness(definitions, onWait = () => {}, timeline = null) {
     XMLHttpRequest: XHR, navigator: {}, performance: { now: () => now }, setInterval() {},
     AudioWorkletNode: class { port = {}; }, console, Uint8Array, ArrayBuffer });
   vm.runInContext(hookSource, context);
+  if (activate) commandListener({ source: window, data: { source: 'ktv420_content', commandId: 0,
+    command: 'listening-enable', payload: { enabled: true } } });
   return { elements, graphs, gains, async command(command, payload = {}) {
     reply = null;
     await commandListener({ source: window, data: { source: 'ktv420_content', commandId: 1, command, payload } });
@@ -75,6 +77,35 @@ test('capture, listening and tempo select playing audio over a preloaded paused 
   assert.equal((await h.command('listening-rate', { rate: 1.25 })).ok, true);
   assert.equal(h.elements[0].playbackRate, 1);
   assert.equal(h.elements[1].playbackRate, 1.25);
+});
+
+test('ordinary Spotify playback stays untouched until explicit activation and is restored on release', async () => {
+  const h = harness([{ src: 'song', _volume: 0.42, _muted: false }], undefined, null, false);
+  const song = h.elements[0];
+  await song.play();
+  await h.command('listening-state');
+  assert.deepEqual(h.graphs, [], 'passive tracking must not attach audio processing');
+  assert.equal(song._volume, 0.42);
+  assert.equal(Object.hasOwn(song, 'volume'), false, 'no volume override before activation');
+  assert.equal((await h.command('capture-begin')).ok, false);
+  assert.equal((await h.command('listening-output', { gain: 0 })).ok, false);
+  assert.equal((await h.command('listening-rate', { rate: 1.2 })).ok, false);
+  await h.command('listening-enable', { enabled: true });
+  await h.command('capture-begin');
+  song.volume = 0.6;
+  await h.command('listening-rate', { rate: 1.2 });
+  await h.command('listening-enable', { enabled: false });
+  assert.equal(song._volume, 0.6, 'restore the current Spotify volume');
+  assert.equal(song.playbackRate, 1);
+  assert.equal(h.gains.get(song).value, 1, 'an existing graph becomes a normal passthrough');
+  assert.equal((await h.command('capture-state')).ok, false);
+  song.volume = 0.3; song.muted = true;
+  assert.equal(song._volume, 0.3);
+  assert.equal(song._muted, true);
+  await song.play();
+  assert.equal(h.graphs.length, 1);
+  await h.command('listening-enable', { enabled: true });
+  assert.equal(h.gains.get(song).value, 0, 'reopening waits for authorized monitoring');
 });
 
 test('ended and unusable elements cannot displace a sole paused target', async () => {
@@ -107,6 +138,17 @@ test('capture waits for transient overlap to settle', async () => {
   const result = await h.command('capture-begin', { timeoutMs: 100 });
   assert.equal(result.ok, true);
   assert.equal(result.result.target.source, 'current');
+});
+
+test('closing during target discovery cannot start a late capture', async () => {
+  const h = harness([{ src: 'previous' }, { src: 'current' }], elements => {
+    void h.command('listening-enable', { enabled: false });
+    elements[0].paused = true;
+  });
+  const result = await h.command('capture-begin', { timeoutMs: 100 });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /capture was closed/);
+  assert.deepEqual(h.graphs, []);
 });
 
 test('successive captures follow the next active element, not the previous graph', async () => {

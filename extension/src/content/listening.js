@@ -3,6 +3,7 @@ import { sendLocalMessage, writeTrackArtifact } from './storage.js';
 
 export function createListeningController({ bridge, emit, ensurePlayer, getRunner, getTrackIds = () => [] }) {
   let busy = false, disposed = false, owner = false, lastLease = 0, catalogAt = 0;
+  let enabled = false, activation = Promise.resolve();
   let catalog = new Map(), recording = null, last = null, generation = 0, lastSource = '';
   let volume = 0.7, volumeRevision = -1, output = 'muted', error = '', armed = false;
   let desiredRate = 1, pendingRate = null, rateQueued = false;
@@ -31,7 +32,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
     })).catch(reason => { error = `Could not save ${capture.title}: ${reason?.message || reason}`; }).finally(() => { storing.delete(capture.trackId); catalogAt = 0; });
   }
   async function tick() {
-    if (busy || disposed) return;
+    if (!enabled || busy || disposed) return;
     busy = true;
     try {
       let dom = readTransportDom();
@@ -127,12 +128,29 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
   const timer = setInterval(() => void tick(), 200);
   void tick();
   return {
-    prepareReplay(enabled = true) { replayPreparation = enabled; if (enabled) volume = 0; void policy(0); },
+    setEnabled(value) {
+      // Serialize fast open/close actions. Disable new ticks immediately, then
+      // let an in-flight tick finish before releasing the page's audio routing.
+      enabled = false;
+      activation = activation.catch(() => {}).then(async () => {
+        while (busy) await new Promise(resolve => setTimeout(resolve, 20));
+        try { if (!value) await finish(false); }
+        finally { await bridge.command('listening-enable', { enabled: value }); }
+        owner = false; lastLease = 0; last = null; lastSource = ''; error = '';
+        output = 'muted'; armed = false; desiredRate = 1; silentGeneration = -1; generation++;
+        enabled = value && !disposed;
+        if (enabled) void tick();
+      });
+      return activation;
+    },
+    prepareReplay(value = true) { replayPreparation = value; if (value) volume = 0; if (enabled) void policy(0); },
     isCapturing() { return output === 'capture'; },
     heartbeat() { frameHeartbeat = Date.now(); },
     command(command) {
+      if (!enabled) return Promise.resolve();
       if (command.action === 'rate') { pendingRate=command; if (rateQueued) return commands; rateQueued=true; }
       commands = commands.catch(() => {}).then(async () => {
+        if (!enabled) return;
         if (command.action === 'rate') { command=pendingRate; pendingRate=null; rateQueued=false; }
         if (command.action === 'silenced') { if (command.generation === generation) silentGeneration = generation; return; }
         error = '';
@@ -167,6 +185,6 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
     async stopCapture() { await this.command({ action: 'pause' }); while (busy) await new Promise(resolve => setTimeout(resolve, 20)); await finish(false); },
     afterBatch() { batchPending = false; },
     async beforeBatch() { batchPending = true; desiredRate = 1; await bridge.command('listening-rate',{rate:1,reset:true}); while (busy) await new Promise(resolve => setTimeout(resolve, 20)); await finish(false); },
-    dispose() { disposed = true; void bridge.command('listening-rate',{rate:1,reset:true}).catch(() => {}); clearInterval(timer); void policy(0); },
+    dispose() { disposed = true; clearInterval(timer); if (enabled) void this.setEnabled(false).catch(() => {}); },
   };
 }

@@ -78,14 +78,19 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
   }
   async function show() {
     prepare();
-    overlay.dataset.open = 'true'; overlay.setAttribute('aria-hidden', 'false'); onOpenChange?.(true);
+    const wasOpen = overlay.dataset.open === 'true';
+    overlay.dataset.open = 'true'; overlay.setAttribute('aria-hidden', 'false');
+    if (!wasOpen) await onOpenChange?.(true);
     await updateTracks(); post();
   }
   function close() {
     if (overlay.dataset.open !== 'true') return;
-    overlay.dataset.open = 'false'; overlay.setAttribute('aria-hidden', 'true'); onOpenChange?.(false);
+    overlay.dataset.open = 'false'; overlay.setAttribute('aria-hidden', 'true');
     // Stop Spotify even when the hosted player has not finished loading.
-    void Promise.resolve(onTransport?.({ action: 'pause' })).catch(reason => { error = reason?.message || String(reason); post(); });
+    void Promise.resolve(onTransport?.({ action: 'pause' })).finally(() => {
+      if (overlay.dataset.open !== 'true') return onOpenChange?.(false);
+    })
+      .catch(reason => { error = reason?.message || String(reason); post(); });
     sendToFrame({ source: PARENT, version: 2, type: 'closed' });
     button.focus?.();
   }

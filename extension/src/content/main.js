@@ -5,6 +5,8 @@ import { mountButton } from "./ui.js";
 
 const bridge = createPageBridge();
 const captureTitle = createCaptureTitle(document, MutationObserver, chrome.runtime.getURL('assets/favicon.svg'));
+// Observe detached media and playlist metadata early; audio routing remains
+// disabled until the user explicitly opens ktv420.
 bridge.inject().catch((error) => {
   console.warn("[ktv420] Failed to inject page hooks early", error);
 });
@@ -41,7 +43,11 @@ async function getOrchestrator() {
 
 const ui = mountButton({
   onReplay: enabled => listening?.prepareReplay(enabled),
-  onOpenChange: open => captureTitle.setOpen(open),
+  onOpenChange: async open => {
+    captureTitle.setOpen(open);
+    if (!open && orchestrator?.isActive()) await orchestrator.requestStop();
+    await listening?.setEnabled(open);
+  },
   isRunActive: () => Boolean(orchestrator?.isActive()),
   loadSpotifyTracks: () => loadSpotifyPlaylistTracks(),
   onTransport: command => listening?.command(command),
