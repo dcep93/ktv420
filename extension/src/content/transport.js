@@ -47,11 +47,17 @@ function setRange(input, value) {
   input.dispatchEvent(new Event('input', { bubbles: true }));
   input.dispatchEvent(new Event('change', { bubbles: true }));
 }
+// Volume is continuous input. Waiting for an acknowledgment for every pointer
+// event backs up playback commands; the listening controller coalesces updates.
+export function setSpotifyVolume(volume) {
+  if (!Number.isFinite(volume) || volume < 0 || volume > 1) throw new Error('Invalid listening volume.');
+  setRange(slider(true), volume);
+}
 export async function commandTransport(command) {
   const before = readTransportDom();
   if (!before.available) throw new Error('Spotify playback controls are unavailable.');
   if (command.action === 'volume') {
-    setRange(slider(true), command.volume); await delay(150);
+    setSpotifyVolume(command.volume); await delay(150);
     await verify(() => Math.abs((readTransportDom().volume ?? -1) - command.volume) < .02, 'Spotify did not accept the volume change.');
   } else if (command.action === 'play' || command.action === 'pause') {
     const playing = command.action === 'play';

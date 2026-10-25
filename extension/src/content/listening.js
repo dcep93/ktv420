@@ -1,11 +1,12 @@
-import { readTransportDom, commandTransport } from './transport.js';
+import { readTransportDom, commandTransport, setSpotifyVolume } from './transport.js';
 import { sendLocalMessage, writeTrackArtifact } from './storage.js';
 
 export function createListeningController({ bridge, emit, ensurePlayer, getRunner, getTrackIds = () => [] }) {
   let busy = false, disposed = false, owner = false, lastLease = 0, catalogAt = 0;
   let enabled = false, activation = Promise.resolve();
   let catalog = new Map(), recording = null, last = null, generation = 0, lastSource = '';
-  let volume = 0.7, volumeRevision = -1, output = 'muted', error = '', armed = false;
+  let volume = 0, volumeRevision = -1, output = 'muted', error = '', armed = false;
+  let volumeTimer = null, volumeEdit = 0, volumeSettlesAt = 0, latestState = null;
   let desiredRate = 1, pendingRate = null, rateQueued = false;
   let batchPending = false, silentGeneration = -1, replayPreparation = false;
   let frameHeartbeat = 0, failedTrack = '', ignoreUntil = 0, commands = Promise.resolve();
@@ -13,6 +14,26 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
   let storageQueue = Promise.resolve();
   const storing = new Set();
   const policy = gain => bridge.command('listening-output', { gain });
+  const publish = state => { latestState = state; emit(state); };
+  function changeVolume(value) {
+    if (!Number.isFinite(value) || value < 0 || value > 1) return;
+    volume = value; volumeEdit++; volumeSettlesAt = Date.now() + 300;
+    if (latestState) publish({ ...latestState, volume });
+    if (volumeTimer !== null) return;
+    volumeTimer = setTimeout(() => {
+      volumeTimer = null;
+      if (!enabled || disposed) return;
+      try {
+        setSpotifyVolume(volume);
+        lastVolumeDom = readTransportDom().volume;
+        // Retain the capture/stems silence handshake; a volume gesture alone
+        // must never unmute an idle player or change captured PCM amplitude.
+        const gain = output === 'capture' && silentGeneration === generation &&
+          Date.now() - frameHeartbeat < 2000 ? volume : 0;
+        void policy(gain).catch(reason => { error = reason?.message || String(reason); });
+      } catch (reason) { error = reason?.message || String(reason); }
+    }, 32);
+  }
   async function finish(valid) {
     const capture = recording; recording = null;
     if (!capture) return;
@@ -34,6 +55,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
   async function tick() {
     if (!enabled || busy || disposed) return;
     busy = true;
+    const observedVolumeEdit = volumeEdit;
     try {
       let dom = readTransportDom();
       if (!dom.trackId && dom.playing && dom.available) {
@@ -52,9 +74,11 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
         const list = await sendLocalMessage({ type: 'ktv420:library-status' });
         catalog = new Map(list.map(item => [item.trackId, item.status])); catalogAt = now;
       }
-      if (volumeRevision < 0) volumeRevision = page.volumeRevision;
-      if (page.volumeRevision !== volumeRevision) { volume = page.requestedVolume; volumeRevision = page.volumeRevision; }
-      if (lastVolumeDom !== null && dom.volume !== null && dom.volume !== lastVolumeDom) volume = dom.volume;
+      if (observedVolumeEdit === volumeEdit && now >= volumeSettlesAt) {
+        if (volumeRevision >= 0 && page.volumeRevision !== volumeRevision) volume = page.requestedVolume;
+        if (dom.volume !== null && dom.volume !== lastVolumeDom) volume = dom.volume;
+      }
+      volumeRevision = page.volumeRevision;
       lastVolumeDom = dom.volume;
       const changed = last && (dom.trackId !== last.trackId || (media?.source && lastSource && media.source !== lastSource));
       const delta = last ? dom.position - last.position : 0;
@@ -114,7 +138,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       const saving = scope.filter(id => !catalog.has(id) && storing.has(id)).length * .99;
       const partial = recording?.complete && !catalog.has(dom.trackId) && dom.duration > 0 ? Math.min(.99, dom.position / dom.duration) : 0;
       const overallCaptureFraction = recording && scope.length ? (captured + saving + partial) / scope.length : null;
-      emit({ ...dom, overallCaptureFraction, generation, position: local ? media.currentTime : dom.position, observedAt: Date.now(),
+      publish({ ...dom, overallCaptureFraction, generation, position: local ? media.currentTime : dom.position, observedAt: Date.now(),
         playing: playing && connected, local: owner && local, output, volume, error,
         capability: 1, tempoSupported: true, playbackRate: media?.playbackRate ?? 1, capturing: !!recording || !!batch,
         captureProgress: recording ? { trackId: recording.trackId, fraction: dom.duration > 0 ? Math.min(.99, dom.position / dom.duration) : null } : null,
@@ -122,7 +146,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
     } catch (reason) {
       error = reason?.message || String(reason); output = 'muted';
       await policy(0).catch(() => {});
-      emit({ capability: 1, trackId: '', generation: ++generation, position: 0, duration: 0, playing: false, local: false, output: 'muted', volume, observedAt: Date.now(), error });
+      publish({ capability: 1, trackId: '', generation: ++generation, position: 0, duration: 0, playing: false, local: false, output: 'muted', volume, observedAt: Date.now(), error });
     } finally { busy = false; }
   }
   const timer = setInterval(() => void tick(), 200);
@@ -132,11 +156,15 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       // Serialize fast open/close actions. Disable new ticks immediately, then
       // let an in-flight tick finish before releasing the page's audio routing.
       enabled = false;
+      clearTimeout(volumeTimer); volumeTimer = null; volumeEdit++;
       activation = activation.catch(() => {}).then(async () => {
         while (busy) await new Promise(resolve => setTimeout(resolve, 20));
         try { if (!value) await finish(false); }
         finally { await bridge.command('listening-enable', { enabled: value }); }
         owner = false; lastLease = 0; last = null; lastSource = ''; error = '';
+        lastVolumeDom = readTransportDom().volume;
+        volume = replayPreparation ? 0 : lastVolumeDom ?? 0;
+        volumeRevision = -1; volumeSettlesAt = 0; latestState = null;
         output = 'muted'; armed = false; desiredRate = 1; silentGeneration = -1; generation++;
         enabled = value && !disposed;
         if (enabled) void tick();
@@ -148,13 +176,13 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
     heartbeat() { frameHeartbeat = Date.now(); },
     command(command) {
       if (!enabled) return Promise.resolve();
+      if (command.action === 'volume') { changeVolume(command.volume); return Promise.resolve(); }
       if (command.action === 'rate') { pendingRate=command; if (rateQueued) return commands; rateQueued=true; }
       commands = commands.catch(() => {}).then(async () => {
         if (!enabled) return;
         if (command.action === 'rate') { command=pendingRate; pendingRate=null; rateQueued=false; }
         if (command.action === 'silenced') { if (command.generation === generation) silentGeneration = generation; return; }
         error = '';
-        if (command.action === 'volume') { if (Number.isFinite(command.volume) && command.volume >= 0 && command.volume <= 1) { volume = command.volume; await commandTransport(command); } return; }
         if (command.action === 'stems-failed') { failedTrack = command.trackId; return; }
         if (command.action === 'enable') { armed = true; ensurePlayer(); return; }
         if (command.action === 'rate') {
