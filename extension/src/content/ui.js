@@ -66,6 +66,15 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
     finally { refreshing = false; lastTrackRefresh = Date.now(); post(); }
   }
   function prepare() {
+    if (!chrome.runtime.id) return;
+    // srcdoc (including an empty value) overrides src and destroys the broker.
+    // Replace the node so queued messages from its old WindowProxy cannot
+    // authenticate the new player. Do not restart a normal about:blank load.
+    if (iframe && (!iframe.isConnected || iframe.src !== frameUrl || iframe.hasAttribute('srcdoc'))) {
+      frameReady = false;
+      iframe.remove();
+      iframe = null;
+    }
     if (!iframe) {
       iframe = document.createElement('iframe');
       iframe.title = 'ktv420 Spotify player';
@@ -110,6 +119,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
     button.dataset.active = String(isRunActive());
     button.disabled = !isSupportedRoute() && !isRunActive() && !listening;
     button.title = isRunActive() ? 'ktv420 capture active' : 'Open ktv420';
+    if (iframe && overlay.dataset.open === 'true') prepare();
     post();
     if (iframe && !isRunActive() && (route !== location.pathname || (replay && (!tracks.length || replay.tracks.some(item => !tracks.some(t => t.trackId === item.id))) && Date.now() - lastTrackRefresh > 3000))) void updateTracks();
   }

@@ -17,7 +17,7 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
   assert.throws(() => structuredClone(row), { name: 'DataCloneError' });
   const makeElement = tag => {
     const element = { tag, dataset: {}, style: {}, children: [], listeners: {},
-      setAttribute() {}, remove() {}, hasAttribute(name) { return name === 'srcdoc' && this.srcdoc !== undefined; },
+      setAttribute() {}, remove() { this.isConnected = false; }, hasAttribute(name) { return name === 'srcdoc' && this.srcdoc !== undefined; },
       addEventListener(name, listener) { this.listeners[name] = listener; },
       append(child) { this.children.push(child); child.parentElement = this; child.isConnected = true; },
     };
@@ -111,9 +111,7 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
     invalidate();
     frame.listeners.load?.();
     await listeners.message(ready); // A queued ready from the old document.
-    ui.refresh(); timers[0]();
-    pendingReply({ok:true,result:{tracks:[{id:trackId,title:'Common Enemy'}]}});
-    await new Promise(resolve=>setImmediate(resolve));
+    ui.notifyListening(null);
     listeners.keydown({key:'Escape',preventDefault(){},stopPropagation(){}});
     assert.equal(messages.length, before, 'state, replay and close must not target a replaced frame');
     delete frame.srcdoc; frame.contentDocument = null;
@@ -123,4 +121,29 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
     await listeners.message(ready);
     assert.ok(messages.length > before, 'fresh trusted handshake restores delivery');
   }
+
+  // Repair the exact blank-frame failure without stopping the current capture.
+  overlay.dataset.open = 'true';
+  for (const corrupt of [node => { node.srcdoc = ''; }, node => { node.src = 'https://open.spotify.com/'; }, node => { node.isConnected = false; }]) {
+    const old = elements.filter(element => element.tag === 'iframe').at(-1);
+    const before = messages.length, commandsBefore = transportRequests.length;
+    corrupt(old);
+    timers[0]();
+    const replacement = elements.filter(element => element.tag === 'iframe').at(-1);
+    assert.notEqual(replacement, old);
+    assert.equal(old.isConnected, false);
+    assert.equal(replacement.hasAttribute('srcdoc'), false);
+    assert.equal(replacement.src, 'chrome-extension://test/build/index.html?overlay=1');
+    assert.equal(messages.length, before, 'new frame must handshake before receiving state');
+    await listeners.message({ ...ready, source: old.contentWindow });
+    assert.equal(messages.length, before, 'old document cannot authenticate its replacement');
+    replacement.contentDocument = { URL: 'about:blank' };
+    timers[0](); ui.prepare();
+    assert.equal(elements.filter(element => element.tag === 'iframe').at(-1), replacement, 'normal loading must not cause a restart loop');
+    replacement.contentDocument = null;
+    await listeners.message({ ...ready, source: replacement.contentWindow });
+    assert.ok(messages.length > before, 'new trusted broker restores the overlay');
+    assert.equal(transportRequests.length, commandsBefore, 'repair must not stop capture or change volume');
+  }
+
 });
