@@ -7,7 +7,7 @@ const hookSource = readFileSync(new URL('../src/page/spotifyHooks.js', import.me
 
 // Run the shipped page script through its real command bridge. Browser audio
 // primitives are mocked, but source selection and capture lifecycle are not.
-function harness(definitions, onWait = () => {}) {
+function harness(definitions, onWait = () => {}, timeline = null) {
   class Media {
     constructor(values) { Object.assign(this, { src: 'song', currentSrc: '', currentTime: 0, duration: 180,
       readyState: 4, playbackRate: 1, paused: false, ended: false, tagName: 'AUDIO', _volume: 1, _muted: false }, values); }
@@ -21,16 +21,25 @@ function harness(definitions, onWait = () => {}) {
   }
   const elements = definitions.map(value => new Media(value));
   const graphs = [];
+  const gains = new Map();
   class AudioContext {
     state = 'running'; currentTime = 0; sampleRate = 44100; destination = {};
     audioWorklet = { addModule: async () => {} };
-    createMediaElementSource(element) { graphs.push(element); return { connect() {} }; }
-    createGain() { return { gain: { value: 0, cancelScheduledValues() {}, setValueAtTime() {}, setTargetAtTime() {} }, connect() {} }; }
+    createMediaElementSource(element) { this.element = element; graphs.push(element); return { connect() {} }; }
+    createGain() {
+      const gain = { value: 0, cancelScheduledValues() {}, setValueAtTime(value) { this.value = value; }, setTargetAtTime(value) { this.value = value; } };
+      gains.set(this.element, gain);
+      return { gain, connect() {} };
+    }
     async resume() { this.state = 'running'; }
   }
   class Document {
     currentScript = { dataset: { ktv420WorkletUrl: 'worklet.js' } };
-    querySelectorAll() { return elements; }
+    querySelectorAll(selector) {
+      if (selector === 'audio, video') return elements;
+      return timeline ? [{ max: timeline.duration * 1000, value: 5000,
+        getAttribute: () => timeline.clock }] : [];
+    }
     createElement() { return {}; }
     createElementNS() { return {}; }
   }
@@ -46,7 +55,7 @@ function harness(definitions, onWait = () => {}) {
     XMLHttpRequest: XHR, navigator: {}, performance: { now: () => now }, setInterval() {},
     AudioWorkletNode: class { port = {}; }, console, Uint8Array, ArrayBuffer });
   vm.runInContext(hookSource, context);
-  return { elements, graphs, async command(command, payload = {}) {
+  return { elements, graphs, gains, async command(command, payload = {}) {
     reply = null;
     await commandListener({ source: window, data: { source: 'ktv420_content', commandId: 1, command, payload } });
     assert.ok(reply, 'bridge must reply');
@@ -109,4 +118,54 @@ test('successive captures follow the next active element, not the previous graph
   assert.equal(next.ok, true);
   assert.equal(next.result.next.target.source, 'second');
   assert.deepEqual(h.graphs, h.elements);
+});
+
+test('song timeline excludes Spotify looping video from capture, tempo and monitoring', async () => {
+  const h = harness([{ src: 'canvas', tagName: 'VIDEO', loop: true, duration: 7.799999, currentTime: 4.96 },
+    { src: 'song', duration: 258.391, currentTime: 2.2 }], undefined, { duration: 258.391, clock: '0:02/4:18' });
+  // Both play hooks create audio graphs. Only the song graph may be audible.
+  await Promise.all(h.elements.map(element => element.play()));
+  assert.equal((await h.command('listening-state')).result.media.source, 'song');
+  assert.equal((await h.command('capture-begin')).result.target.source, 'song');
+  assert.equal((await h.command('listening-rate', { rate: 1.25 })).ok, true);
+  assert.equal(h.elements[0].playbackRate, 1);
+  assert.equal(h.elements[1].playbackRate, 1.25);
+  await h.command('listening-output', { gain: 0.7 });
+  assert.equal(h.gains.get(h.elements[0]).value, 0);
+  assert.equal(h.gains.get(h.elements[1]).value, 0.7);
+  await h.command('listening-output', { gain: 0 });
+  assert.equal(h.gains.get(h.elements[1]).value, 0);
+});
+
+test('playing decoration cannot displace a paused song or become the only capture target', async () => {
+  const h = harness([{ src: 'canvas', tagName: 'VIDEO', loop: true, duration: 8 },
+    { src: 'song', duration: 258.4, paused: true }], undefined, { duration: 258.391, clock: '0:00/4:18' });
+  assert.equal((await h.command('capture-begin')).result.target.source, 'song');
+  h.elements[1].ended = true;
+  assert.equal((await h.command('listening-state')).result.media, null);
+  assert.equal((await h.command('capture-begin', { timeoutMs: 100 })).ok, false);
+});
+
+test('equal-duration media use the accessible song clock, never the rounded range value', async () => {
+  const h = harness([{ src: 'stale', currentTime: 5 }, { src: 'song', currentTime: 2.3 }],
+    undefined, { duration: 180, clock: '0:02/3:00' });
+  assert.equal((await h.command('capture-begin')).result.target.source, 'song');
+  h.elements[0].currentTime = 2.3;
+  assert.equal((await h.command('listening-state')).result.media, null, 'matching clocks still cannot justify an arbitrary pick');
+  assert.equal((await h.command('capture-begin', { timeoutMs: 100 })).ok, false);
+});
+
+test('full music video is eligible when it matches the song, and a loop alone without controls is not', async () => {
+  const h = harness([{ src: 'song-video', tagName: 'VIDEO', duration: 180 },
+    { src: 'canvas', tagName: 'VIDEO', loop: true, duration: 8 }], undefined, { duration: 180, clock: '0:00/3:00' });
+  assert.equal((await h.command('capture-begin')).result.target.source, 'song-video');
+  const loop = harness([{ tagName: 'VIDEO', loop: true, duration: 8 }]);
+  assert.equal((await loop.command('capture-begin', { timeoutMs: 100 })).ok, false);
+});
+
+test('capture waits for the song timeline to catch up during a transition', async () => {
+  const timeline = { duration: 200, clock: '0:00/3:20' };
+  const h = harness([{ src: 'next', duration: 180 }, { tagName: 'VIDEO', loop: true, duration: 8 }],
+    () => { timeline.duration = 180; }, timeline);
+  assert.equal((await h.command('capture-begin', { timeoutMs: 100 })).result.target.source, 'next');
 });

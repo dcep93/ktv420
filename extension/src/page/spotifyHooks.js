@@ -37,13 +37,15 @@
   }
   function updateMonitor() {
     const gain = performance.now() < monitor.expires ? monitor.gain : 0;
+    const target = gain > 0 ? selectMediaTarget(discoverUsableTargets(mediaTracker)) : null;
     if (performance.now() >= monitor.expires) { for (const element of rateElements) element.playbackRate = 1; rateElements.clear(); }
     for (const element of outputElements.keys()) {
       const graph = audioGraphs.get(element);
       if (graph) {
+        const elementGain = element === target ? gain : 0;
         graph.monitor.gain.cancelScheduledValues(graph.context.currentTime);
-        if (gain === 0) graph.monitor.gain.setValueAtTime(0, graph.context.currentTime);
-        else graph.monitor.gain.setTargetAtTime(gain, graph.context.currentTime, 0.005);
+        if (elementGain === 0) graph.monitor.gain.setValueAtTime(0, graph.context.currentTime);
+        else graph.monitor.gain.setTargetAtTime(elementGain, graph.context.currentTime, 0.005);
       }
     }
   }
@@ -555,7 +557,7 @@
     }
 
     if (lastCount > 1) {
-      throw new Error(`Could not identify Spotify's current audio: ${lastPlayingCount} playing elements out of ${lastCount} loaded. Pause other audio and retry.`);
+      throw new Error(`Could not identify Spotify's current audio: ${lastPlayingCount} playing elements out of ${lastCount} loaded. Pause and play the song, then retry.`);
     }
     throw new Error(
       `No usable Spotify media element found after ${timeoutMs}ms. Last page-world target count: ${lastCount}. Seen: ${JSON.stringify(lastSeen)}`
@@ -565,9 +567,36 @@
   // Capture, transport state and tempo must agree on the source. Muted media
   // remains eligible: monitoring volume must never determine capture identity.
   function selectMediaTarget(elements) {
-    const playing = elements.filter(element => !element.paused);
+    // Canvas videos can be playing alongside the detached song element. Match
+    // Spotify's actual song duration before considering playback state; otherwise
+    // a playing decoration can even displace a paused song.
+    const timeline = readSongTimeline();
+    let candidates = elements;
+    if (timeline) {
+      candidates = candidates.filter(element => Math.abs(element.duration - timeline.duration) <= 2);
+      if (candidates.length > 1 && timeline.position !== null) {
+        candidates = candidates.filter(element => Math.abs(element.currentTime - timeline.position) <= 2);
+      }
+    } else {
+      // A looping video without a song timeline is not evidence of song playback.
+      candidates = candidates.filter(element => !(element.tagName === 'VIDEO' && element.loop));
+    }
+    const playing = candidates.filter(element => !element.paused);
     if (playing.length === 1) return playing[0];
-    return playing.length === 0 && elements.length === 1 ? elements[0] : null;
+    return playing.length === 0 && candidates.length === 1 ? candidates[0] : null;
+  }
+
+  function readSongTimeline() {
+    const seek = [...document.querySelectorAll('[data-testid="now-playing-bar"] input[type="range"]')]
+      .find(element => Number(element.max) > 1);
+    const duration = Number(seek?.max) / 1000;
+    if (!Number.isFinite(duration) || duration <= 0) return null;
+    // The range value is keyboard-step rounded (observed 5s while the displayed
+    // position was 2s). Use its accessible clock, including "0:02/4:18" format.
+    const clock = seek.getAttribute('aria-valuetext')?.match(/^(\d+):(\d{2})(?::(\d{2}))?/);
+    const position = clock ? clock[3] === undefined ? Number(clock[1]) * 60 + Number(clock[2])
+      : Number(clock[1]) * 3600 + Number(clock[2]) * 60 + Number(clock[3]) : null;
+    return { duration, position };
   }
 
   function discoverUsableTargets(mediaTracker) {
