@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ktv420",
-  "version": "6.3.8",
+  "version": "6.3.9",
   "minimum_chrome_version": "121",
   "description": "Capture Spotify and keep audio locally. The ktv420 hosted player handles listening, DJing and local separation.",
   "icons": {

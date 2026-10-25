@@ -4,6 +4,7 @@ import { sendLocalMessage, writeTrackArtifact } from './storage.js';
 export function createListeningController({ bridge, emit, ensurePlayer, getRunner, getTrackIds = () => [] }) {
   let busy = false, disposed = false, owner = false, lastLease = 0, catalogAt = 0;
   let enabled = false, activation = Promise.resolve();
+  let halted = false;
   let catalog = new Map(), recording = null, last = null, generation = 0, lastSource = '';
   let volume = 0, volumeRevision = -1, output = 'muted', error = '', armed = false;
   let volumeTimer = null, volumeEdit = 0, volumeSettlesAt = 0, latestState = null;
@@ -13,7 +14,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
   let lastVolumeDom = null;
   let storageQueue = Promise.resolve();
   const storing = new Set();
-  const policy = gain => bridge.command('listening-output', { gain });
+  const policy = gain => bridge.command('listening-output', { gain: halted ? 0 : gain });
   const publish = state => { latestState = state; emit(state); };
   function changeVolume(value) {
     if (!Number.isFinite(value) || value < 0 || value > 1) return;
@@ -64,6 +65,9 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       }
       const page = await bridge.command('listening-state');
       const media = page.media;
+      // A stop cannot re-arm from the same still-playing DOM snapshot. Remote
+      // playback may take over again only after we actually observe a pause.
+      if (halted && !dom.playing && media?.paused) halted = false;
       const local = !!media && media.readyState >= 2 && (media.paused || Math.abs(media.currentTime - dom.position) < 2);
       const now = Date.now();
       if (local && dom.playing && !media.paused && (now - lastLease > 900 || !owner)) {
@@ -87,7 +91,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       if (changed || seeked) { generation++; ignoreUntil = 0; }
       const runner = getRunner();
       const batch = runner?.isActive();
-      if (batch && (seeked || (changed && runner.captureProgress && runner.captureProgress.fraction < 0.97))) runner.handoff();
+      if (batch && runner.captureProgress && (seeked || (changed && runner.captureProgress.fraction < 0.97))) runner.handoff();
       if (recording && !batch && (changed || seeked || !local || !owner || page.captureInvalid || media?.ended || page.captureEnded)) {
         const ended = !seeked && !page.captureInvalid && (page.captureEnded || media?.ended || (changed && last?.duration > 0 && last.position >= last.duration - 0.06));
         await finish(ended); if (ended && !changed) ignoreUntil = now + 700;
@@ -108,7 +112,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
         error = 'Spotify reset the tempo. Pause and choose the tempo again.';
         if (dom.playing) await commandTransport({action:'pause'});
       }
-      const playing = !!(owner && local && dom.trackId && dom.playing && !media.paused && !media.ended && media.playbackRate === desiredRate && !error);
+      const playing = !!(!halted && owner && local && dom.trackId && dom.playing && !media.paused && !media.ended && media.playbackRate === desiredRate && !error);
       if (playing) { armed = true; ensurePlayer(); }
       // Start the PCM tap while the player loads, so a cold iframe does not
       // discard the beginning of a newly selected song. Monitoring still waits
@@ -166,6 +170,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
         volume = replayPreparation ? 0 : lastVolumeDom ?? 0;
         volumeRevision = -1; volumeSettlesAt = 0; latestState = null;
         output = 'muted'; armed = false; desiredRate = 1; silentGeneration = -1; generation++;
+        halted = false;
         enabled = value && !disposed;
         if (enabled) void tick();
       });
@@ -185,6 +190,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
         error = '';
         if (command.action === 'stems-failed') { failedTrack = command.trackId; return; }
         if (command.action === 'enable') { armed = true; ensurePlayer(); return; }
+        if (command.action === 'play' || command.action === 'select') halted = false;
         if (command.action === 'rate') {
           const dom = readTransportDom();
           if (!Number.isFinite(command.rate) || command.rate < .5 || command.rate > 1.5 || dom.trackId !== command.trackId || catalog.get(dom.trackId) !== 'ready' || recording || getRunner()?.isActive()) throw new Error('Tempo changes require prepared stems. Capture stays at 1×.');
@@ -210,9 +216,19 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       }).catch(reason => { error = reason?.message || String(reason); });
       return commands;
     },
-    async stopCapture() { await this.command({ action: 'pause' }); while (busy) await new Promise(resolve => setTimeout(resolve, 20)); await finish(false); },
+    async stopCapture() {
+      halted = true; armed = false; output = 'muted'; generation++;
+      if (latestState) publish({ ...latestState, generation, playing: false, output: 'muted', capturing: false,
+        captureProgress: null, overallCaptureFraction: null });
+      await policy(0);
+      try { await commandTransport({ action: 'pause' }); }
+      finally {
+        while (busy) await new Promise(resolve => setTimeout(resolve, 20));
+        await finish(false);
+      }
+    },
     afterBatch() { batchPending = false; },
-    async beforeBatch() { batchPending = true; desiredRate = 1; await bridge.command('listening-rate',{rate:1,reset:true}); while (busy) await new Promise(resolve => setTimeout(resolve, 20)); await finish(false); },
+    async beforeBatch() { batchPending = true; halted = false; desiredRate = 1; await bridge.command('listening-rate',{rate:1,reset:true}); while (busy) await new Promise(resolve => setTimeout(resolve, 20)); await finish(false); last = null; lastSource = ''; },
     dispose() { disposed = true; clearInterval(timer); if (enabled) void this.setEnabled(false).catch(() => {}); },
   };
 }

@@ -42,6 +42,52 @@ test('listening does nothing until opened, and releases control when closed', as
   assert.equal(calls.length, count, 'disposing a closed controller must not inject or mute');
 });
 
+test('Stop silences and pauses, and stale playing state cannot restart capture', async t => {
+  const ticks = [], calls = [], updates = [];
+  let playing = true, paused = false;
+  const id = '5EGTNEoUpibGgMWf6ECe0X';
+  const link = { getAttribute: () => `/track/${id}` };
+  const button = { disabled: false, getAttribute: () => playing ? 'Pause' : 'Play', click() { playing = false; } };
+  const seek = { max: '180000', value: '0', getAttribute: () => '0:00/3:00' };
+  const volumeSlider = { max: '1', value: '0.43' };
+  for (const [key, value] of Object.entries({
+    document: {
+      querySelector: selector => selector.includes('control-button-playpause') ? button : selector.includes('now-playing-widget') ? { contains: () => true, querySelector: () => null } : null,
+      querySelectorAll: selector => selector.includes('input[type="range"]') ? [seek, volumeSlider] : [link],
+    },
+    location: { origin: 'https://open.spotify.com' },
+    chrome: { runtime: { async sendMessage(message) { return { ok: true, result: message.type === 'ktv420:listening-claim' ? true : [] }; } } },
+    setInterval(callback) { ticks.push(callback); return 0; }, clearInterval() {},
+  })) {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, key);
+    Object.defineProperty(globalThis, key, { value, writable: true, configurable: true });
+    t.after(() => previous ? Object.defineProperty(globalThis, key, previous) : delete globalThis[key]);
+  }
+  const controller = createListeningController({
+    bridge: { async command(command, payload) {
+      calls.push({ command, payload });
+      if (command === 'listening-state') return { media: { source: 'song', readyState: 4, paused, currentTime: 0, playbackRate: 1 }, volumeRevision: 0 };
+      if (command === 'capture-begin') return { target: { currentTime: 0 } };
+      return {};
+    } }, emit: state => updates.push(state), ensurePlayer() {}, getRunner: () => null,
+  });
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  controller.heartbeat(); await controller.setEnabled(true); await settle();
+  assert.equal(calls.filter(c => c.command === 'capture-begin').length, 1);
+  await controller.stopCapture(); await settle();
+  assert.equal(playing, false);
+  assert.equal(updates.at(-1).capturing, false);
+  assert.equal(updates.at(-1).output, 'muted');
+  const afterStop = calls.length;
+  playing = true; ticks[0](); await settle();
+  assert.equal(calls.filter(c => c.command === 'capture-begin').length, 1);
+  assert.ok(calls.slice(afterStop).filter(c => c.command === 'listening-output').every(c => c.payload.gain === 0));
+  playing = false; paused = true; ticks[0](); await settle();
+  playing = true; paused = false; ticks[0](); await settle();
+  assert.equal(calls.filter(c => c.command === 'capture-begin').length, 2, 'fresh remote playback works after observed pause');
+  await controller.setEnabled(false); controller.dispose();
+});
+
 test('inherits Spotify volume and coalesces a drag without delaying pause or reverting to stale state', async t => {
   const ticks = [], timers = new Map(), writes = [], updates = [], calls = [];
   let nextTimer = 1, now = 10000;

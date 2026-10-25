@@ -102,3 +102,12 @@ test('run errors and cached completion reset progress', async t => {
   assert.equal(events.at(-1), null);
   assert.equal(runner.isActive(), false);
 });
+
+test('remote handoff ends the batch without reporting a user stop', async t => {
+  mockPage(t);
+  const runner = new CaptureOrchestrator({ bridge: { command: async () => ({}), getSnapshot: () => ({}) } });
+  runner.preflightQueue = async () => { runner.handoff(); runner.throwIfStopped(); };
+  await runner.run();
+  assert.equal(runner.isActive(), false);
+  assert.equal(runner.handingOff, true);
+});

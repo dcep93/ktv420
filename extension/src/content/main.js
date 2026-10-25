@@ -55,9 +55,15 @@ const ui = mountButton({
   onToggleRun: async (options = {}) => {
     try {
       const runner = await getOrchestrator();
+      if (runner.isActive()) { await runner.requestStop(); await listening?.stopCapture(); return; }
       if (!runner.isActive() && listening?.isCapturing()) { await listening.stopCapture(); return; }
       if (!runner.isActive()) await listening?.beforeBatch();
-      try { await runner.toggleRun(options); } finally { listening?.afterBatch(); }
+      try {
+        await runner.toggleRun(options);
+        if (!runner.handingOff) await listening?.stopCapture();
+      }
+      catch (error) { await listening?.stopCapture(); throw error; }
+      finally { listening?.afterBatch(); }
       ui.refresh();
     } catch (error) {
       console.log("[ktv420] Failed to run capture", error);

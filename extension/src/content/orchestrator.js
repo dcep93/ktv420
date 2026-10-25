@@ -219,6 +219,9 @@ export class CaptureOrchestrator extends EventTarget {
       this.clearCaptureProgress();
       if (!this.handingOff) pausePlaybackCleanly();
       await this.bridge.command("capture-abort").catch(() => {});
+      // A remote track/seek handoff intentionally continues in the listening
+      // controller; it is not a user Stop and must not show a stopped error.
+      if (this.handingOff && this.stopRequested) return;
       markTiming(runTimingTrace, "orchestrator_run_error", {
         error: error?.message || String(error)
       });
