@@ -1,7 +1,8 @@
 import { readTransportDom, commandTransport, setSpotifyVolume } from './transport.js';
 import { sendLocalMessage, writeTrackArtifact } from './storage.js';
+import { withTrackMetadata } from './trackMetadata.js';
 
-export function createListeningController({ bridge, emit, ensurePlayer, getRunner, getTrackIds = () => [] }) {
+export function createListeningController({ bridge, emit, ensurePlayer, getRunner, getTrackIds = () => [], getTrackMetadata = () => null }) {
   let busy = false, disposed = false, owner = false, lastLease = 0, catalogAt = 0;
   let enabled = false, activation = Promise.resolve();
   let halted = false;
@@ -36,7 +37,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
     }, 32);
   }
   async function finish(valid) {
-    const capture = recording; recording = null;
+    const capture = recording ? withTrackMetadata(recording, getTrackMetadata(recording.trackId)) : null; recording = null;
     if (!capture) return;
     if (!valid || !capture.complete || catalog.has(capture.trackId)) { await bridge.command('capture-abort'); return; }
     const result = await bridge.command('capture-finish', {}, 60000);
@@ -91,6 +92,12 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       if (changed || seeked) { generation++; ignoreUntil = 0; }
       const runner = getRunner();
       const batch = runner?.isActive();
+      if (recording && recording.trackId === dom.trackId) {
+        recording = withTrackMetadata({ ...recording,
+          title: recording.title || dom.title, artist: recording.artist || dom.artist,
+          artwork: recording.artwork || dom.artwork,
+        }, getTrackMetadata(recording.trackId));
+      }
       if (batch && runner.captureProgress && (seeked || (changed && runner.captureProgress.fraction < 0.97))) runner.handoff();
       if (recording && !batch && (changed || seeked || !local || !owner || page.captureInvalid || media?.ended || page.captureEnded)) {
         const ended = !seeked && !page.captureInvalid && (page.captureEnded || media?.ended || (changed && last?.duration > 0 && last.position >= last.duration - 0.06));
@@ -119,7 +126,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       // for the hosted player's explicit silence acknowledgment below.
       if (playing && armed && !replayPreparation && !batch && !ready && !batchPending && now > ignoreUntil && !recording) {
         const result = await bridge.command('capture-begin');
-        recording = { ...dom, complete: result.target.currentTime <= 0.35 && !catalog.has(dom.trackId) && !storing.has(dom.trackId) };
+        recording = withTrackMetadata({ ...dom, complete: result.target.currentTime <= 0.35 && !catalog.has(dom.trackId) && !storing.has(dom.trackId) }, getTrackMetadata(dom.trackId));
       }
       const connected = now - frameHeartbeat < 2000;
       const previousOutput = output;

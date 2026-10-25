@@ -75,7 +75,7 @@ const ui = mountButton({
 listening = createListeningController({ bridge, emit: state => {
   ui.notifyListening(state);
   if (!orchestrator?.isActive()) captureTitle.set(state.overallCaptureFraction);
-}, ensurePlayer: () => ui.prepare(), getRunner: () => orchestrator, getTrackIds: () => ui.getTrackIds() });
+}, ensurePlayer: () => ui.prepare(), getRunner: () => orchestrator, getTrackIds: () => ui.getTrackIds(), getTrackMetadata: id => ui.getTrackMetadata(id) });
 window.addEventListener('pagehide', () => { listening?.dispose(); captureTitle.dispose(); }, { once: true });
 
 async function loadSpotifyPlaylistTracks() {

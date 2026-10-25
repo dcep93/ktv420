@@ -155,6 +155,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
     clearInterval(timer); window.removeEventListener('message', handleMessage); window.removeEventListener('keydown', keydown, true); chrome.runtime.onMessage.removeListener(toolbar);
   }, { once: true });
   return { refresh, prepare, getTrackIds: () => tracks.map(track => track.trackId),
+    getTrackMetadata: id => tracks.find(track => track.trackId === id),
     notifyListening(state) { listening = state; post(); },
     notifyCaptureProgress(progress) { captureProgress = progress; post(); },
     async notifyTrackCaptured(_id, metadata) { notice = `${metadata?.trackName || 'Track'} captured. Local separation is queued automatically.`; post(); },

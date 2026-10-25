@@ -4,7 +4,7 @@ import { loadPerformance, savePerformance } from '../features/local/performanceF
 import { PerformanceClock, parseRecording, MAX_RECORDING_BYTES, validSnapshot, type PerformanceRecording, type MixerControl } from '../features/local/recording';
 import { useReplay } from '../features/local/useReplay';
 import { captureStartSeconds } from '../features/local/listeningProtocol';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Player from '../features/stems/player/Player';
 import OverlayIcon from './OverlayIcon';
 import type { PlaybackRecord, RecordingEvent, RecordingStartRequest } from '../features/stems/player/types';
@@ -14,6 +14,7 @@ import { processLocalTrack } from '../features/local/processing';
 import { drainSpotifyQueue } from '../features/local/spotifyQueue';
 import { nextSeparationFraction } from '../features/local/rowProgress';
 import { useSpotifyOverlay } from '../features/local/useSpotifyOverlay';
+import { withSpotifyMetadata } from '../features/local/trackMetadata';
 import { LocalSeparator } from '../features/local/inference/client';
 import { clearModelCache, getModelCacheStatus, loadModelBytes } from '../features/local/inference/model';
 import type { SeparationProgress } from '../features/local/inference/types';
@@ -23,7 +24,7 @@ const size = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
 export default function LibraryPage() {
   const mp3Export = useReplayExport();
   const exportController = mp3Export.controller;
-  const [tracks, setTracks] = useState<LocalTrack[]>([]);
+  const [storedTracks, setTracks] = useState<LocalTrack[]>([]);
   const [selected, setSelected] = useState('');
   const [record, setRecord] = useState<PlaybackRecord | null>(null);
   const [viewMode, setViewMode] = useState<'tracks' | 'settings' | 'player'>('tracks');
@@ -33,6 +34,10 @@ export default function LibraryPage() {
   const [error, setError] = useState('');
   const closeRef = useRef<() => void>(() => {});
   const spotify = useSpotifyOverlay(() => closeRef.current());
+  const tracks = useMemo(() => {
+    const rows = new Map(spotify.tracks.map(row => [`spotify-${row.trackId}`, row]));
+    return storedTracks.map(track => withSpotifyMetadata(track, rows.get(track.id)));
+  }, [storedTracks, spotify.tracks]);
   const listening = spotify.listening;
   const transportCommand = spotify.transport;
   useEffect(() => {

@@ -6,7 +6,7 @@ import { getInput, getTrack, deleteTrack, transaction } from '../features/local/
 import { decodeWav } from '../features/local/audio/wav.ts';
 const samples = new Float32Array([-0,1.25,-1.25,0.00000001,0.5,-0.5]);
 const bytes = new Uint8Array(samples.buffer);
-const meta = {trackId:'testCapture',trackName:'fixture',audioSampleRate:48000,audioChannelCount:2,audioSampleFormat:'PCM_F32LE',audioByteLength:bytes.length};
+const meta = {trackId:'testCapture',trackName:'fixture',trackArtist:'fixture artist',audioSampleRate:48000,audioChannelCount:2,audioSampleFormat:'PCM_F32LE',audioByteLength:bytes.length};
 const b64 = (value: Uint8Array) => Buffer.from(value).toString('base64');
 test('capture retains Float32 channel words and commits only after all chunks arrive', async () => {
   const id = await beginCapture(1,meta,bytes.length);
@@ -17,6 +17,8 @@ test('capture retains Float32 channel words and commits only after all chunks ar
   await assert.rejects(appendCapture(1,id,2,b64(bytes.subarray(8))));
   await appendCapture(1,id,1,b64(bytes.subarray(8)));
   await finishCapture(1,id);
+  const saved = await getTrack('spotify-testCapture');
+  assert.equal(saved?.title, 'fixture'); assert.equal(saved?.artist, 'fixture artist');
   const audio = decodeWav(await (await getInput('spotify-testCapture')).arrayBuffer());
   assert.equal(audio.sampleRate,48000);
   assert.deepEqual([...audio.left],[-0,-1.25,0.5]);
