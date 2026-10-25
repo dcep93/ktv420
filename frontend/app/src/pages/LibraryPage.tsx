@@ -419,7 +419,8 @@ export default function LibraryPage() {
           : separating ? `${active === track.id && progress?.phase === 'encoding' ? 'Saving MP3' : 'Separating'}${fraction === null ? '' : ` ~${Math.floor(fraction * 100)}%`}`
           : track.status === 'error' ? 'Failed' : track.status === 'missing' ? 'Not captured' : 'Queued';
         const icon = ready ? 'play' : track.status === 'error' ? 'alert' : progressKind ? 'processing' : 'clock';
-        const artwork = typeof track.metadata?.trackArtworkSrc === 'string' ? track.metadata.trackArtworkSrc : '';
+        const artwork = (typeof track.metadata?.trackArtworkSrc === 'string' ? track.metadata.trackArtworkSrc : '') ||
+          spotify.tracks.find(item => `spotify-${item.trackId}` === track.id)?.trackArtworkSrc || '';
         return <li key={`${track.id}-${index}`}><button type="button" className="iframe-track-row" data-state={track.status} data-progress={progressKind}
           aria-label={`${track.title} — ${label}`} disabled={!available}
           title={track.error || (active === track.id ? progress?.message : available ? 'Open stem mixer' : label)}

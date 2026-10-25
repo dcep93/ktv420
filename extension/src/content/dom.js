@@ -36,6 +36,11 @@ export function collectTrackRows() {
   if (!root) {
     return [];
   }
+  // Album rows omit covers (and can contain video thumbnails/equalizer GIFs).
+  // Only album routes share one cover; playlist headers are not track artwork.
+  const header = /^\/album\//.test(window.location.pathname)
+    ? document.querySelector('[data-testid="entity-header"]') : null;
+  const albumArtwork = header ? getLargestRowArtworkSrc(header) : '';
 
   return Array.from(root.querySelectorAll(SELECTORS.trackRow))
     .map((row, rowIndex) => {
@@ -50,7 +55,7 @@ export function collectTrackRows() {
       const artists = Array.from(row.querySelectorAll(SELECTORS.artistAnchor))
         .map((artistAnchor) => compactWhitespace(artistAnchor.textContent))
         .filter(Boolean);
-      const trackArtworkSrc = getLargestRowArtworkSrc(row);
+      const trackArtworkSrc = albumArtwork || getLargestRowArtworkSrc(row);
 
       return {
         row,
@@ -82,8 +87,9 @@ function getLargestRowArtworkSrc(row) {
     }
   }
 
-  candidates.sort((a, b) => b.size - a.size);
-  return candidates[0]?.src || "";
+  const covers = candidates.filter(({ src }) => /^https:\/\/(?:i\.scdn\.co\/image\/|mosaic\.scdn\.co\/)/.test(src));
+  covers.sort((a, b) => b.size - a.size);
+  return covers[0]?.src || "";
 }
 
 function parseSrcset(srcset) {
