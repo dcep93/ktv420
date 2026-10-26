@@ -17,6 +17,7 @@ import {
   type PointerEvent,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -273,7 +274,7 @@ export default function Player({
     });
   }, [record.md5, trackMetadata]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     volumesRef.current = volumes;
   }, [volumes]);
 
@@ -285,19 +286,19 @@ export default function Player({
     onRecordingEventRef.current = onRecordingEvent;
   }, [onRecordingEvent]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     trackMuteStatesRef.current = trackMuteStates;
   }, [trackMuteStates]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     trackDeafenStatesRef.current = trackDeafenStates;
   }, [trackDeafenStates]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     effectValuesRef.current = effectValues;
   }, [effectValues]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     effectTypesRef.current = effectTypes;
   }, [effectTypes]);
 
@@ -1411,7 +1412,7 @@ export default function Player({
     if (isRecording && areTracksReady) onRecordingEventRef.current?.({type:'mixer_snapshot',trackTimeSeconds:currentPlaybackTime(),payload:{snapshot:snapshot()}});
   }, [isRecording,areTracksReady,tempo,pitch,volumes,trackMuteStates,trackDeafenStates,trackLockStates,effectValues,effectTypes,effectSettings,visualizerType,spotlightState,snapshot,currentPlaybackTime]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (areTracksReady && !replaying) onSettingsChange?.(snapshot());
   }, [areTracksReady, replaying, onSettingsChange, snapshot, tempo, pitch, volumes, trackMuteStates, trackDeafenStates, trackLockStates, effectValues, effectTypes, effectSettings]);
 

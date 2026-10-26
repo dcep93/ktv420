@@ -1,3 +1,4 @@
+import { usePlayerPreferences } from '../features/local/usePlayerPreferences';
 import { useHostedCapture } from '../features/local/useHostedCapture';
 import { SpotifyDriftController } from '../features/local/spotifyDrift';
 import { catalogUrl } from '../features/local/extensionConnection';
@@ -5,7 +6,7 @@ import { bestEffortSpotify } from '../features/local/spotifySync';
 import { useReplayExport } from '../features/local/export/useReplayExport';
 import ReplayExportButton from './ReplayExportButton';
 import { loadPerformance, savePerformance } from '../features/local/performanceFiles';
-import { PerformanceClock, parseRecording, MAX_RECORDING_BYTES, validSnapshot, type PerformanceRecording, type MixerControl, type MixerSnapshot } from '../features/local/recording';
+import { PerformanceClock, parseRecording, MAX_RECORDING_BYTES, validSnapshot, type PerformanceRecording, type MixerControl } from '../features/local/recording';
 import { useReplay } from '../features/local/useReplay';
 import { captureStartSeconds } from '../features/local/listeningProtocol';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -97,10 +98,8 @@ export default function LibraryPage() {
   const mix = useRef<PerformanceRecording | null>(null);
   const recordingClock = useRef(new PerformanceClock());
   const mixer = useRef<MixerControl | null>(null);
-  // View preferences outlive the per-song Player (including its loading gap).
-  const [combinedVisualizerExpanded, setCombinedVisualizerExpanded] = useState(false);
-  const mixerSettings = useRef<MixerSnapshot | null>(null);
-  const rememberMixerSettings = useCallback((settings: MixerSnapshot) => { mixerSettings.current = settings; }, []);
+  const {mixerSettings,rememberMixerSettings,combinedVisualizerExpanded,setCombinedVisualizerExpanded} =
+    usePlayerPreferences(!spotify.replay && !mp3Export.busy);
   const [savedMix,setSavedMix] = useState<PerformanceRecording | null>(null);
   const replay = useReplay({recording:spotify.replay,listening,transport:transportCommand,
     select:id => { if(selected!==`spotify-${id}`) { loadedRevision.current='';setSelected(`spotify-${id}`);setRecord(null); } setSelectedRowIndex(null); syncTrackUrl(`spotify-${id}`, true); setViewMode('player'); },
@@ -548,7 +547,7 @@ export default function LibraryPage() {
     </ol>}
     <PlayerViewport contentKey={activeTrack && record && record.md5 === selected ? `${record.md5}/${selectedRowIndex}` : null} hidden={viewMode !== 'player'}>
     {activeTrack && record && record.md5 === selected && <>
-      <div className={replay.active ? "replay-mixer" : undefined} inert={!!spotify.replay || mp3Export.busy}><Player key={`${record.md5}/${selectedRowIndex}`} record={record} title={activeTrack.title} replaying={replay.active || mp3Export.busy} onControls={onControls}
+      <div className={replay.active ? "replay-mixer" : undefined} inert={!!spotify.replay || mp3Export.busy}><Player key={`${record.md5}/${selectedRowIndex}/${spotify.replay ? 'replay' : 'manual'}`} record={record} title={activeTrack.title} replaying={replay.active || mp3Export.busy} onControls={onControls}
         combinedVisualizerExpanded={combinedVisualizerExpanded} onCombinedVisualizerExpandedChange={setCombinedVisualizerExpanded}
         initialSettings={spotify.replay ? undefined : mixerSettings.current} onSettingsChange={spotify.replay ? undefined : rememberMixerSettings}
         masterVolume={listening?.capturing ? 0 : masterVolume}
