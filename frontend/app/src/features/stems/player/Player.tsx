@@ -1,3 +1,4 @@
+import { settingsForTracks } from './mixerSettings';
 import { SpotifyRemoteObserver } from '../../local/spotifySync';
 import { resizeVisualizer, canvasVisible } from './visuals/canvas';
 import { createStereoTap, type StereoTap } from './visuals/analysis';
@@ -68,7 +69,7 @@ type SpotlightState = {
 };
 
 export default function Player({
-  record, replaying = false, onControls,
+  record, replaying = false, onControls, initialSettings, onSettingsChange,
   masterVolume = 1, tempoSupported = true, transport, onTransportCommand, onPlaybackError,
   title,
   trackMetadata,
@@ -86,6 +87,7 @@ export default function Player({
   onRecordingEvent,
   onRegisterRecordingFlush,
 }: PlayerProps) {
+  const inheritedSettings = useRef(initialSettings);
   const controlsCallback = useRef(onControls); controlsCallback.current=onControls;
   useEffect(() => () => controlsCallback.current?.(null), []);
   const playbackErrorRef = useRef(onPlaybackError);
@@ -95,9 +97,9 @@ export default function Player({
   const masterGain = useRef<GainNode | null>(null);
   const engine = useRef<TempoEngine | null>(null);
   const [engineReady, setEngineReady] = useState(false);
-  const [tempo, setTempo] = useState(1);
-  const [pitch, setPitch] = useState(0);
-  const tempoRef = useRef(1), pitchRef = useRef(0);
+  const [tempo, setTempo] = useState(initialSettings?.tempo ?? 1);
+  const [pitch, setPitch] = useState(initialSettings?.pitch ?? 0);
+  const tempoRef = useRef(tempo), pitchRef = useRef(pitch);
   const applyTempoPitch = useCallback((rate: number, semitones: number) => {
     if (!validTempo(rate) || !validPitch(semitones)) throw new Error('Invalid tempo or pitch.');
     engine.current?.set(rate, semitones);
@@ -115,7 +117,7 @@ export default function Player({
     Record<string, number>
   >({});
   const [visualizerType, setVisualizerType] = useState<VisualizerType>(
-    visualizerOptions[0].value
+    (initialSettings?.visualizer as VisualizerType) ?? visualizerOptions[0].value
   );
   const [trackMuteStates, setTrackMuteStates] = useState<
     Record<string, boolean>
@@ -136,7 +138,7 @@ export default function Player({
   const [isHarmonicAnalysisRunning, setIsHarmonicAnalysisRunning] =
     useState(false);
   const [spotlightState, setSpotlightState] =
-    useState<SpotlightState | null>(null);
+    useState<SpotlightState | null>((initialSettings?.spotlight as SpotlightState) ?? null);
   const isAnyTrackDeafened = useMemo(
     () => Object.values(trackDeafenStates).some(Boolean),
     [trackDeafenStates]
@@ -574,12 +576,14 @@ export default function Player({
     const initialEffectValues: Record<string, number> = {};
     const initialEffectTypes: Record<string, AudioEffectType> = {};
 
-    for (const track of tracks) {
-      initialVolumes[track.id] = 1;
-      initialMuteStates[track.id] = track.isInput && tracks.some(candidate => !candidate.isInput);
-      initialDeafenStates[track.id] = false;
-      initialEffectValues[track.id] = getDefaultEffectValue("wah");
-      initialEffectTypes[track.id] = "wah";
+    const inherited = settingsForTracks(inheritedSettings.current, tracks);
+    for (const [index, track] of tracks.entries()) {
+      const stem = inherited.stems[index];
+      initialVolumes[track.id] = stem.volume;
+      initialMuteStates[track.id] = stem.mute;
+      initialDeafenStates[track.id] = stem.deafen;
+      initialEffectValues[track.id] = stem.value;
+      initialEffectTypes[track.id] = stem.effect as AudioEffectType;
     }
 
     volumesRef.current = initialVolumes;
@@ -596,7 +600,10 @@ export default function Player({
     setIsPlaying(false);
     setReadyTrackIds([]);
     setEngineReady(false);
-    tempoRef.current = 1; pitchRef.current = 0; setTempo(1); setPitch(0);
+    tempoRef.current = inherited.tempo ?? 1; pitchRef.current = inherited.pitch ?? 0;
+    setTempo(tempoRef.current); setPitch(pitchRef.current);
+    setSpotlightState(inherited.spotlight as SpotlightState | null);
+    setVisualizerType(inherited.visualizer as VisualizerType);
     setTrackMuteStates(initialMuteStates);
     setTrackDeafenStates(initialDeafenStates);
     setAmplitudeEnvelopes({});
@@ -1433,6 +1440,10 @@ export default function Player({
   useEffect(() => {
     if (isRecording && areTracksReady) onRecordingEventRef.current?.({type:'mixer_snapshot',trackTimeSeconds:currentPlaybackTime(),payload:{snapshot:snapshot()}});
   }, [isRecording,areTracksReady,tempo,pitch,volumes,trackMuteStates,trackDeafenStates,effectValues,effectTypes,visualizerType,spotlightState,snapshot,currentPlaybackTime]);
+
+  useEffect(() => {
+    if (areTracksReady && !replaying) onSettingsChange?.(snapshot());
+  }, [areTracksReady, replaying, onSettingsChange, snapshot, tempo, pitch, volumes, trackMuteStates, trackDeafenStates, effectValues, effectTypes]);
 
   useEffect(() => {
     onControls?.({

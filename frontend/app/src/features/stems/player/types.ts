@@ -77,6 +77,8 @@ export type VisualizerType =
   | "delay-pedal";
 
 export type PlayerProps = {
+  initialSettings?: MixerSnapshot | null;
+  onSettingsChange?: (settings: MixerSnapshot) => void;
   replaying?: boolean;
   onControls?: (control: MixerControl | null) => void;
   masterVolume?: number;

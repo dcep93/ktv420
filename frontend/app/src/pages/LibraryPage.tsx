@@ -2,7 +2,7 @@ import { bestEffortSpotify } from '../features/local/spotifySync';
 import { useReplayExport } from '../features/local/export/useReplayExport';
 import ReplayExportButton from './ReplayExportButton';
 import { loadPerformance, savePerformance } from '../features/local/performanceFiles';
-import { PerformanceClock, parseRecording, MAX_RECORDING_BYTES, validSnapshot, type PerformanceRecording, type MixerControl } from '../features/local/recording';
+import { PerformanceClock, parseRecording, MAX_RECORDING_BYTES, validSnapshot, type PerformanceRecording, type MixerControl, type MixerSnapshot } from '../features/local/recording';
 import { useReplay } from '../features/local/useReplay';
 import { captureStartSeconds } from '../features/local/listeningProtocol';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -80,6 +80,8 @@ export default function LibraryPage() {
   const mix = useRef<PerformanceRecording | null>(null);
   const recordingClock = useRef(new PerformanceClock());
   const mixer = useRef<MixerControl | null>(null);
+  const mixerSettings = useRef<MixerSnapshot | null>(null);
+  const rememberMixerSettings = useCallback((settings: MixerSnapshot) => { mixerSettings.current = settings; }, []);
   const [savedMix,setSavedMix] = useState<PerformanceRecording | null>(null);
   const replay = useReplay({recording:spotify.replay,listening,transport:transportCommand,
     select:id => { if(selected!==`spotify-${id}`) { loadedRevision.current='';setSelected(`spotify-${id}`);setRecord(null); } setViewMode('player'); },
@@ -457,6 +459,7 @@ export default function LibraryPage() {
     {activeTrack && record && record.md5 === selected && <section className="iframe-player-view" hidden={viewMode !== 'player'} aria-label="Player">
       <button className="iframe-player-back" aria-label="Back to tracks" onClick={() => setViewMode('tracks')}><OverlayIcon name="back" /></button>
       <div className={replay.active ? "replay-mixer" : undefined} inert={!!spotify.replay || mp3Export.busy}><Player key={record.md5} record={record} title={activeTrack.title} replaying={replay.active || mp3Export.busy} onControls={onControls}
+        initialSettings={spotify.replay ? undefined : mixerSettings.current} onSettingsChange={spotify.replay ? undefined : rememberMixerSettings}
         masterVolume={listening?.capturing ? 0 : masterVolume}
         tempoSupported
         transport={!spotify.replay && listening ? { ...listening, position: Math.max(0, listening.position - captureOffset) } : undefined}
