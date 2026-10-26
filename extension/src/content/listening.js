@@ -92,9 +92,14 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       }
       lastVolumeDom = dom.volume;
       const changed = last && (dom.trackId !== last.trackId || (media?.source && lastSource && media.source !== lastSource));
-      const delta = last ? dom.position - last.position : 0;
+      // Spotify's rounded DOM clock can stay stale and catch up several seconds
+      // at once. Only movement of the same actual media can establish a seek.
+      const mediaPosition = Number.isFinite(media?.currentTime) ? media.currentTime : null;
+      const comparableClock = !!last && mediaPosition !== null && Number.isFinite(last.mediaPosition) &&
+        !!media?.source && media.source === lastSource;
+      const delta = comparableClock ? mediaPosition - last.mediaPosition : 0;
       const elapsed = last ? (now - last.observedAt) / 1000 : 0;
-      const seeked = !!last && !changed && (delta < -0.5 || delta > elapsed * (last.playbackRate || 1) + 1.3);
+      const seeked = comparableClock && !changed && (delta < -0.5 || delta > elapsed * (last.playbackRate || 1) + 1.3);
       if (changed || seeked) { generation++; ignoreUntil = 0; }
       // A later remote song choice can enter normal capture again. Failed local
       // selection commands must not capture Spotify's unchanged, wrong song.
@@ -160,7 +165,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
           return;
         }
       }
-      last = { ...dom, playbackRate: 1, observedAt: Date.now() };
+      last = { ...dom, mediaPosition, playbackRate: 1, observedAt: now };
       lastSource = media?.source || '';
       const playlist = [...new Set(getTrackIds())];
       const scope = playlist.includes(dom.trackId) ? playlist : [dom.trackId];

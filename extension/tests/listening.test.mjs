@@ -409,3 +409,37 @@ test('hosted mode reports native time, never auto-captures, and rejects correcti
   now+=5000;ticks[0]();await settle();assert.equal(stops,1,'frame loss stops native capture');
   await controller.setEnabled(false);controller.dispose();
 });
+
+
+test('batch capture ignores stale DOM clock jumps but still hands off actual media seeks', async t => {
+  const ticks = []; let now = 10000, position = 10, domPosition = '0:10', handoffs = 0;
+  t.mock.method(Date, 'now', () => now);
+  const id = '1111111111111111111111', link = { getAttribute: () => `/track/${id}` };
+  const seek = { max: '180000', value: '10000', getAttribute: () => domPosition };
+  for (const [key, value] of Object.entries({
+    document: { querySelector: s => s.includes('control-button-playpause') ? { disabled:false, getAttribute:()=> 'Pause' }
+      : s.includes('now-playing-widget') ? {contains:()=>true,querySelector:()=>null} : null,
+      querySelectorAll: s => s.includes('input[type="range"]') ? [seek,{max:'1',value:'.5'}] : [link] },
+    location: {origin:'https://open.spotify.com'},
+    chrome: {runtime:{async sendMessage(m){return {ok:true,result:m.type==='ktv420:listening-claim'?true:[]};}}},
+    setInterval(fn){ticks.push(fn);return 0;},clearInterval(){},
+  })) {
+    const previous = Object.getOwnPropertyDescriptor(globalThis,key);
+    Object.defineProperty(globalThis,key,{value,writable:true,configurable:true});
+    t.after(()=>previous?Object.defineProperty(globalThis,key,previous):delete globalThis[key]);
+  }
+  const runner = {isActive:()=>true,captureProgress:{fraction:.2},handoff:()=>handoffs++};
+  const controller = createListeningController({bridge:{async command(name){return name==='listening-state'
+    ? {media:{currentTime:position,source:'song',readyState:4,paused:false,playbackRate:1}} : {};}},
+    emit(){},ensurePlayer(){},getRunner:()=>runner});
+  const settle=()=>new Promise(r=>setImmediate(r));
+  const tick=async()=>{controller.heartbeat();ticks[0]();await settle();};
+  controller.heartbeat();await controller.setEnabled(true);await settle();
+  // Spotify leaves its displayed clock stale, then catches up by two seconds.
+  for(let i=0;i<9;i++){now+=200;position+=.2;await tick();}
+  now+=200;position+=.2;domPosition='0:12';await tick();
+  assert.equal(handoffs,0,'ordinary audio must not be interrupted by a DOM clock refresh');
+  now+=200;position=3;domPosition='0:03';await tick();
+  assert.equal(handoffs,1,'a real same-song seek still hands off the capture');
+  await controller.setEnabled(false);controller.dispose();
+});

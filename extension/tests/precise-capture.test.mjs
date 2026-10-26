@@ -233,3 +233,34 @@ test('stale Play acknowledgment uses the armed-media fallback and rejects a froz
   assert.equal(h.calls.filter(name=>name==='capture-play').length,1);
  }
 });
+
+
+test('a media replacement during rewind is re-prepared and verified from zero', async () => {
+ const h=setup();const command=h.options.bridge.command;let source='audio',prepares=0;
+ h.options.bridge.command=async(name,payload)=>{
+  if(name==='capture-prepare')prepares++;
+  const result=await command(name,payload);
+  if(name==='listening-state'&&prepares===1){source='replacement';h.setMedia({position:.151});}
+  if(result.target)result.target={...result.target,source};
+  if(result.media)result.media={...result.media,source};
+  if(name==='capture-begin')assert.equal(payload.expectedSource,'replacement');
+  if(name==='capture-state')return {...result,source};
+  return result;
+ };
+ const result=await startPreciseCapture(h.options);
+ assert.equal(prepares,2);assert.equal(result.startVerified,true);
+ assert.equal(result.target.currentTime,0);
+ assert.equal(h.calls.filter(name=>name==='capture-begin').length,1);
+});
+
+test('repeated media replacements exhaust a bounded retry without recording', async () => {
+ const h=setup();const command=h.options.bridge.command;let prepares=0;
+ h.options.bridge.command=async(name,payload)=>{
+  const result=await command(name,payload);
+  if(name==='capture-prepare'){prepares++;result.target.source=`prepared-${prepares}`;}
+  if(result.media)result.media.source='another-source';
+  return result;
+ };
+ await assert.rejects(startPreciseCapture(h.options),/audio source changed/);
+ assert.equal(prepares,3);assert.ok(!h.calls.includes('capture-begin'));
+});

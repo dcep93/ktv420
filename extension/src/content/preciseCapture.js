@@ -34,6 +34,9 @@ export async function startPreciseCapture({ bridge, trackId, checkCancelled = ()
         check();
         const { media } = await bridge.command('listening-state');
         lastMedia = media;
+        // Spotify may replace its media source while applying our zero seek.
+        // Re-prepare that source, then verify paused zero again before recording.
+        if (media?.source && media.source !== prepared.target.source && restart < 2) continue attempts;
         if (!corrected && attempt >= 10 && media?.source === prepared.target.source && media.paused &&
             !media.seeking && Number.isFinite(media.currentTime) && media.currentTime !== 0) {
           check();
