@@ -378,3 +378,64 @@ test('missing or repeated worklet blocks cannot be compensated by silent end pad
     assert.equal(result.invalid,true);assert.match(result.invalidReason,/missed or repeated/);
   }
 });
+
+test('compressed duration overhang is accepted only after natural completion, without padding', async () => {
+  for (const { short, ended, missingFirst, missingLast, changedSource, valid } of [
+    { short: .025, ended: true, valid: true },
+    { short: .025, ended: false },
+    { short: .075, ended: true },
+    { short: .025, ended: true, missingFirst: true },
+    { short: .025, ended: true, missingLast: true },
+    { short: .025, ended: true, changedSource: true },
+  ]) {
+    const h = harness([{ src: 'song', paused: true, duration: 3 }]);
+    await h.command('capture-begin', { requireStart: true, expectedSource: 'song' });
+    await h.elements[0].play();
+    const frames = Math.round((3 - short) * 44100), offset = missingFirst ? 128 : 0;
+    const pcm = new Float32Array((frames - offset - (missingLast ? 128 : 0)) * 2);
+    pcm[pcm.length - 1] = .25; // the last audible sample must survive unchanged
+    h.contexts[0].currentTime = frames / 44100;
+    h.ports[0].onmessage({ data: { frame: offset, channelCount: 2, bytesBuffer: pcm.buffer } });
+    if (changedSource) h.elements[0].src = 'next';
+    if (ended) { h.elements[0].ended = true; h.elements[0].currentTime = 3; h.elements[0].dispatch('ended'); }
+    const result = (await h.command('capture-finish')).result;
+    assert.equal(result.invalid, !valid, JSON.stringify({short,ended,missingFirst,missingLast,changedSource}));
+    assert.equal(result.endVerified, !!valid);
+    if (valid) {
+      assert.equal(result.byteLength, pcm.byteLength, 'never insert artificial tail samples');
+      assert.deepEqual(new Float32Array(result.bytesBuffer), pcm);
+    }
+  }
+});
+
+test('final duration replaces the provisional duration and survives next-song reuse', async () => {
+  const h = harness([{ src: 'song', paused: true, duration: 3 }]);
+  await h.command('capture-begin', { requireStart: true, expectedSource: 'song' });
+  await h.elements[0].play();
+  const frames = 3 * 44100, pcm = new Float32Array(frames * 2);
+  pcm[pcm.length - 1] = .4;
+  h.contexts[0].currentTime = 3;
+  h.ports[0].onmessage({ data: { frame: 0, channelCount: 2, bytesBuffer: pcm.buffer } });
+  h.elements[0].duration = 3.025;
+  h.elements[0].ended = true; h.elements[0].dispatch('ended');
+  h.elements[0].src = 'next'; h.elements[0].duration = 200;
+  const result = (await h.command('capture-finish')).result;
+  assert.equal(result.invalid, false);
+  assert.equal(result.endVerified, true);
+  assert.equal(result.mediaDuration, 3.025);
+  assert.deepEqual(new Float32Array(result.bytesBuffer), pcm);
+});
+
+test('a completely missing pre-pause interval cannot be mistaken for codec padding', async () => {
+  const h = harness([{ src: 'song', paused: true, duration: 4 / 44100 }]);
+  await h.command('capture-begin', { requireStart: true, expectedSource: 'song' });
+  await h.elements[0].play();
+  h.contexts[0].currentTime = 2 / 44100; h.elements[0].pause();
+  h.contexts[0].currentTime = 10 / 44100; await h.elements[0].play();
+  h.contexts[0].currentTime = 12 / 44100;
+  h.elements[0].ended = true; h.elements[0].dispatch('ended');
+  h.ports[0].onmessage({ data: { frame: 10, channelCount: 2, bytesBuffer: new Float32Array(4).buffer } });
+  const result = (await h.command('capture-finish')).result;
+  assert.equal(result.invalid, true);
+  assert.equal(result.endVerified, false);
+});

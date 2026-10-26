@@ -42,3 +42,23 @@ test('capture errors distinguish unverified starts, interrupted audio and incorr
  assert.throws(()=>captureTiming({...capture,byteLength:48000*9*8},10),/1.000 seconds short/);
  assert.throws(()=>captureTiming({...capture,byteLength:48000*11*8},10),/1.000 seconds long/);
 });
+
+test('natural-end duration mismatch retains real frame count and requires collector proof', () => {
+ const frames=48000*3-1200;
+ const capture={startVerified:true,startMediaTime:0,invalid:false,sampleRate:48000,channelCount:2,
+  byteLength:frames*8,rawCapturedFrames:frames,endVerified:true};
+ const timing=captureTiming(capture,3);
+ assert.equal(timing.capturedFrames,frames);
+ assert.equal(timing.captureEndVerified,true);
+ assert.ok(Math.abs(timing.captureDurationErrorSeconds+.025)<1e-10);
+ for(const change of [{endVerified:false},{endVerified:undefined},{rawCapturedFrames:frames-128},{invalid:true},
+  {byteLength:48000*2.9*8,rawCapturedFrames:48000*2.9}])assert.throws(()=>captureTiming({...capture,...change},3),/timing could not/);
+});
+
+test('storage audit uses the verified final duration rather than a provisional estimate', () => {
+ const frames=48000*3;
+ const capture={startVerified:true,startMediaTime:0,invalid:false,sampleRate:48000,channelCount:2,
+  byteLength:frames*8,rawCapturedFrames:frames,endVerified:true,mediaDuration:3.025};
+ assert.equal(captureTiming(capture,2.95).expectedDurationSeconds,3.025);
+ assert.throws(()=>captureTiming({...capture,endVerified:false},2.95),/timing could not/);
+});

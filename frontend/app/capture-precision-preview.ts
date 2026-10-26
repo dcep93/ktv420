@@ -1,3 +1,4 @@
+import mp3 from '@audio/encode-mp3';
 import hookUrl from '../../extension/src/page/spotifyHooks.js?url';
 import workletUrl from '../../extension/src/page/pcmWorklet.js?url';
 import {encodeFloat32Wav} from './src/features/local/audio/wav';
@@ -11,10 +12,21 @@ function command(command:string,payload={}){return new Promise<CaptureResult>((r
 document.querySelector('#run')!.addEventListener('click',async()=>{
  try{
   result.textContent='Testing…';await command('listening-enable',{enabled:true});
-  const sampleRate=48000,frames=Math.round(sampleRate*3.137),left=new Float32Array(frames),right=new Float32Array(frames);
+  const compressed=document.querySelector<HTMLInputElement>('#mp3-test')!.checked;
+  const sampleRate=compressed?44100:48000,frames=Math.round(sampleRate*3.137),left=new Float32Array(frames),right=new Float32Array(frames);
   // Known leading silence followed by a ramp exposes both lost and inserted samples.
   for(let i=0;i<frames;i++){left[i]=i<1024?0:.1+.4*i/frames;right[i]=i<1024?0:-.1-.3*i/frames;}
-  audio.src=URL.createObjectURL(new Blob([encodeFloat32Wav({left,right,sampleRate},2)],{type:'audio/wav'}));
+  let blob=new Blob([encodeFloat32Wav({left,right,sampleRate},2)],{type:'audio/wav'});
+  if(compressed){
+   const encoder=await mp3({sampleRate,channels:2,bitrate:320});
+   try { const body=new Blob([new Uint8Array(encoder.encode([left,right])),new Uint8Array(encoder.flush())],{type:'audio/mpeg'});const head=encoder.head!();blob=new Blob([new Uint8Array(head),body.slice(head.length)],{type:'audio/mpeg'}); }
+   finally {encoder.free();}
+  }
+  const referenceContext=new AudioContext();
+  const reference=await referenceContext.decodeAudioData(await blob.arrayBuffer());
+  const referenceLeft=reference.getChannelData(0),referenceRight=reference.getChannelData(1);
+  await referenceContext.close();
+  audio.src=URL.createObjectURL(blob);
   await new Promise(resolve=>audio.addEventListener('canplaythrough',resolve,{once:true}));
   audio.currentTime=1;await new Promise(resolve=>audio.addEventListener('seeked',resolve,{once:true}));
   const bridge={command};
@@ -29,8 +41,8 @@ document.querySelector('#run')!.addEventListener('click',async()=>{
   await new Promise(resolve=>audio.addEventListener('ended',resolve,{once:true}));
   const capture=await command('capture-finish');const pcm=new Float32Array(capture.bytesBuffer);
   const first=pcm.findIndex(value=>Math.abs(value)>.001);let last=pcm.length-1;while(last>=0&&Math.abs(pcm[last])<.001)last--;
-  let maxError=0;for(let i=0;i<Math.min(frames,pcm.length/2);i++){maxError=Math.max(maxError,Math.abs(left[i]-pcm[i*2]),Math.abs(right[i]-pcm[i*2+1]));}
+  let maxError=0;for(let i=0;i<Math.min(reference.length,pcm.length/2);i++){maxError=Math.max(maxError,Math.abs(referenceLeft[i]-pcm[i*2]),Math.abs(referenceRight[i]-pcm[i*2+1]));}
   let audit;try{audit=captureTiming(capture,audio.duration);}catch(e){audit=String(e);}
-  result.textContent=JSON.stringify({start:start.target,rate:capture.sampleRate,frames:pcm.length/2,duration:pcm.length/2/capture.sampleRate,firstSignalFrame:first/2,lastSignalFrame:Math.floor(last/2),firstLeft:pcm[first],lastLeft:pcm[last-1],invalid:capture.invalid,invalidReason:capture.invalidReason,maxError,expectedFrames:frames,audit},null,2);
+  result.textContent=JSON.stringify({start:start.target,rate:capture.sampleRate,frames:pcm.length/2,duration:pcm.length/2/capture.sampleRate,firstSignalFrame:first/2,lastSignalFrame:Math.floor(last/2),firstLeft:pcm[first],lastLeft:pcm[last-1],invalid:capture.invalid,invalidReason:capture.invalidReason,maxError,expectedFrames:reference.length,mediaDuration:audio.duration,referenceDuration:reference.duration,audit},null,2);
  }catch(e){result.textContent=String(e);}
 });

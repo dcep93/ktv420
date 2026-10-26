@@ -434,7 +434,6 @@ export class CaptureOrchestrator extends EventTarget {
     const sourceAtStart = initialState.source;
     const duration = safeDuration(initialState);
     let lastMediaTime = safeCurrentTime(initialState);
-    let pauseStartedAt = null;
     let ignoredNetworkTrackId = null;
     this.updateCaptureProgress(item, initialState);
 
@@ -474,13 +473,6 @@ export class CaptureOrchestrator extends EventTarget {
           duration,
           reason: "media-ended"
         };
-      }
-
-      if (mediaState.paused && !mediaState.ended) {
-        pauseStartedAt ??= now;
-        // A remote pause is ordinary transport, not a failed recording.
-      } else {
-        pauseStartedAt = null;
       }
 
       if (currentTime + END_TOLERANCE_SECONDS < lastMediaTime) {
@@ -532,13 +524,8 @@ export class CaptureOrchestrator extends EventTarget {
       }
 
       this.updateCaptureProgress(item, mediaState, now);
-      if (mediaState.paused && isAtEnd(currentTime, duration)) {
-        return {
-          endMediaTime: Math.min(currentTime || lastMediaTime, duration),
-          duration,
-          reason: "paused-at-end"
-        };
-      }
+      // Pausing near the end is still a pause. Wait for ended/transition rather
+      // than finalizing early and discarding the last few milliseconds.
 
       await delay(100);
     }
@@ -558,6 +545,8 @@ export class CaptureOrchestrator extends EventTarget {
       channelCount: capture.channelCount,
       startMediaTime: capture.startMediaTime,
       startVerified: capture.startVerified,
+      endVerified: capture.endVerified,
+      mediaDuration: capture.mediaDuration,
       rawCapturedFrames: capture.rawCapturedFrames,
       invalid: capture.invalid,
       invalidReason: capture.invalidReason

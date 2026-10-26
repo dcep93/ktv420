@@ -145,3 +145,26 @@ test('capture deduplicates playlist positions without renumbering its track snap
   const queue=await runner.preflightQueue({events:[]},null,[{...item,rowIndex:0},{...item,rowIndex:2},{trackId:'other',trackName:'Other',rowIndex:3}]);
   assert.deepEqual(queue.map(t=>[t.trackId,t.rowIndex]),[['actual-track',0],['other',3]]);
 });
+
+test('a pause 25 ms before the end waits for resume and natural completion', async t => {
+  mockPage(t);
+  window.setTimeout = callback => callback();
+  const states = [
+    { source: 'audio', currentTime: 9.9, duration: 10 },
+    { source: 'audio', currentTime: 9.975, duration: 10, paused: true },
+    { source: 'audio', currentTime: 9.99, duration: 10, paused: false },
+    { source: 'audio', currentTime: 10, duration: 10, ended: true },
+  ];
+  const runner = new CaptureOrchestrator({ bridge: {
+    command: async () => states.shift(), getSnapshot: () => ({}),
+  } });
+  const result = await runner.recordUntilBoundary(item, {}, { events: [] });
+  assert.equal(result.reason, 'media-ended');
+  assert.equal(states.length, 0);
+});
+
+test('batch normalization preserves natural-end proof for the storage audit', () => {
+  const { runner } = recorder();
+  const capture = runner.normalizePageCapture({bytesBuffer:new ArrayBuffer(8),endVerified:true});
+  assert.equal(capture.endVerified,true);
+});

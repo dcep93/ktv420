@@ -459,6 +459,7 @@
         this.abort(); throw new Error('Spotify moved before recording was armed. Retry this song.');
       }
       this.startVerified = requireStart;
+      this.sourceAtStart = getMediaSource(this.element);
       this.chunks = [];
       this.byteLength = 0;
       this.channelCount = 2;
@@ -500,13 +501,28 @@
     async finish() {
       this.pauseAt();
       await this.graph.flush();
+      // A short container duration mismatch is safe only if every audio-clock
+      // interval was delivered, including its first and final blocks.
+      if (this.intervals.some(interval => (interval.lastFrame ?? interval.start) !== interval.end)) {
+        this.invalidate('Audio samples were missed at the end of recording.');
+      }
       this.capturing = false;
       this.graph.consumers.delete(this);
       this.element.removeEventListener('ratechange', this.onRate);
       this.element.removeEventListener('seeking', this.onSeek);
       this.element.removeEventListener('ended', this.onEnded);
       const rawCapturedFrames = this.byteLength / (this.channelCount * 4);
-      const expectedFrames = Math.round(this.duration * this.sampleRate);
+      const endVerified = this.ended && this.endState?.source === this.sourceAtStart;
+      // Chromium may refine compressed duration after playback starts. Freeze
+      // the completed source's final duration before Spotify reuses its element.
+      const mediaDuration = endVerified ? this.endState.duration : this.duration;
+      const expectedFrames = Math.round(mediaDuration * this.sampleRate);
+      // Compressed media duration is not decoded PCM length. Chromium can report
+      // an MP3 ~25 ms longer than the audio it actually plays (codec padding).
+      // Accept at most 50 ms only at a natural end with uninterrupted PCM; keep
+      // the actual samples, never pad the recording to the container duration.
+      const shortAtNaturalEnd = endVerified && rawCapturedFrames > 0 &&
+        expectedFrames - rawCapturedFrames <= Math.ceil(this.sampleRate * .05);
       // The ended event runs on the main thread: a busy tab can keep receiving
       // silent worklet blocks long after the last sample. Length alone cannot
       // distinguish that harmless tail from extra/misaligned music. Check every
@@ -516,12 +532,12 @@
         const excess = rawCapturedFrames - expectedFrames;
         if (!Number.isSafeInteger(expectedFrames) || expectedFrames <= 0) {
           this.invalidate('Spotify did not provide a valid song duration.');
-        } else if (excess < 0) {
+        } else if (excess < 0 && !shortAtNaturalEnd) {
           this.invalidate(`Recording is ${(-excess / this.sampleRate).toFixed(3)} seconds short.`);
         } else if (excess > 0 && (!this.tailIsSilent(expectedFrames) ||
             (excess > this.sampleRate * .05 && !this.ended))) {
           this.invalidate(`Recording has ${(excess / this.sampleRate).toFixed(3)} seconds of unverified extra audio.`);
-        } else this.byteLength = expectedFrames * this.channelCount * 4;
+        } else if (excess > 0) this.byteLength = expectedFrames * this.channelCount * 4;
       }
       const bytes = new Uint8Array(this.byteLength);
       let offset = 0;
@@ -540,6 +556,8 @@
         channelCount: this.channelCount,
         startMediaTime: this.startMediaTime,
         startVerified: this.startVerified,
+        endVerified: endVerified && !this.invalid,
+        mediaDuration,
         rawCapturedFrames,
         invalid: this.invalid,
         invalidReason: this.invalidReason || ''
@@ -574,7 +592,7 @@
       for (const interval of this.intervals) {
         const from = Math.max(message.frame, interval.start), to = Math.min(end, interval.end);
         if (to <= from) continue;
-        if (interval.lastFrame !== undefined && from !== interval.lastFrame) {
+        if (from !== (interval.lastFrame ?? interval.start)) {
           this.invalidate('Audio samples were missed or repeated during recording.'); return;
         }
         interval.lastFrame = to;
@@ -582,7 +600,12 @@
         if (this.byteLength + part.byteLength > 1024*1024*1024) { this.invalidate('Recording exceeded the local size limit.'); return; }
         this.chunks.push(part); this.byteLength += part.byteLength;
       }
-      while (this.intervals.length && this.intervals[0].end <= end) this.intervals.shift();
+      while (this.intervals.length && this.intervals[0].end <= end) {
+        const interval = this.intervals.shift();
+        if ((interval.lastFrame ?? interval.start) !== interval.end) {
+          this.invalidate('Audio samples were missed or repeated during recording.'); return;
+        }
+      }
     }
   }
 

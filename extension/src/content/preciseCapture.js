@@ -41,6 +41,11 @@ export async function startPreciseCapture({ bridge, trackId, checkCancelled = ()
 }
 
 export function captureTiming(capture, duration) {
+  // The initial duration is provisional for compressed streams. Only use the
+  // final snapshot from the same source after a verified natural completion.
+  if (capture.endVerified === true && Number.isFinite(capture.mediaDuration) && capture.mediaDuration > 0) {
+    duration = capture.mediaDuration;
+  }
   const frames = capture.byteLength / (capture.channelCount * 4);
   const seconds = frames / capture.sampleRate;
   const difference = seconds - duration;
@@ -52,10 +57,15 @@ export function captureTiming(capture, duration) {
   } else if (![1, 2].includes(capture.channelCount) || !Number.isFinite(capture.sampleRate) || capture.sampleRate <= 0 ||
       !Number.isSafeInteger(frames) || !Number.isFinite(duration) || duration <= 0 || !Number.isFinite(seconds) || seconds <= 0) {
     reason = 'The recorded audio or song duration is invalid.';
-  } else if (frames !== Math.round(duration * capture.sampleRate)) {
+  } else if (frames !== Math.round(duration * capture.sampleRate) &&
+      // This is a container/decoder discrepancy only after the page collector
+      // verifies natural completion and an unbroken stream. No early stops.
+      !(capture.endVerified === true && difference < 0 &&
+        Math.round(duration * capture.sampleRate) - frames <= Math.ceil(capture.sampleRate * .05) &&
+        capture.rawCapturedFrames === frames)) {
     reason = `Recording is ${Math.abs(difference).toFixed(3)} seconds ${difference < 0 ? 'short' : 'long'}.`;
   }
   if (reason) throw new Error(`Capture timing could not be verified: ${reason} Nothing was saved.`);
-  return { captureTimingVersion: CAPTURE_TIMING_VERSION, captureStartVerified: true,
+  return { captureTimingVersion: CAPTURE_TIMING_VERSION, captureStartVerified: true, captureEndVerified: capture.endVerified === true,
     capturedFrames: frames, rawCapturedFrames: capture.rawCapturedFrames ?? frames, expectedDurationSeconds: duration, captureDurationErrorSeconds: difference };
 }
