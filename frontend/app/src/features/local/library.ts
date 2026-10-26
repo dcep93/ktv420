@@ -116,10 +116,14 @@ export function saveMp3(id: string, files: Mp3Files, metadata: Record<string, un
     };
   });
 }
-export function deleteTrack(id: string): Promise<void> {
+export function deleteTrack(id: string): Promise<void> { return deleteTracks([id]); }
+
+export function deleteTracks(ids: string[]): Promise<void> {
   return transaction(['tracks', 'audio'], 'readwrite', (tx) => {
-    tx.objectStore('tracks').delete(id);
-    const request = tx.objectStore('audio').index('trackId').openKeyCursor(IDBKeyRange.only(id));
-    request.onsuccess = () => { const cursor = request.result; if (cursor) { tx.objectStore('audio').delete(cursor.primaryKey); cursor.continue(); } };
+    for (const id of new Set(ids)) {
+      tx.objectStore('tracks').delete(id);
+      const request = tx.objectStore('audio').index('trackId').openKeyCursor(IDBKeyRange.only(id));
+      request.onsuccess = () => { const cursor = request.result; if (cursor) { tx.objectStore('audio').delete(cursor.primaryKey); cursor.continue(); } };
+    }
   });
 }

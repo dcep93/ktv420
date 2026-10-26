@@ -1,3 +1,4 @@
+import { catalogUrl } from '../features/local/extensionConnection';
 import { bestEffortSpotify } from '../features/local/spotifySync';
 import { useReplayExport } from '../features/local/export/useReplayExport';
 import ReplayExportButton from './ReplayExportButton';
@@ -471,7 +472,7 @@ export default function LibraryPage() {
         </div>
       </section>
       <section className="iframe-settings-source">
-        <header className="iframe-settings-source-header"><h2>Local audio</h2><span>{size(tracks.reduce((total, track) => total + track.bytes, 0))}</span></header>
+        <header className="iframe-settings-source-header"><h2><a href={catalogUrl()} target="_blank" rel="noreferrer">Local audio</a></h2><span>{size(tracks.reduce((total, track) => total + track.bytes, 0))}</span></header>
         <div className="iframe-audio-cleanup">
           {confirmDeleteAll ? <>
             <span>Delete all saved songs and stems? This can’t be undone.</span>

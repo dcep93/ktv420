@@ -15,3 +15,9 @@ export function extensionMessage<T extends { ok: boolean; error?: string; versio
     });
   });
 }
+
+export function catalogUrl(): string {
+  const origin = new URLSearchParams(location.search).get('brokerOrigin') || '';
+  const id = /^chrome-extension:\/\/[a-p]{32}$/.test(origin) ? origin.slice('chrome-extension://'.length) : '';
+  return `https://ktv420.web.app/catalog${id && id !== STORE_ID ? `?extension=${id}` : ''}`;
+}

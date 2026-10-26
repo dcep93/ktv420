@@ -1,3 +1,4 @@
+import { deleteCollectionAudio } from './catalogDeletion';
 import { savedCollections, setCaptureContext } from './collectionRegistry';
 import { parseRecording } from '../features/local/recording';
 import { claimListeningLease } from './listeningLease';
@@ -52,13 +53,18 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
   return true;
 });
 
-// Top-level website pages can hand off recordings or read collection metadata, never audio.
+// Top-level website pages can hand off recordings, read catalog metadata, or delete a registered collection’s audio. They cannot read audio.
 chrome.runtime.onMessageExternal.addListener((message: unknown, sender, respond) => {
   let url: URL;
   try { url = new URL(sender.url || ''); } catch { return false; }
   if (url.origin !== 'https://ktv420.web.app' || !['/replay', '/catalog', '/saved'].includes(url.pathname.replace(/\/$/,'')) || (sender.frameId !== undefined && sender.frameId !== 0) ||
     !message || typeof message !== 'object' || !('type' in message)) return false;
   if (['/catalog', '/saved'].includes(url.pathname.replace(/\/$/,''))) {
+    if (url.pathname.replace(/\/$/,'') === '/catalog' && message.type === 'ktv420:delete-collection-audio') {
+      if (!('path' in message) || !('confirmed' in message) || message.confirmed !== true) return false;
+      void deleteCollectionAudio(message.path, navigator.locks).then(() => respond({ ok: true }), error => respond({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+      return true;
+    }
     if (message.type !== 'ktv420:saved-collections') return false;
     void savedCollections().then(collections => respond({ ok: true, collections }), error => respond({ ok: false, error: String(error) }));
     return true;

@@ -14,3 +14,16 @@
 .saved-copy strong { font-size: 1.2rem; overflow-wrap: anywhere; }
 .saved-arrow { margin-left: auto; color: #ff7bc3; font-size: 1.5rem; }
 .saved-empty nav { display: flex; align-items: center; gap: 24px; }
+
+.saved-row { display: flex; align-items: stretch; gap: 12px; }
+.saved-row > a { flex: 1; min-width: 0; }
+.saved-delete { align-self: center; display: grid; place-items: center; width: 44px; height: 44px; padding: 10px; border: 1px solid var(--ww-border); border-radius: 12px; background: transparent; color: var(--ww-text-muted); cursor: pointer; }
+.saved-delete svg { width: 22px; height: 22px; }
+.saved-delete:hover:not(:disabled), .saved-delete:focus-visible { color: var(--ww-title-pink); border-color: var(--ww-title-pink); }
+.saved-delete:disabled { opacity: .35; cursor: default; }
+.saved-confirm { padding: 0 22px 18px; }
+.saved-confirm p { font-size: .95rem; line-height: 1.5; }
+.saved-confirm > div { display: flex; gap: 12px; }
+.saved-confirm button { padding: 10px 16px; border: 1px solid var(--ww-border); border-radius: 10px; background: var(--ww-panel-soft); color: inherit; font: inherit; cursor: pointer; }
+.saved-confirm .saved-delete-confirm, .saved-confirm [role="alert"] { color: var(--ww-title-pink); }
+.saved-confirm button:disabled { opacity: .5; cursor: wait; }

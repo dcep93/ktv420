@@ -31,6 +31,11 @@ test('external handoff restricts origin/frame, validates files, persists before 
   assert.equal(external!(listSaved,untrusted,()=>assert.fail('registry disclosed to wrong page/frame')),false);
  }
  for(const type of ['read-audio','ktv420:open-replay','ktv420:register-collection']) assert.equal(external!({type},savedSender,()=>assert.fail('Saved page gained write/audio access')),false);
+ for (const source of [sender,{...savedSender,frameId:2},{...savedSender,url:'https://evil.example/catalog'},{...savedSender,url:'https://ktv420.web.app/saved'}]) {
+  assert.equal(external!({type:'ktv420:delete-collection-audio',path:`playlist/${id}`,confirmed:true},source,()=>assert.fail('untrusted deletion')),false);
+ }
+ assert.equal(external!({type:'ktv420:delete-collection-audio',path:`playlist/${id}`},savedSender,()=>assert.fail('unconfirmed deletion')),false);
+ assert.equal((await call(external!,{type:'ktv420:delete-collection-audio',path:'../audio',confirmed:true},savedSender)).ok,false);
  const summary=await new Promise(resolve=>external!(listSaved,savedSender,resolve));
  assert.deepEqual(summary,{ok:true,collections:[]});
  assert.deepEqual(await new Promise(resolve=>external!(listSaved,{...savedSender,url:'https://ktv420.web.app/saved'},resolve)),{ok:true,collections:[]});
