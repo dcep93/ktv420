@@ -7,7 +7,7 @@ const saved: MixerSnapshot = {
   tempo:1.24,pitch:-3,visualizer:'stem-garden',
   spotlight:{intent:{kind:'output',name:'vocals.mp3'},level:'track-with-selectors'},
   stems:[
-    {name:'vocals.mp3',input:false,volume:.42,mute:false,deafen:true,effect:'reverb',value:.81,effectSettings:{bypass:true,bpm:128,beats:1}},
+    {name:'vocals.mp3',input:false,volume:.42,mute:false,deafen:false,locked:true,effect:'reverb',value:.81,effectSettings:{bypass:true,bpm:128,beats:1}},
     {name:'drums.mp3',input:false,volume:.7,mute:true,deafen:false,effect:'chorus',value:.2},
     {name:'original.mp3',input:true,volume:.1,mute:true,deafen:false,effect:'wah',value:.5},
   ],
@@ -16,7 +16,7 @@ test('new songs inherit every mixer choice by stem identity, independent of orde
   const next=settingsForTracks(saved,[
     {name:'drums.mp3',isInput:false},{name:'vocals.mp3',isInput:false},{name:'original.mp3',isInput:true},
   ]);
-  assert.deepEqual(next,{...saved,stems:[saved.stems[1],saved.stems[0],saved.stems[2]]});
+  assert.deepEqual(next,{...saved,stems:[saved.stems[1],saved.stems[0],saved.stems[2]].map(stem=>({...stem,locked:stem.locked ?? false}))});
   next.stems[1].volume=1;
   next.stems[1].effectSettings!.bpm=140;
   assert.equal(saved.stems[0].effectSettings!.bpm,128);
@@ -37,4 +37,15 @@ test('first song uses normal defaults and input spotlight survives new input fil
   assert.equal(first.tempo,1);assert.equal(first.pitch,0);assert.equal(first.spotlight,null);
   const next=settingsForTracks({...saved,spotlight:{intent:{kind:'input'},level:'track'}},tracks);
   assert.deepEqual(next.spotlight,{intent:{kind:'input'},level:'track'});
+});
+
+test('locks default off and old solo settings become visible mute states without moving faders',()=>{
+  const rows=[{name:'vocals.mp3',isInput:false},{name:'drums.mp3',isInput:false},{name:'original.mp3',isInput:true}];
+  assert.ok(settingsForTracks(null,rows).stems.every(stem=>stem.locked===false));
+  const old=structuredClone(saved);old.stems[0].deafen=true;old.stems[1].mute=false;
+  const migrated=settingsForTracks(old,rows);
+  assert.deepEqual(migrated.stems.map(stem=>stem.mute),[false,true,true]);
+  assert.ok(migrated.stems.every(stem=>!stem.deafen));
+  assert.deepEqual(migrated.stems.map(stem=>stem.volume),old.stems.map(stem=>stem.volume));
+  assert.equal(old.stems[0].deafen,true,'migration does not rewrite historical recording input');
 });

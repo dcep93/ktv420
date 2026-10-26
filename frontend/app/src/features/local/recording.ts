@@ -5,7 +5,7 @@ export const MAX_RECORDING_BYTES = 4 * 1024 * 1024;
 export type MixerSnapshot = {
   tempo?: number; pitch?: number;
   visualizer: string;
-  stems: { name: string; input: boolean; volume: number; mute: boolean; deafen: boolean; effect: string; value: number; effectSettings?: EffectSettings }[];
+  stems: { name: string; input: boolean; volume: number; mute: boolean; deafen: boolean; locked?: boolean; effect: string; value: number; effectSettings?: EffectSettings }[];
   spotlight: { intent: { kind: 'input' | 'output'; name?: string }; level: 'track' | 'track-with-selectors' } | null;
 };
 export type PerformanceEvent = {
@@ -27,6 +27,7 @@ export function validSnapshot(v: unknown): v is MixerSnapshot {
   for (const s of v.stems) {
     if (!object(s) || !str(s.name, 100) || names.has(s.name) || typeof s.input !== 'boolean' || !finite(s.volume, 2) ||
       typeof s.mute !== 'boolean' || typeof s.deafen !== 'boolean' || !str(s.effect, 40) || !finite(s.value, 1)) return false;
+    if (s.locked !== undefined && typeof s.locked !== 'boolean') return false;
     if (s.effectSettings !== undefined && !validEffectSettings(s.effectSettings)) return false;
     names.add(s.name);
   }

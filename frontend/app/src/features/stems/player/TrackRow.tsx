@@ -9,7 +9,7 @@ type TrackRowProps = {
   seekable?: boolean;
   volume: number;
   isMuted: boolean;
-  isDeafened: boolean;
+  isLocked: boolean;
   effectType: AudioEffectType;
   effectValue: number;
   effectOptions: AudioEffectOption[];
@@ -21,7 +21,7 @@ type TrackRowProps = {
   onEffectTypeChange: (trackId: string, value: AudioEffectType) => void;
   onResetEffect: (trackId: string) => void;
   onToggleMute: (trackId: string) => void;
-  onToggleDeafen: (trackId: string) => void;
+  onToggleLock: (trackId: string) => void;
   isSpotlighted: boolean;
   onToggleSpotlight: () => void;
   registerCanvas: (canvas: HTMLCanvasElement | null) => void;
@@ -34,7 +34,7 @@ export function TrackRow({
   seekable = false,
   volume,
   isMuted,
-  isDeafened,
+  isLocked,
   effectType,
   effectValue,
   effectOptions, effectSettings, onEffectSettingsChange,
@@ -44,7 +44,7 @@ export function TrackRow({
   onEffectTypeChange,
   onResetEffect,
   onToggleMute,
-  onToggleDeafen,
+  onToggleLock,
   isSpotlighted,
   onToggleSpotlight,
   registerCanvas,
@@ -145,13 +145,17 @@ export function TrackRow({
           </button>
           <button
             type="button"
-            onClick={() => onToggleDeafen(track.id)}
-            style={controlButtonStyle(isDeafened)}
-            aria-pressed={isDeafened}
-            aria-label={isDeafened ? "Undeafen" : "Deafen"}
-            title={isDeafened ? "Undeafen" : "Deafen"}
+            onClick={() => onToggleLock(track.id)}
+            style={controlButtonStyle(isLocked)}
+            aria-pressed={isLocked}
+            aria-label={`${isLocked ? "Unlock" : "Lock"} ${label} volume`}
+            title={isLocked ? "Unlock" : "Lock"}
           >
-            {isDeafened ? "🎧" : "🎧"}
+            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{verticalAlign:'middle'}}>
+              <rect x="5" y="10" width="14" height="11" rx="2" />
+              <path d={isLocked ? 'M8 10V7a4 4 0 0 1 8 0v3' : 'M8 10V7a4 4 0 0 1 8 0'} />
+              <path d="M12 14v3" />
+            </svg>
           </button>
         </div>
         <div className="stem-effect-controls">

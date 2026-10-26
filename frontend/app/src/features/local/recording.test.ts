@@ -43,3 +43,15 @@ test('track changes must precede their automation and carry a starting snapshot'
  assert.equal(parseRecording(r).tracks.length,2);
  delete r.events[7].snapshot;assert.throws(()=>parseRecording(r));
 });
+
+test('recordings preserve optional locks and all resulting slider positions without relinking',()=>{
+  const mix=structuredClone(recording());
+  const state=mix.events[2].snapshot!;
+  state.stems[0].locked=true;state.stems[0].volume=1.4;
+  state.stems.push({...state.stems[0],name:'drums.mp3',locked:false,volume:.6});
+  const parsed=parseRecordingText(JSON.stringify(mix));
+  assert.deepEqual(parsed.events[2].snapshot,state);
+  assert.doesNotThrow(()=>parseRecording(recording()),'old snapshots without locks remain valid');
+  const invalid=JSON.parse(JSON.stringify(mix));invalid.events[2].snapshot.stems[0].locked='true';
+  assert.throws(()=>parseRecording(invalid));
+});

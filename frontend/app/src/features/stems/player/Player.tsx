@@ -1,6 +1,7 @@
 import { loadPlateArtwork, musicNoteArtwork } from './visuals/plateArtwork';
 import { CombinedVisualizerPanel } from './CombinedVisualizerPanel';
 import { settingsForTracks } from './mixerSettings';
+import { linkedVolumes } from './linkedVolumes';
 import { SpotifyRemoteObserver } from '../../local/spotifySync';
 import { resizeVisualizer, canvasVisible } from './visuals/canvas';
 import { createStereoTap, type StereoTap } from './visuals/analysis';
@@ -135,6 +136,8 @@ export default function Player({
   const [trackDeafenStates, setTrackDeafenStates] = useState<
     Record<string, boolean>
   >({});
+  const [trackLockStates, setTrackLockStates] = useState<Record<string, boolean>>({});
+  const trackLockStatesRef = useRef<Record<string, boolean>>({});
   const [effectValues, setEffectValues] = useState<Record<string, number>>({});
   const [effectTypes, setEffectTypes] = useState<
     Record<string, AudioEffectType>
@@ -554,6 +557,7 @@ export default function Player({
     tempo: tempoRef.current, pitch: pitchRef.current,
     visualizer: visualizerType,
     stems: tracks.map(track => ({name:track.name,input:track.isInput,volume:volumesRef.current[track.id] ?? 1,
+      locked:trackLockStatesRef.current[track.id] ?? false,
       mute:trackMuteStatesRef.current[track.id] ?? false,deafen:trackDeafenStatesRef.current[track.id] ?? false,
       effect:effectTypesRef.current[track.id] ?? 'wah',value:effectValuesRef.current[track.id] ?? getDefaultEffectValue('wah'),effectSettings:{...(effectSettingsRef.current[track.id] ?? defaultEffectSettings)}})),
     spotlight: spotlightState,
@@ -586,6 +590,7 @@ export default function Player({
     const initialVolumes: Record<string, number> = {};
     const initialMuteStates: Record<string, boolean> = {};
     const initialDeafenStates: Record<string, boolean> = {};
+    const initialLockStates: Record<string, boolean> = {};
     const initialEffectValues: Record<string, number> = {};
     const initialEffectSettings: Record<string,EffectSettings> = {};
     const initialEffectTypes: Record<string, AudioEffectType> = {};
@@ -596,6 +601,7 @@ export default function Player({
       initialVolumes[track.id] = stem.volume;
       initialMuteStates[track.id] = stem.mute;
       initialDeafenStates[track.id] = stem.deafen;
+      initialLockStates[track.id] = stem.locked ?? false;
       initialEffectValues[track.id] = stem.value;
       initialEffectSettings[track.id] = {...(stem.effectSettings ?? defaultEffectSettings)};
       initialEffectTypes[track.id] = stem.effect as AudioEffectType;
@@ -604,6 +610,8 @@ export default function Player({
     volumesRef.current = initialVolumes;
     trackMuteStatesRef.current = initialMuteStates;
     trackDeafenStatesRef.current = initialDeafenStates;
+    trackLockStatesRef.current = initialLockStates;
+    setTrackLockStates(initialLockStates);
     effectValuesRef.current = initialEffectValues;
     effectSettingsRef.current=initialEffectSettings;setEffectSettings(initialEffectSettings);
     effectTypesRef.current = initialEffectTypes;
@@ -1248,23 +1256,18 @@ export default function Player({
   }, [handlePlayPause, selectVisualizerType, visualizerType,replaying]);
 
   const handleVolumeChange = (trackId: string, value: number) => {
-    setVolumes((previous) => ({ ...previous, [trackId]: value }));
-    applyEffectiveVolume(trackId, value);
-    queueDebouncedRecordingEvent(
-      `volume:${trackId}`,
-      createRecordingEvent("volume_change", {
-        ...getStemRecordingPayload(trackId),
-        value,
-      })
-    );
+    const previous = volumesRef.current;
+    const next = linkedVolumes(previous, trackLockStatesRef.current, tracks.map(track => track.id), trackId, value);
+    const changed = tracks.filter(track => (next[track.id] ?? 1) !== (previous[track.id] ?? 1));
+    if (!changed.length) return;
+    // Advance the source of truth before the next input event or recording snapshot.
+    volumesRef.current = next;
+    setVolumes(next);
+    for (const track of changed) applyEffectiveVolume(track.id, next[track.id]);
+    emitRecordingEvent('mixer_snapshot', {snapshot:snapshot()});
   };
 
-  const handleVolumeReset = (trackId: string) => {
-    cancelDebouncedRecordingEvent(`volume:${trackId}`);
-    setVolumes((previous) => ({ ...previous, [trackId]: 1 }));
-    applyEffectiveVolume(trackId, 1);
-    emitRecordingEvent("volume_reset", getStemRecordingPayload(trackId));
-  };
+  const handleVolumeReset = (trackId: string) => handleVolumeChange(trackId, 1);
 
   const enableEditedEffect = (trackId: string) => {
     const settings = effectSettingsRef.current[trackId];
@@ -1355,27 +1358,11 @@ export default function Player({
     });
   };
 
-  const toggleTrackDeafen = (trackId: string) => {
-    const nextValue = !trackDeafenStates[trackId];
-
-    setTrackDeafenStates((previous) => {
-      if (nextValue) {
-        setTrackMuteStates((mutePrevious) => ({
-          ...mutePrevious,
-          [trackId]: false,
-        }));
-      }
-
-      return {
-        ...previous,
-        [trackId]: nextValue,
-      };
-    });
-    applyEffectiveVolume(trackId);
-    emitRecordingEvent("deafen_toggle", {
-      ...getStemRecordingPayload(trackId),
-      value: nextValue,
-    });
+  const toggleTrackLock = (trackId: string) => {
+    const next = { ...trackLockStatesRef.current, [trackId]: !trackLockStatesRef.current[trackId] };
+    trackLockStatesRef.current = next;
+    setTrackLockStates(next);
+    emitRecordingEvent('mixer_snapshot', {snapshot:snapshot()});
   };
 
   const areTracksReady =
@@ -1416,11 +1403,11 @@ export default function Player({
   }, [transport, tracks.length, readyTrackIds.length, unavailableMessage, onPlaybackError]);
   useEffect(() => {
     if (isRecording && areTracksReady) onRecordingEventRef.current?.({type:'mixer_snapshot',trackTimeSeconds:currentPlaybackTime(),payload:{snapshot:snapshot()}});
-  }, [isRecording,areTracksReady,tempo,pitch,volumes,trackMuteStates,trackDeafenStates,effectValues,effectTypes,effectSettings,visualizerType,spotlightState,snapshot,currentPlaybackTime]);
+  }, [isRecording,areTracksReady,tempo,pitch,volumes,trackMuteStates,trackDeafenStates,trackLockStates,effectValues,effectTypes,effectSettings,visualizerType,spotlightState,snapshot,currentPlaybackTime]);
 
   useEffect(() => {
     if (areTracksReady && !replaying) onSettingsChange?.(snapshot());
-  }, [areTracksReady, replaying, onSettingsChange, snapshot, tempo, pitch, volumes, trackMuteStates, trackDeafenStates, effectValues, effectTypes, effectSettings]);
+  }, [areTracksReady, replaying, onSettingsChange, snapshot, tempo, pitch, volumes, trackMuteStates, trackDeafenStates, trackLockStates, effectValues, effectTypes, effectSettings]);
 
   useEffect(() => {
     onControls?.({
@@ -1431,12 +1418,16 @@ export default function Player({
       apply:value => {
         applyTempoPitch(value.tempo ?? 1, value.pitch ?? 0);
         if (!supportsVisualizer(value.visualizer) || value.stems.length !== tracks.length) throw new Error('Recording requires an unsupported mixer layout.');
+        const locks: Record<string,boolean> = {};
+        const legacySolo = value.stems.some(stem => stem.deafen);
         const v: Record<string,number> = {}, m: Record<string,boolean> = {}, d: Record<string,boolean> = {}, e: Record<string,AudioEffectType> = {}, x: Record<string,number> = {}, options: Record<string,EffectSettings> = {};
         for (const track of tracks) {
           const stem = value.stems.find(stem => stem.name === track.name && stem.input === track.isInput);
           if (!stem || !isAudioEffect(stem.effect)) throw new Error('Recording requires a different stem or effect version.');
-          v[track.id]=stem.volume; m[track.id]=stem.mute; d[track.id]=stem.deafen; e[track.id]=stem.effect as AudioEffectType; x[track.id]=stem.value;options[track.id]={...(stem.effectSettings ?? defaultEffectSettings)};
+          locks[track.id]=stem.locked ?? false;
+          v[track.id]=stem.volume; m[track.id]=stem.mute || (legacySolo && !stem.deafen); d[track.id]=false; e[track.id]=stem.effect as AudioEffectType; x[track.id]=stem.value;options[track.id]={...(stem.effectSettings ?? defaultEffectSettings)};
         }
+        trackLockStatesRef.current=locks;setTrackLockStates(locks);
         effectSettingsRef.current=options;setEffectSettings(options);
         volumesRef.current=v; trackMuteStatesRef.current=m; trackDeafenStatesRef.current=d; effectTypesRef.current=e; effectValuesRef.current=x;
         setVolumes(v);setTrackMuteStates(m);setTrackDeafenStates(d);setEffectTypes(e);setEffectValues(x);
@@ -1778,7 +1769,7 @@ export default function Player({
                 seekable={visualizerType === "time-ribbon" || visualizerType === "super-time-ribbon"}
                 volume={volumes[track.id] ?? 1}
                 isMuted={!!trackMuteStates[track.id]}
-                isDeafened={!!trackDeafenStates[track.id]}
+                isLocked={!!trackLockStates[track.id]}
                 effectType={effectTypes[track.id] ?? "wah"}
                 effectValue={
                   effectValues[track.id] ??
@@ -1793,7 +1784,7 @@ export default function Player({
                 onEffectTypeChange={handleEffectTypeChange}
                 onResetEffect={handleEffectReset}
                 onToggleMute={toggleTrackMute}
-                onToggleDeafen={toggleTrackDeafen}
+                onToggleLock={toggleTrackLock}
                 isSpotlighted={spotlightTrackId === track.id}
                 onToggleSpotlight={() => { if (!isCombinedVisualizer(visualizerType)) toggleTrackSpotlight(track); }}
                 registerCanvas={(ref) => {
