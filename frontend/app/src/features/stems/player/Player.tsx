@@ -202,7 +202,7 @@ export default function Player({
           return a.name.localeCompare(b.name);
         }
 
-        return a.isInput ? 1 : -1;
+        return a.isInput ? -1 : 1;
       });
   }, [record]);
 
@@ -1802,7 +1802,6 @@ export default function Player({
       </div>
       {tracks.length ? (
         <>
-          {isCombinedVisualizer(visualizerType) && <CombinedVisualizerPanel type={visualizerType} canvasRef={combinedCanvas} />}
           <div className="player-track-list" style={{ marginTop: "1rem" }}>
             {tracks.map((track) => (
               <TrackRow
@@ -1837,6 +1836,7 @@ export default function Player({
               />
             ))}
           </div>
+          {isCombinedVisualizer(visualizerType) && <CombinedVisualizerPanel type={visualizerType} canvasRef={combinedCanvas} />}
           <div
             className="player-visualizer-picker"
             hidden={!shouldShowVisualizerPicker}
