@@ -390,7 +390,8 @@
       },
       state() {
         assertCapture(currentCapture);
-        return currentCapture.endState || describeMediaElement(currentCapture.element);
+        return { ...(currentCapture.endState || describeMediaElement(currentCapture.element)),
+          invalid: currentCapture.invalid, invalidReason: currentCapture.invalidReason || '' };
       },
       async finish() {
         assertCapture(currentCapture);
@@ -429,7 +430,15 @@
       this.duration = element.duration;
       this.invalid = false;
       this.intervals = [];
-      this.onSeek = () => { if (this.capturing && !this.ended) this.invalidate('Spotify changed position during recording.'); };
+      this.playbackStarted = false;
+      this.onSeek = () => {
+        if (!this.capturing || this.ended) return;
+        // A repeated seek to zero while still armed and paused cannot remove
+        // audio: playback has never started. Recheck zero before first play.
+        if (this.startVerified && !this.playbackStarted && element.paused &&
+            element.currentTime === 0 && getMediaSource(element) === this.sourceAtStart) return;
+        this.invalidate(`Spotify changed position during recording (song position ${safeMediaTime(element).toFixed(3)}s; ${(this.context.currentTime - this.armedAt).toFixed(3)}s after capture began).`);
+      };
       this.ended = false;
       this.endState = null;
       this.onEnded = () => {
@@ -471,12 +480,18 @@
       this.byteLength = 0;
       this.channelCount = 2;
       this.startMediaTime = safeMediaTime(this.element);
+      this.armedAt = this.context.currentTime;
       this.capturing = true;
       if (!this.element.paused) this.resumeAt();
     }
 
     resumeAt() {
       if (!this.capturing || this.ended || this.intervals.at(-1)?.end === Infinity) return;
+      if (this.startVerified && !this.playbackStarted && (this.element.seeking || this.element.currentTime !== 0 ||
+          getMediaSource(this.element) !== this.sourceAtStart)) {
+        this.invalidate('Spotify moved before recording playback began.');
+      }
+      this.playbackStarted = true;
       this.intervals.push({ start: Math.round(this.context.currentTime * this.sampleRate), end: Infinity });
     }
 

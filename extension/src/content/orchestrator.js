@@ -450,6 +450,9 @@ export class CaptureOrchestrator extends EventTarget {
       this.throwIfStopped();
       const now = performance.now();
       const mediaState = await this.bridge.command("capture-state");
+      if (mediaState.invalid) {
+        throw new Error(`Capture timing could not be verified: ${mediaState.invalidReason || 'The recording was interrupted.'} Nothing was saved.`);
+      }
       const currentSource = mediaState.source;
       const currentTime = safeCurrentTime(mediaState);
 

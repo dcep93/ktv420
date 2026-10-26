@@ -497,3 +497,43 @@ test('audio beyond the duration still requires natural completion and an intact 
     assert.equal(capture.endVerified,false,issue);
   }
 });
+
+test('armed zero-position seek is harmless only before any playback and on the same source', async () => {
+  const h = harness([{ src: 'song', paused: true, duration: 2 / 44100 }]);
+  await h.command('capture-begin', { requireStart: true, expectedSource: 'song' });
+  const song = h.elements[0];
+  song.seeking = true; song.dispatch('seeking');
+  assert.equal((await h.command('capture-state')).result.invalid, false);
+  song.seeking = false;
+  await song.play();
+  const signal = new Float32Array([.5, -.5, .25, -.25]);
+  h.ports[0].onmessage({ data: { frame: 0, channelCount: 2, bytesBuffer: signal.buffer } });
+  h.contexts[0].currentTime = 2 / 44100;
+  song.currentTime = song.duration; song.ended = true; song.dispatch('ended');
+  const result = (await h.command('capture-finish')).result;
+  assert.equal(result.invalid, false);
+  assert.deepEqual([...new Float32Array(result.bytesBuffer)], [...signal]);
+  assert.equal(result.endVerified, true);
+});
+
+test('actual seeks, unresolved startup seeks and later returns to zero remain invalid', async () => {
+  for (const scenario of ['nonzero', 'source', 'unsettled', 'playing', 'paused-after-playing']) {
+    const h = harness([{ src: 'song', paused: true }]);
+    await h.command('capture-begin', { requireStart: true, expectedSource: 'song' });
+    const song = h.elements[0];
+    if (scenario === 'nonzero') song.currentTime = .001;
+    if (scenario === 'source') song.src = 'replacement';
+    if (scenario === 'playing' || scenario === 'paused-after-playing') {
+      await song.play(); h.contexts[0].currentTime = 5;
+      if (scenario === 'paused-after-playing') song.pause();
+    }
+    song.seeking = true; song.dispatch('seeking');
+    if (scenario === 'unsettled') await song.play();
+    const state = (await h.command('capture-state')).result;
+    assert.equal(state.invalid, true, scenario);
+    assert.match(state.invalidReason, /Spotify (changed position|moved before)/);
+    if (scenario === 'playing') assert.match(state.invalidReason, /5\.000s after capture began/);
+    const result = (await h.command('capture-finish')).result;
+    assert.equal(result.invalid, true, scenario);
+  }
+});

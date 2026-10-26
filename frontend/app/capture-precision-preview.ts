@@ -33,7 +33,13 @@ document.querySelector('#run')!.addEventListener('click',async()=>{
   const start=await startPreciseCapture({bridge,trackId:'test',readTransport:()=>({trackId:'test'}),transport:async c=>{
    if(c.action==='pause')audio.pause();
    if(c.action==='seek'){audio.currentTime=0;await new Promise(resolve=>audio.addEventListener('seeked',resolve,{once:true}));}
-   if(c.action==='play')await audio.play();
+   if(c.action==='play'){
+    if(document.querySelector<HTMLInputElement>('#zero-seek-test')!.checked){
+     const settled=new Promise(resolve=>audio.addEventListener('seeked',resolve,{once:true}));
+     audio.currentTime=0;await settled;
+    }
+    await audio.play();
+   }
   }});
   if(document.querySelector<HTMLInputElement>('#busy-test')!.checked)setTimeout(()=>{const until=performance.now()+200;while(performance.now()<until){ /* simulate main-thread contention */ }},1800);
   if(document.querySelector<HTMLInputElement>('#end-delay-test')!.checked)setTimeout(()=>{const until=performance.now()+350;while(performance.now()<until){ /* delay ended event delivery */ }},3050);

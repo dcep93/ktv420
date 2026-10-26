@@ -168,3 +168,16 @@ test('batch normalization preserves natural-end proof for the storage audit', ()
   const capture = runner.normalizePageCapture({bytesBuffer:new ArrayBuffer(8),endVerified:true});
   assert.equal(capture.endVerified,true);
 });
+
+test('invalid capture reports its first failure immediately instead of waiting until song end', async () => {
+  const states = [
+    { source: 'song', currentTime: 0, duration: 180 },
+    { source: 'song', currentTime: 5, duration: 180, invalid: true,
+      invalidReason: 'Spotify changed position during recording (song position 5.000s; 0.200s after capture began).' },
+  ];
+  const runner = new CaptureOrchestrator({ bridge: {
+    command: async () => { assert.ok(states.length, 'must stop polling after invalidation'); return states.shift(); },
+    getSnapshot: () => { throw new Error('must report invalid capture before other playback handling'); },
+  } });
+  await assert.rejects(runner.recordUntilBoundary(item, {}, { events: [] }), /song position 5\.000s; 0\.200s after capture began/);
+});
