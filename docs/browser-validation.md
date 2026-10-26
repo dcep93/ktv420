@@ -160,3 +160,14 @@ playback after disconnection, and fresh remote play/pause. The actual useReplay
 hook completed a track/play/seek/pause/play/stop performance while Spotify
 continually reported a seek error and never acknowledged commands. This uses
 synthetic audio and state, not a claim of a completed real-Spotify device test.
+
+## Combined Highway (2026-10-26)
+
+Highway now uses the combined-scene canvas and the stable `highway` recording
+identifier. A shared projected road replaces the former per-stem renderer.
+Synthetic browser inspection confirmed vocal mute removes the sun/waveform and
+other mute removes mountains/cacti; pause and seek retain coherent perspective.
+The 1050 × 340 preview measured 0.39 ms mean / 0.90 ms p95 for 120 frames of CPU
+drawing commands plus analysis (not total GPU/compositor cost). Automated checks
+cover monotonic perspective, finite bounded rendering at three sizes, solo/mute,
+large/backward seeks, balanced canvas state, and replay registration.

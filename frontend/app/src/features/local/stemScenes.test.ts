@@ -93,3 +93,41 @@ test('every combined scene is selectable and remains valid in recorded snapshots
   }
   assert.equal(isCombinedVisualizer('time-ribbon'), false);
 });
+
+test('Highway perspective converges at the horizon and widens toward the listener', async () => {
+  const {highwayPoint}=await import('../stems/player/visuals/highway');
+  for(const time of [0,10,1000]) {
+    let lastWidth=0,lastY=0;
+    for(let i=0;i<=100;i++){
+      const left=highwayPoint(i/100,-1,1200,600,time),right=highwayPoint(i/100,1,1200,600,time);
+      assert.ok(right.x-left.x>=lastWidth);
+      assert.ok(left.y>=lastY);
+      assert.equal(left.y,right.y);
+      lastWidth=right.x-left.x;lastY=left.y;
+    }
+  }
+});
+
+test('Highway is a bounded combined scene with independent stem contributions and safe seeks', async () => {
+  const {drawHighway,resetHighway}=await import('../stems/player/visuals/highway');
+  for(const [width,height] of [[360,210],[1600,360],[2400,1200]]) {
+    const s=surface(width,height),voices=stemRoles.map(role=>voice(role));
+    for(let i=0;i<120;i++){
+      s.reset();drawHighway(s.canvas,voices,i/60,true);
+      assert.equal(s.read().depth,0);assert.ok(s.read().operations<3000);
+    }
+    voices.forEach(v=>{v.audible=false;});
+    s.reset();drawHighway(s.canvas,voices,2,true);const silent=s.read().marks;
+    for(const role of ['drums','vocals','other','original']) {
+      const v=voices.find(v=>v.name===role)!;v.audible=true;
+      s.reset();drawHighway(s.canvas,voices,2.1,true);
+      assert.ok(s.read().marks>silent,role);v.audible=false;
+    }
+    for(const time of [2.1,2.1,1,4000]){
+      s.reset();drawHighway(s.canvas,voices,time,false);
+      assert.equal(s.read().depth,0);assert.equal(s.read().marks,silent);
+    }
+    resetHighway(s.canvas);drawHighway(s.canvas,voices,0,true);
+    assert.equal(s.read().depth,0);
+  }
+});

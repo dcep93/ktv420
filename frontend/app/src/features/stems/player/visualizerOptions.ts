@@ -49,6 +49,6 @@ export const visualizerOptions: Array<{
     hint: "Whirling Shards",
   },
   { value: "kaleidoscope", label: "Kaleidoscope", hint: "Mirrored Lenses" },
-  { value: "highway", label: "Highway", hint: "Retro Neon Run" },
+  { value: "highway", label: "Highway", hint: "The mix drives a neon desert" },
   { value: "delay-pedal", label: "Delay Pedal", hint: "Echo Ripples" },
 ];
