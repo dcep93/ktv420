@@ -23,9 +23,5 @@ export function CombinedVisualizerPanel({ type, canvasRef, expanded, onExpandedC
       if ((event.key === 'Enter' || event.key === ' ') && !event.repeat) { event.preventDefault(); toggle(); }
     }}>
     <canvas ref={canvasRef} aria-label="Combined stem visualization" />
-    <div className="combined-visualizer__legend">
-      {scene.legend.map(label => <span key={label}>{label}</span>)}
-      <span className="combined-visualizer__size">{expanded ? 'Click to shrink ↙' : 'Click to expand ↗'}</span>
-    </div>
   </section>;
 }

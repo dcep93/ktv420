@@ -4,7 +4,7 @@
   <p style="color:var(--ww-text-soft)">Synthetic stems · silent monitoring</p>
   <label>Resonance artwork <input id="artwork" type="file" accept="image/*"></label> <button id="sample-artwork">Sample cover</button> <button id="clear-artwork">Music notes</button><img id="artwork-source" alt="Source cover" width="100" height="100" hidden>
   <div id="voices" style="display:flex;gap:16px;flex-wrap:wrap"></div>
-  <section class="combined-visualizer"><canvas id="scene-canvas" style="height:340px" aria-label="Combined scene preview"></canvas><div id="legend" class="combined-visualizer__legend"></div></section>
+  <section class="combined-visualizer"><canvas id="scene-canvas" style="height:340px" aria-label="Combined scene preview"></canvas></section>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px"><section><h3>Spectrogram</h3><canvas id="spectrogram" style="width:100%;height:140px" aria-label="Spectrogram preview"></canvas></section><section><h3>Stereo Bloom</h3><canvas id="bloom" style="width:100%;height:140px" aria-label="Stereo Bloom preview"></canvas></section></div>
   <p id="result" role="status">Choose a scene, then start the preview.</p><p id="timing"></p>
 </main><script type="module" src="/visual-preview.ts"></script></body></html>

@@ -42,12 +42,10 @@ document.querySelector('#clear-artwork')!.addEventListener('click', () => {
 const timings: number[] = [];
 for (const [value, option] of Object.entries(combinedVisualizers)) picker.add(new Option(option.label, value));
 picker.value = scene;
-function updateLegend() {
-  const legend = document.querySelector('#legend')!; legend.replaceChildren();
-  for (const label of combinedVisualizers[scene].legend) { const span = document.createElement('span'); span.textContent = label; legend.append(span); }
+function resetScene() {
   resetCombinedVisualizer(canvas); timings.length = 0;
 }
-picker.addEventListener('change', () => { scene = picker.value as CombinedVisualizerType; updateLegend(); }); updateLegend();
+picker.addEventListener('change', () => { scene = picker.value as CombinedVisualizerType; resetScene(); }); resetScene();
 document.querySelector('#start')!.addEventListener('click', async () => {
   if (started) return; started = true;
   const context = new AudioContext(), silent = context.createGain(); silent.gain.value = 0; silent.connect(context.destination);

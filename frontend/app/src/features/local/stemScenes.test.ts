@@ -87,7 +87,6 @@ test('every combined scene is selectable and remains valid in recorded snapshots
   for (const [value, scene] of Object.entries(combinedVisualizers)) {
     const option = visualizerOptions.find(option => option.value === value);
     assert.ok(option); assert.equal(option.label, scene.label); assert.ok(isCombinedVisualizer(option.value));
-    assert.equal(scene.legend.length, 4);
     assert.ok(validSnapshot({ visualizer: value, tempo: 1, pitch: 0, spotlight: null,
       stems: [{ name: 'vocals.mp3', input: false, volume: 1, mute: false, deafen: false, effect: 'wah', value: 0 }] }));
   }
