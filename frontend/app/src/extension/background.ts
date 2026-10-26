@@ -19,7 +19,7 @@ chrome.action.onClicked.addListener(tab => {
 chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
   if (sender.id !== chrome.runtime.id || typeof sender.tab?.id !== 'number' || !sender.url?.startsWith('https://open.spotify.com/') ||
     !message || typeof message !== 'object' || !('type' in message)) return false;
-  const request = message as { type: string; collection: unknown; metadata: Record<string, unknown>; bytes: number; id: string; index: number; base64: string };
+  const request = message as { type: string; started?: boolean; collection: unknown; metadata: Record<string, unknown>; bytes: number; id: string; index: number; base64: string };
   const tabId = sender.tab.id;
   const handle = async () => {
     switch (request.type) {
@@ -35,7 +35,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
         const lease = await updateState('listeningLease', previous => claimListeningLease(previous, tabId, Date.now()));
         return lease?.tabId === tabId;
       }
-      case 'ktv420:register-collection': await setCaptureContext(tabId, request.collection, sender.url!); return null;
+      case 'ktv420:register-collection': await setCaptureContext(tabId, request.collection, sender.url!, request.started === true); return null;
       case 'ktv420:library-status': return (await listTracks()).filter(track => track.source === 'spotify').map(track => ({ trackId: track.metadata?.trackId, status: track.status }));
       case 'ktv420:cached': return (await listTracks()).filter(track => track.source === 'spotify').map(track => track.metadata);
       case 'ktv420:capture-begin': {
@@ -56,9 +56,9 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
 chrome.runtime.onMessageExternal.addListener((message: unknown, sender, respond) => {
   let url: URL;
   try { url = new URL(sender.url || ''); } catch { return false; }
-  if (url.origin !== 'https://ktv420.web.app' || !['/replay', '/saved'].includes(url.pathname.replace(/\/$/,'')) || (sender.frameId !== undefined && sender.frameId !== 0) ||
+  if (url.origin !== 'https://ktv420.web.app' || !['/replay', '/catalog', '/saved'].includes(url.pathname.replace(/\/$/,'')) || (sender.frameId !== undefined && sender.frameId !== 0) ||
     !message || typeof message !== 'object' || !('type' in message)) return false;
-  if (url.pathname.replace(/\/$/,'') === '/saved') {
+  if (['/catalog', '/saved'].includes(url.pathname.replace(/\/$/,''))) {
     if (message.type !== 'ktv420:saved-collections') return false;
     void savedCollections().then(collections => respond({ ok: true, collections }), error => respond({ ok: false, error: String(error) }));
     return true;

@@ -1,5 +1,5 @@
 export type Collection = { path: string; title: string; artwork: string; trackIds: string[] };
-export type SavedCollection = Collection & { savedAt: number };
+export type SavedCollection = Collection & { savedAt: number; startedAt?: number };
 export type SavedCollectionSummary = Omit<SavedCollection, 'trackIds'> & { captured: number; ready: number; total: number };
 export function parseCollection(value: unknown): Collection | null {
   if (!value || typeof value !== 'object') return null;
@@ -18,6 +18,6 @@ export function summarizeCollections(collections: SavedCollection[], tracks: { i
   return collections.flatMap(({trackIds, ...collection}) => {
     const captured = trackIds.filter(id => saved.has(`spotify-${id}`)).length;
     const ready = trackIds.filter(id => saved.get(`spotify-${id}`) === 'ready').length;
-    return captured ? [{...collection, captured, ready, total: trackIds.length}] : [];
+    return captured || collection.startedAt ? [{...collection, captured, ready, total: trackIds.length}] : [];
   }).sort((a, b) => b.savedAt - a.savedAt);
 }

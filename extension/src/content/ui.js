@@ -25,9 +25,9 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
   let urlKey = null;
   let navigation = { revision: 0, open: false, trackIndex: null };
   let collection = null, captureCollection = null;
-  function registerCollection(value = collection) {
+  function registerCollection(value = collection, started = false) {
     if (!value) return;
-    chrome.runtime.sendMessage({ type: 'ktv420:register-collection', collection: value }, response => {
+    chrome.runtime.sendMessage({ type: 'ktv420:register-collection', collection: value, started }, response => {
       if (chrome.runtime.lastError || !response?.ok) return;
     });
   }
@@ -229,7 +229,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
         if (missing.length) throw new Error(`Find the required songs in this Spotify page first: ${missing.map(t => t.title).join(', ')}`);
         await onTransport?.({action:'volume',volume:0});
       }
-      if (!isRunActive()) captureCollection = collection;
+      if (!isRunActive()) { captureCollection = collection; registerCollection(captureCollection, true); }
       const run = onToggleRun({ trackSnapshot: tracks, trackIds: replay ? replay.tracks.map(t => t.id) : null });
       post();
       await run;
@@ -265,7 +265,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
   }, { once: true });
   return { refresh, prepare, getTrackIds: () => tracks.map(track => track.trackId),
     getTrackMetadata: id => tracks.find(track => track.trackId === id),
-    notifyListening(state) { if (listening?.capturing && !state?.capturing) registerCollection(); listening = state; post(); },
+    notifyListening(state) { if (!listening?.capturing && state?.capturing) registerCollection(collection, true); if (listening?.capturing && !state?.capturing) registerCollection(); listening = state; post(); },
     notifyCaptureProgress(progress) { captureProgress = progress; post(); },
     async notifyTrackCaptured(_id, metadata) { registerCollection(captureCollection || collection); notice = `${metadata?.trackName || 'Track'} captured. Local separation is queued automatically.`; post(); },
     async notifyCaptureComplete(trackIds) { notice = `${trackIds?.length || 0} tracks captured. Separation continues here automatically.`; refresh(); },

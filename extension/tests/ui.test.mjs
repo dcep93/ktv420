@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { mountButton } from '../src/content/ui.js';
 
 test('overlay waits for a trusted ready message, then sends cloneable DOM track metadata', async t => {
+  const registrations = [];
   const elements = [];
   const messages = [];
   const timers = [];
@@ -47,7 +48,7 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
       addEventListener(name, listener) { listeners[name] = listener; }, removeEventListener() {} },
     location: pageLocation,
     history: { state: { spotify: true }, pushState(state, _title, href) { assert.deepEqual(state, {spotify:true}); pageLocation.href = href; }, replaceState(state, title, href) { this.pushState(state, title, href); } },
-    chrome: { runtime: { id: 'test', sendMessage(message, respond) { if (message.type === 'ktv420:pending-replay') pendingReply=respond; respond({ok:true,result:null}); }, getManifest: () => ({ version: '0.5.0' }), getURL: path => `chrome-extension://test/${path}`, onMessage: { addListener() {}, removeListener() {} } } },
+    chrome: { runtime: { id: 'test', sendMessage(message, respond) { if (message.type === 'ktv420:register-collection') registrations.push(message); if (message.type === 'ktv420:pending-replay') pendingReply=respond; respond({ok:true,result:null}); }, getManifest: () => ({ version: '0.5.0' }), getURL: path => `chrome-extension://test/${path}`, onMessage: { addListener() {}, removeListener() {} } } },
     setInterval: callback => { timers.push(callback); return 1; },
     clearInterval() {},
     MutationObserver: class {
@@ -117,6 +118,12 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
   }
   assert.equal(messages.at(-1).tracks.length, 1);
   assert.equal(messages.at(-1).captureProgress, null);
+  assert.equal(registrations.some(item => item.started), false, 'opening alone does not start a catalog entry');
+  ui.notifyListening({ capturing: true });
+  assert.equal(registrations.at(-1).started, true, 'passive capture registers before any song is saved');
+  const registrationsAtStart = registrations.length;
+  ui.notifyListening({ capturing: true });
+  assert.equal(registrations.length, registrationsAtStart, 'capture heartbeats do not repeatedly write the catalog');
   ui.notifyCaptureProgress({ trackId, fraction: 0.4 });
   assert.deepEqual(messages.at(-1).captureProgress, { trackId, fraction: 0.4 });
   ui.notifyCaptureProgress(null);

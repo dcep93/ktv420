@@ -10,11 +10,11 @@
     ],
     "rewrites": [
       {
-        "source": "/saved",
+        "source": "/catalog",
         "destination": "/player/index.html"
       },
       {
-        "source": "/saved/**",
+        "source": "/catalog/**",
         "destination": "/player/index.html"
       },
       {
@@ -125,13 +125,25 @@
         ]
       },
       {
-        "source": "/saved{,/**}",
+        "source": "/catalog{,/**}",
         "headers": [
           {
             "key": "Cache-Control",
             "value": "no-cache"
           }
         ]
+      }
+    ],
+    "redirects": [
+      {
+        "source": "/saved",
+        "destination": "/catalog",
+        "type": 301
+      },
+      {
+        "source": "/saved/**",
+        "destination": "/catalog",
+        "type": 301
       }
     ]
   }

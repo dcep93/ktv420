@@ -30,3 +30,20 @@ test('saved registry persists, deduplicates, backfills, reports current readines
   await deleteTrack('spotify-one');
   assert.deepEqual(await savedCollections(),[]);
 });
+
+test('capture start appears before audio exists and remains visible through partial saves and reloads', async () => {
+  await updateState('collections', () => undefined);
+  await setCaptureContext(6, collection, collectionLink(collection.path), true);
+  const started = (await savedCollections())[0];
+  assert.equal(started.captured, 0); assert.equal(started.ready, 0); assert.equal(started.total, 2);
+  assert.ok(started.startedAt);
+  await setCaptureContext(6, {...collection, title:''}, collectionLink(collection.path));
+  assert.deepEqual((await savedCollections())[0], started, 'ordinary refresh preserves the started entry');
+  await saveInput({id:'spotify-two',title:'Two',artist:'',createdAt:1,sampleRate:44100,frames:1,status:'captured',bytes:0,source:'spotify'},new Blob(['audio']));
+  assert.equal((await savedCollections())[0].captured, 1);
+  await setTrackStatus('spotify-two', 'ready');
+  assert.equal((await savedCollections())[0].ready, 1);
+  await deleteTrack('spotify-two');
+  assert.equal((await savedCollections())[0].captured, 0, 'started collection remains available for recapture');
+  assert.equal((await savedCollections()).length, 1);
+});
