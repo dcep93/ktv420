@@ -13,7 +13,7 @@ export type AudioEffectOption = { value: AudioEffectType; label: string; descrip
 export const audioEffectOptions: AudioEffectOption[] = [
   {value:'dj-filter',label:'DJ Filter',description:'Left removes highs; right removes lows. Center is clean.'},
   {value:'tone',label:'Tone',description:'Balance warmth and brightness. Center is clean.'},
-  {value:'wah',label:'Wah',description:'Sweep a pronounced resonant band from low to high. Center is clean.'},
+  {value:'wah',label:'Wah',description:'A vocal pedal sweep: low at the left, bright at the right. Center is clean.'},
   {value:'telephone',label:'Telephone',description:'Blend in a narrow telephone sound.'},
   {value:'delay-pedal',label:'Echo',description:'Darkening repeats. Set the song BPM and beat interval separately from amount.'},
   {value:'reverb',label:'Reverb',description:'A diffused stereo room, growing into a longer wash. Adjustments preserve the tail.'},

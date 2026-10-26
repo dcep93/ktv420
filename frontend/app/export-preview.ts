@@ -2,7 +2,7 @@ import { renderSection, type RenderSource } from './src/features/local/export/re
 import { exportReplay } from './src/features/local/export/exportReplay';
 import { compileExport, EXPORT_RATE as rate } from './src/features/local/export/timeline';
 import { encodeFloat32Wav } from './src/features/local/audio/wav';
-import { applyAudioEffect, createEffectNodes, audioEffectOptions } from './src/features/stems/player/audioEffects';
+import { applyAudioEffect, createEffectNodes, audioEffectOptions, prepareAudioEffects, syncAudioEffects } from './src/features/stems/player/audioEffects';
 import { connectStemEffects, disposeStemEffects } from './src/features/stems/player/stemGraph';
 import { getLogarithmicVolumeGain } from './src/features/stems/player/mixerGain';
 import type { MixerSnapshot, PerformanceRecording } from './src/features/local/recording';
@@ -46,9 +46,12 @@ document.querySelector('#correctness')!.addEventListener('click',async()=>{
   for(const effect of audioEffectOptions) {
    const snapshot=structuredClone(data.snapshot);snapshot.stems[0].effect=effect.value;snapshot.stems[0].value=.72;snapshot.stems[0].volume=.9;
    const output=await renderSection(compileExport(mix(snapshot,1.5)).sections[0],data.source,signal,()=>{});
-   const reference=new OfflineAudioContext(2,Math.round(1.5*rate),rate),input=reference.createGain(),nodes=createEffectNodes(reference);
+   const reference=new OfflineAudioContext(2,Math.round(1.5*rate),rate);
+   await prepareAudioEffects(reference);
+   const input=reference.createGain(),nodes=createEffectNodes(reference);
    input.gain.value=getLogarithmicVolumeGain(.9);connectStemEffects(input,nodes,reference.destination);
    applyAudioEffect({context:reference,nodes,effect:effect.value,value:.72});
+   syncAudioEffects(nodes,0,1,.02);
    const native=reference.createBufferSource();native.buffer=await reference.decodeAudioData(await data.source.record.files[0].blob.arrayBuffer());native.connect(input);native.start(.02);
    const baseline=await reference.startRendering();let error=0,maxAt=0;
    for(let c=0;c<2;c++){const a=output.getChannelData(c),b=baseline.getChannelData(c);for(let i=0;i<a.length;i++)if(Math.abs(a[i]-b[i])>error){error=Math.abs(a[i]-b[i]);maxAt=i/rate;}}

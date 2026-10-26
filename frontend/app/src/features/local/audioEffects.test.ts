@@ -19,14 +19,14 @@ test('every visible effect is exactly transparent at neutral and bypass',()=>{
   for(let i=0;i<300;i++){const l=Math.sin(i)*.2; bypass.tick(l,-l,c,i/rate);assert.equal(bypass.left,l);assert.equal(bypass.right,-l);}
  }
 });
-test('Wah has a pronounced moving resonance without hollowing out the off-band body',()=>{
+test('Wah has a focused pedal resonance instead of a dry signal under a moving EQ',()=>{
  for(const amount of [0,.1,.25,.75,.9,1]){
-  const frequency=220*(3400/220)**amount;
+  const frequency=400*5**amount;
   const peak=rms(render('wah',amount,1,frequency).left,rate/2)/(.2/Math.SQRT2);
   const off=rms(render('wah',amount,1,frequency/4).left,rate/2)/(.2/Math.SQRT2);
-  assert.ok(peak>2 && peak<2.8, `Wah ${amount}: resonant gain ${peak}`);
-  assert.ok(off>.6 && off<1.1, `Wah ${amount}: off-band gain ${off}`);
-  assert.ok(peak/off>2, 'sweeping should emphasize a band, not just turn the signal down');
+  assert.ok(peak>2.95 && peak<3.05, `Wah ${amount}: resonant gain ${peak}`);
+  assert.ok(off<.55, `Wah ${amount}: off-band gain ${off}`);
+  assert.ok(peak/off>5, 'pedal resonance must stand out clearly from the surrounding spectrum');
  }
 });
 test('all effect IDs remain finite with controlled test-tone gain',()=>{
@@ -107,6 +107,43 @@ test('Wah stays continuous through clean center even for near-full-scale audio',
   maxStep=Math.max(maxStep,Math.abs(dsp.left-previous));previous=dsp.left;
  }
  assert.ok(maxStep<.001,`near-center step ${maxStep}`);
+});
+
+test('Wah keeps its heel/toe contour and gain at production sample rates',()=>{
+ const gain=(sampleRate:number,amount:number,frequency:number)=>{
+  const dsp=new StereoEffects(sampleRate),c=control('wah',amount);let energy=0;
+  const frames=Math.round(sampleRate/4),start=Math.round(frames/2);
+  for(let i=0;i<frames;i++){
+   dsp.tick(.05*Math.sin(2*Math.PI*frequency*i/sampleRate),0,c,i/sampleRate);
+   if(i>=start)energy+=dsp.left**2;
+   assert.equal(dsp.right,0);
+  }
+  return Math.sqrt(energy/(frames-start))/(.05/Math.SQRT2);
+ };
+ for(const sampleRate of [44100,48000,96000]){
+  for(const [amount,frequency] of [[0,400],[1,2000]]){
+   const peak=gain(sampleRate,amount,frequency);
+   assert.ok(peak>2.97&&peak<3.03,`gain ${peak} at ${sampleRate}`);
+   assert.ok(gain(sampleRate,amount,frequency/4)<.5,'bass outside the selected band is filtered');
+   assert.ok(gain(sampleRate,amount,frequency*4)<.65,'highs outside the selected band are filtered');
+  }
+  const heelShoulder=gain(sampleRate,0,500)/gain(sampleRate,0,400);
+  const toeShoulder=gain(sampleRate,1,2500)/gain(sampleRate,1,2000);
+  assert.ok(heelShoulder<.35&&toeShoulder>.65,'heel is focused; toe opens into a broader bright vowel');
+ }
+});
+
+test('Wah replayed sweeps are deterministic, bounded, and settle back to clean',()=>{
+ const sampleRate=48000,a=new StereoEffects(sampleRate),b=new StereoEffects(sampleRate),c=control('wah',.5);
+ for(let i=0;i<sampleRate*3;i++){
+  c.amount=i<sampleRate*2?.5+.5*Math.sin(i/sampleRate*Math.PI*2):.5;
+  c.bypass=i>sampleRate*.7&&i<sampleRate*.8?1:0;
+  const input=.85*Math.sin(i/sampleRate*Math.PI*2*440)+.1*Math.sin(i/sampleRate*Math.PI*2*1760);
+  a.tick(input,-input,c,i/sampleRate);b.tick(input,-input,c,i/sampleRate);
+  assert.equal(a.left,b.left);assert.equal(a.right,-a.left);
+  assert.ok(Number.isFinite(a.left)&&Math.abs(a.left)<=1);
+  if(i>sampleRate*2.9)assert.equal(a.left,input);
+ }
 });
 
 test('Vowels emphasize their vowel bands instead of reducing every band to a whisper',()=>{

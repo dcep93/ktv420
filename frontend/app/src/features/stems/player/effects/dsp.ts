@@ -34,6 +34,19 @@ class Filter {
     this.b0=b0/a0;this.b1=b1/a0;this.b2=b2/a0;this.a1=a1/a0;this.a2=a2/a0;
   }
   tick(x:number){const y=this.b0*x+this.z1;this.z1=flush(this.b1*x-this.a1*y+this.z2);this.z2=flush(this.b2*x-this.a2*y);return y;}
+  setWah(position:number,rate:number){
+    // Single DC zero + resonant pole pair, as in the documented Faust/Smith
+    // CryBaby model. GCB95-range sweep; this is not a transistor circuit clone.
+    const w=TAU*400*5**position/rate,q=8*.25**position;
+    const radius=1-w/(2*q),c=Math.cos(w),s=Math.sin(w);
+    this.a1=-2*radius*c;this.a2=radius*radius;
+    // Normalize at the pole angle to keep guitar-pedal voltage gain from
+    // overwhelming already-mastered stems. The shared ceiling handles peaks.
+    const real=1+this.a1*c+this.a2*Math.cos(2*w);
+    const imaginary=-this.a1*s-this.a2*Math.sin(2*w);
+    const gain=3*Math.hypot(real,imaginary)/Math.hypot(1-c,s);
+    this.b0=gain;this.b1=-gain;this.b2=0;
+  }
   reset(){this.z1=this.z2=0;}
 }
 class Delay {
@@ -105,7 +118,7 @@ export class StereoEffects {
     for(let c=0;c<2;c++){
       const f=this.filters[c*3],g=this.filters[c*3+1];
       switch(kind){
-        case 'wah':f.set('bandpass',220*(3400/220)**v,2.5+amount*2,this.rate);break;
+        case 'wah':f.setWah(v,this.rate);break;
         case 'band-emphasis':f.set('bandpass',220*(3400/220)**v,2+amount*3,this.rate);break;
         case 'envelope-filter':f.set('bandpass',250+4300*Math.sqrt(clamp(this.envelope*3,0,1))*v,1.4+v*2.6,this.rate);break;
         case 'telephone':f.set('highpass',350,.707,this.rate);g.set('lowpass',3000,.707,this.rate);break;
@@ -152,9 +165,10 @@ export class StereoEffects {
       const x=c?r:l,f=this.filters[c*3],g=this.filters[c*3+1];let y=x;
       switch(kind){
         case 'wah':{
-          // Resonance emphasizes the swept band instead of only removing other frequencies.
-          const engage=1-(1-strength)**2;
-          y=x*(1-.35*engage)+f.tick(x)*2*engage;break;
+          // A pedal filters the whole signal. Only blend dry near our deliberate
+          // clean-center detent; smoothstep avoids an abrupt engagement edge.
+          const blend=Math.min(1,strength/.12),engage=blend*blend*(3-2*blend);
+          y=x*(1-engage)+f.tick(x)*engage;break;
         }
         case 'band-emphasis':y=x*(1-.85*strength)+f.tick(x)*.85*strength;break;
         case 'telephone':y=x*(1-v)+g.tick(f.tick(x))*v;break;
