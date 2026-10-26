@@ -100,7 +100,9 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
           artwork: recording.artwork || dom.artwork,
         }, getTrackMetadata(recording.trackId));
       }
-      if (batch && runner.captureProgress && (seeked || (changed && runner.captureProgress.fraction < 0.97))) runner.handoff();
+      // A captured end is authoritative even if the last progress poll was early.
+      // Let the batch finish/save it instead of treating normal auto-advance as a remote skip.
+      if (batch && runner.captureProgress && !page.captureEnded && (seeked || (changed && runner.captureProgress.fraction < 0.97))) runner.handoff();
       if (recording && !batch && (changed || seeked || !local || !owner || page.captureInvalid || media?.ended || page.captureEnded)) {
         const ended = !seeked && !page.captureInvalid && (page.captureEnded || media?.ended || (changed && last?.duration > 0 && last.position >= last.duration - 0.06));
         await finish(ended); if (ended && !changed) ignoreUntil = now + 700;

@@ -111,3 +111,26 @@ test('remote handoff ends the batch without reporting a user stop', async t => {
   assert.equal(runner.isActive(), false);
   assert.equal(runner.handingOff, true);
 });
+
+test('a captured end wins over next-track metadata even when the last poll was early', async () => {
+  const states = [
+    { source: 'first', currentTime: 170, duration: 180 },
+    { source: 'first', currentTime: 180, duration: 180, ended: true },
+  ];
+  const runner = new CaptureOrchestrator({ bridge: {
+    command: async () => states.shift(),
+    getSnapshot: () => { throw new Error('Completed capture must not consult next-track metadata'); },
+  } });
+  const result = await runner.recordUntilBoundary(item, {}, { events: [] });
+  assert.equal(result.reason, 'media-ended');
+  assert.equal(result.endMediaTime, 180);
+});
+
+test('a mid-song source replacement still fails rather than saving mixed audio', async () => {
+  const states = [
+    { source: 'first', currentTime: 40, duration: 180 },
+    { source: 'replacement', currentTime: 40.1, duration: 180 },
+  ];
+  const runner = new CaptureOrchestrator({ bridge: { command: async () => states.shift() } });
+  await assert.rejects(runner.recordUntilBoundary(item, {}, { events: [] }), /media source changed/);
+});

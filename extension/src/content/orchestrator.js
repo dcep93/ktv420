@@ -509,6 +509,16 @@ export class CaptureOrchestrator extends EventTarget {
         throw new Error(`Spotify media source changed during ${item.trackName}.`);
       }
 
+      // The page capture freezes its ended state. Spotify's metadata may already
+      // describe the next song, especially after a delayed background-tab poll.
+      if (mediaState.ended) {
+        return {
+          endMediaTime: Math.min(currentTime || lastMediaTime, duration),
+          duration,
+          reason: "media-ended"
+        };
+      }
+
       if (mediaState.paused && !mediaState.ended) {
         pauseStartedAt ??= now;
         // A remote pause is ordinary transport, not a failed recording.
@@ -565,11 +575,11 @@ export class CaptureOrchestrator extends EventTarget {
       }
 
       this.updateCaptureProgress(item, mediaState, now);
-      if (mediaState.ended || (mediaState.paused && isAtEnd(currentTime, duration))) {
+      if (mediaState.paused && isAtEnd(currentTime, duration)) {
         return {
           endMediaTime: Math.min(currentTime || lastMediaTime, duration),
           duration,
-          reason: mediaState.ended ? "media-ended" : "paused-at-end"
+          reason: "paused-at-end"
         };
       }
 

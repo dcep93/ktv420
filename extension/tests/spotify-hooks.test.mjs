@@ -9,14 +9,19 @@ const hookSource = readFileSync(new URL('../src/page/spotifyHooks.js', import.me
 // primitives are mocked, but source selection and capture lifecycle are not.
 function harness(definitions, onWait = () => {}, timeline = null, activate = true) {
   class Media {
+    listeners = new Map();
     constructor(values) { Object.assign(this, { src: 'song', currentSrc: '', currentTime: 0, duration: 180,
       readyState: 4, playbackRate: 1, paused: false, ended: false, tagName: 'AUDIO', _volume: 1, _muted: false }, values); }
     get volume() { return this._volume; }
     set volume(value) { this._volume = value; }
     get muted() { return this._muted; }
     set muted(value) { this._muted = value; }
-    addEventListener() {}
-    removeEventListener() {}
+    addEventListener(type, listener) {
+      if (!this.listeners.has(type)) this.listeners.set(type, new Set());
+      this.listeners.get(type).add(listener);
+    }
+    removeEventListener(type, listener) { this.listeners.get(type)?.delete(listener); }
+    dispatch(type) { for (const listener of this.listeners.get(type) || []) listener(); }
     play() { this.paused = false; return Promise.resolve(); }
   }
   const elements = definitions.map(value => new Media(value));
@@ -185,6 +190,28 @@ test('successive captures follow the next active element, not the previous graph
   assert.equal(next.ok, true);
   assert.equal(next.result.next.target.source, 'second');
   assert.deepEqual(h.graphs, h.elements);
+});
+
+test('completed capture retains its boundary after Spotify reuses the media element', async () => {
+  const h = harness([{ src: 'first', duration: 180 }]);
+  await h.command('capture-begin');
+  await h.command('capture-mark-start');
+  const song = h.elements[0];
+  song.currentTime = 180; song.ended = true; song.paused = true;
+  song.dispatch('ended');
+  // The content-script poll can run after Spotify has already started another song.
+  song.src = 'next'; song.duration = 220; song.currentTime = 0.2;
+  song.ended = false; song.paused = false; song.dispatch('seeking');
+  const state = (await h.command('capture-state')).result;
+  assert.equal(state.source, 'first');
+  assert.equal(state.currentTime, 180);
+  assert.equal(state.duration, 180);
+  assert.equal(state.ended, true);
+  assert.equal((await h.command('listening-state')).result.captureInvalid, false);
+  const next = await h.command('capture-finish-and-begin');
+  assert.equal(next.result.finished.invalid, false);
+  assert.equal(next.result.next.target.source, 'next');
+  assert.equal((await h.command('capture-state')).result.ended, false);
 });
 
 test('song timeline excludes Spotify looping video from capture, tempo and monitoring', async () => {

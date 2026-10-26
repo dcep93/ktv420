@@ -370,7 +370,7 @@
       },
       state() {
         assertCapture(currentCapture);
-        return describeMediaElement(currentCapture.element);
+        return currentCapture.endState || describeMediaElement(currentCapture.element);
       },
       finish() {
         assertCapture(currentCapture);
@@ -410,7 +410,15 @@
       this.lastMediaTime = safeMediaTime(element);
       this.onSeek = () => { if (this.capturing) this.invalid = true; };
       this.ended = false;
-      this.onEnded = () => { this.capturing = false; this.ended = true; };
+      this.endState = null;
+      this.onEnded = () => {
+        if (!this.capturing) return;
+        // Spotify can reuse this element before the content script polls again.
+        // Preserve the completed recording's boundary, not the next song's state.
+        this.endState = { ...describeMediaElement(element), ended: true };
+        this.capturing = false;
+        this.ended = true;
+      };
       this.onRate = () => { if (this.capturing && element.playbackRate !== 1) this.invalid = true; };
       element.addEventListener('ratechange', this.onRate);
       element.addEventListener('seeking', this.onSeek);
@@ -433,6 +441,7 @@
 
     markAcceptedStart() {
       this.invalid = this.element.playbackRate !== 1; this.ended = false;
+      this.endState = null;
       this.chunks = [];
       this.byteLength = 0;
       this.startMediaTime = safeMediaTime(this.element);

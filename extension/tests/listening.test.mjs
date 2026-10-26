@@ -148,7 +148,7 @@ test('inherits Spotify volume and coalesces a drag without delaying pause or rev
 
 test('media handoff mute does not reset listening volume, but Spotify slider changes still do', async t => {
   const ticks = [], calls = [], updates = [];
-  let trackId = '5EGTNEoUpibGgMWf6ECe0X', source = 'first', volumeRevision = 0;
+  let trackId = '5EGTNEoUpibGgMWf6ECe0X', source = 'first', volumeRevision = 0, captureEnded = false, handoffs = 0;
   const slider = { max: '1', value: '0.43' };
   const seek = { max: '180000', value: '0', getAttribute: () => '0:00/3:00' };
   const link = { getAttribute: () => `/track/${trackId}` };
@@ -171,17 +171,20 @@ test('media handoff mute does not reset listening volume, but Spotify slider cha
       calls.push({ command, payload });
       return command === 'listening-state' ? {
         media: { source, readyState: 4, paused: false, currentTime: 0, playbackRate: 1 },
-        volumeRevision, requestedVolume: 0,
+        volumeRevision, requestedVolume: 0, captureEnded,
       } : {};
-    } }, emit: state => updates.push(state), ensurePlayer() {}, getRunner: () => ({ isActive: () => true }),
+    } }, emit: state => updates.push(state), ensurePlayer() {}, getRunner: () => ({
+      isActive: () => true, captureProgress: { fraction: .5 }, handoff: () => handoffs++,
+    }),
   });
   const settle = () => new Promise(resolve => setImmediate(resolve));
   const tick = async () => { controller.heartbeat(); ticks[0](); await settle(); };
   controller.heartbeat(); await controller.setEnabled(true); await settle();
   await controller.command({ action: 'silenced', generation: updates.at(-1).generation }); await tick();
   assert.equal(calls.at(-1).payload.gain, 0.43);
-  source = 'second'; trackId = '6EGTNEoUpibGgMWf6ECe0X'; volumeRevision++;
+  source = 'second'; trackId = '6EGTNEoUpibGgMWf6ECe0X'; volumeRevision++; captureEnded = true;
   await tick();
+  assert.equal(handoffs, 0, 'a completed capture stays with the batch despite stale progress');
   assert.equal(updates.at(-1).volume, 0.43, 'old media muted during transition is not user intent');
   assert.equal(calls.at(-1).payload.gain, 0, 'handoff still waits for player silence acknowledgment');
   await controller.command({ action: 'silenced', generation: updates.at(-1).generation }); await tick();
@@ -192,6 +195,8 @@ test('media handoff mute does not reset listening volume, but Spotify slider cha
   assert.equal(updates.at(-1).volume, 0, 'explicit Spotify mute is still respected');
   slider.value = '0.65'; await tick();
   assert.equal(updates.at(-1).volume, 0.65);
+  source = 'third'; trackId = '7EGTNEoUpibGgMWf6ECe0X'; captureEnded = false; await tick();
+  assert.equal(handoffs, 1, 'an actual early skip still hands off');
   await controller.setEnabled(false); controller.dispose();
 });
 
