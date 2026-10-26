@@ -353,12 +353,12 @@ test('delayed ended event trims only proven digital silence and preserves the co
   assert.deepEqual([...new Float32Array(result.bytesBuffer)],[...signal]);
 });
 
-test('extra quiet music, invalid samples, or an unconfirmed long tail cannot be silently trimmed', async () => {
+test('signal beyond the natural-end bound, invalid samples, or an unconfirmed long tail cannot be trimmed', async () => {
   for (const {tail,ended} of [{tail:1e-20,ended:true},{tail:NaN,ended:true},{tail:0,ended:false}]) {
     const h=harness([{src:'song',paused:true,duration:4/44100}]);
     await h.command('capture-begin',{requireStart:true,expectedSource:'song'});
     await h.elements[0].play();
-    const pcm=new Float32Array(10000);pcm[8]=tail;
+    const pcm=new Float32Array(10000);pcm[6000]=tail;
     h.contexts[0].currentTime=5000/44100;
     if(ended){h.elements[0].ended=true;h.elements[0].dispatch('ended');}
     h.ports[0].onmessage({data:{frame:0,channelCount:2,bytesBuffer:pcm.buffer}});
@@ -438,4 +438,62 @@ test('a completely missing pre-pause interval cannot be mistaken for codec paddi
   const result = (await h.command('capture-finish')).result;
   assert.equal(result.invalid, true);
   assert.equal(result.endVerified, false);
+});
+
+test('natural-end resampler tails survive; only subsequent exact silence is removed', async () => {
+  for (const silentFrames of [0, 44100 / 2]) {
+    const expected = 44100 * 3, tailFrames = Math.round(44100 * .021);
+    const frames = expected + tailFrames + silentFrames;
+    const h = harness([{src:'song',paused:true,duration:3}]);
+    await h.command('capture-begin',{requireStart:true,expectedSource:'song'});
+    await h.elements[0].play();
+    const pcm = new Float32Array(frames * 2);
+    pcm[0] = .25; // preserve the very first sample
+    pcm[(expected + tailFrames) * 2 - 1] = 1e-20; // quiet right-channel tail
+    h.contexts[0].currentTime = frames / 44100;
+    h.elements[0].ended = true; h.elements[0].dispatch('ended');
+    // Deliver in multiple blocks, with the expected end crossing a block.
+    const split = (expected - 32) * 2;
+    h.ports[0].onmessage({data:{frame:0,channelCount:2,bytesBuffer:pcm.slice(0,split).buffer}});
+    h.ports[0].onmessage({data:{frame:split/2,channelCount:2,bytesBuffer:pcm.slice(split).buffer}});
+    const capture = (await h.command('capture-finish')).result;
+    assert.equal(capture.invalid,false);
+    assert.equal(capture.endVerified,true);
+    assert.equal(capture.rawCapturedFrames,frames);
+    assert.deepEqual(new Float32Array(capture.bytesBuffer),pcm.slice(0,(expected+tailFrames)*2));
+  }
+});
+
+test('a brief buffering stall cannot be accepted as a small resampler tail', async () => {
+  const h = harness([{src:'song',paused:true,duration:3}]);
+  await h.command('capture-begin',{requireStart:true,expectedSource:'song'});
+  await h.elements[0].play();
+  h.elements[0].currentTime = 1; h.elements[0].readyState = 2;
+  h.elements[0].dispatch('waiting');
+  h.elements[0].readyState = 4;
+  const frames = Math.round(44100 * 3.021);
+  h.contexts[0].currentTime = frames / 44100;
+  h.elements[0].ended = true; h.elements[0].dispatch('ended');
+  h.ports[0].onmessage({data:{frame:0,channelCount:2,bytesBuffer:new Float32Array(frames*2).buffer}});
+  const capture = (await h.command('capture-finish')).result;
+  assert.equal(capture.invalid,true);
+  assert.equal(capture.endVerified,false);
+  assert.match(capture.invalidReason,/Spotify buffered/);
+});
+
+test('audio beyond the duration still requires natural completion and an intact stream', async () => {
+  for (const issue of ['paused', 'source-change', 'missing-first']) {
+    const h = harness([{src:'song',paused:true,duration:3}]);
+    await h.command('capture-begin',{requireStart:true,expectedSource:'song'});
+    await h.elements[0].play();
+    const frames = Math.round(44100 * 3.021), first = issue === 'missing-first' ? 128 : 0;
+    const pcm = new Float32Array((frames-first)*2);pcm[pcm.length-1]=.25;
+    h.contexts[0].currentTime=frames/44100;
+    if(issue==='source-change')h.elements[0].src='next';
+    if(issue!=='paused'){h.elements[0].ended=true;h.elements[0].dispatch('ended');}
+    h.ports[0].onmessage({data:{frame:first,channelCount:2,bytesBuffer:pcm.buffer}});
+    const capture=(await h.command('capture-finish')).result;
+    assert.equal(capture.invalid,true,issue);
+    assert.equal(capture.endVerified,false,issue);
+  }
 });

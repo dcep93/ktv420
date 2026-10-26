@@ -60,9 +60,10 @@ export function captureTiming(capture, duration) {
   } else if (frames !== Math.round(duration * capture.sampleRate) &&
       // This is a container/decoder discrepancy only after the page collector
       // verifies natural completion and an unbroken stream. No early stops.
-      !(capture.endVerified === true && difference < 0 &&
-        Math.round(duration * capture.sampleRate) - frames <= Math.ceil(capture.sampleRate * .05) &&
-        capture.rawCapturedFrames === frames)) {
+      !(capture.endVerified === true &&
+        Math.abs(Math.round(duration * capture.sampleRate) - frames) <= Math.ceil(capture.sampleRate * .05) &&
+        Number.isSafeInteger(capture.rawCapturedFrames) && capture.rawCapturedFrames >= frames &&
+        (difference > 0 || capture.rawCapturedFrames === frames))) {
     reason = `Recording is ${Math.abs(difference).toFixed(3)} seconds ${difference < 0 ? 'short' : 'long'}.`;
   }
   if (reason) throw new Error(`Capture timing could not be verified: ${reason} Nothing was saved.`);

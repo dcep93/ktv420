@@ -62,3 +62,14 @@ test('storage audit uses the verified final duration rather than a provisional e
  assert.equal(captureTiming(capture,2.95).expectedDurationSeconds,3.025);
  assert.throws(()=>captureTiming({...capture,endVerified:false},2.95),/timing could not/);
 });
+
+test('storage audit retains verified resampler tail samples after zero-padding removal', () => {
+ const frames=48000*3+1008;
+ const capture={startVerified:true,startMediaTime:0,invalid:false,sampleRate:48000,channelCount:2,
+  byteLength:frames*8,rawCapturedFrames:frames+24000,endVerified:true,mediaDuration:3};
+ const timing=captureTiming(capture,3);
+ assert.equal(timing.capturedFrames,frames);
+ assert.ok(Math.abs(timing.captureDurationErrorSeconds-.021)<1e-10);
+ for(const change of [{endVerified:false},{rawCapturedFrames:frames-1},{rawCapturedFrames:NaN},{invalid:true},
+  {byteLength:(48000*3+2401)*8}])assert.throws(()=>captureTiming({...capture,...change},3),/timing could not/);
+});

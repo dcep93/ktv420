@@ -440,6 +440,13 @@
         this.pauseAt();
         this.ended = true;
       };
+      this.onWaiting = () => {
+        // A short network stall must not masquerade as codec/resampler overhead.
+        if (this.capturing && !this.ended && !element.paused && element.readyState < 3 && element.currentTime > 0) {
+          this.invalidate('Spotify buffered during recording. Retry this song after it loads.');
+        }
+      };
+      element.addEventListener('waiting', this.onWaiting);
       this.onRate = () => { if (this.capturing && !this.ended && element.playbackRate !== 1) this.invalidate('Spotify changed speed during recording.'); };
       element.addEventListener('ratechange', this.onRate);
       element.addEventListener('seeking', this.onSeek);
@@ -496,6 +503,7 @@
       this.element.removeEventListener('ratechange', this.onRate);
       this.element.removeEventListener('seeking', this.onSeek);
       this.element.removeEventListener('ended', this.onEnded);
+      this.element.removeEventListener('waiting', this.onWaiting);
     }
 
     async finish() {
@@ -511,33 +519,33 @@
       this.element.removeEventListener('ratechange', this.onRate);
       this.element.removeEventListener('seeking', this.onSeek);
       this.element.removeEventListener('ended', this.onEnded);
+      this.element.removeEventListener('waiting', this.onWaiting);
       const rawCapturedFrames = this.byteLength / (this.channelCount * 4);
       const endVerified = this.ended && this.endState?.source === this.sourceAtStart;
       // Chromium may refine compressed duration after playback starts. Freeze
       // the completed source's final duration before Spotify reuses its element.
       const mediaDuration = endVerified ? this.endState.duration : this.duration;
       const expectedFrames = Math.round(mediaDuration * this.sampleRate);
-      // Compressed media duration is not decoded PCM length. Chromium can report
-      // an MP3 ~25 ms longer than the audio it actually plays (codec padding).
-      // Accept at most 50 ms only at a natural end with uninterrupted PCM; keep
-      // the actual samples, never pad the recording to the container duration.
-      const shortAtNaturalEnd = endVerified && rawCapturedFrames > 0 &&
-        expectedFrames - rawCapturedFrames <= Math.ceil(this.sampleRate * .05);
-      // The ended event runs on the main thread: a busy tab can keep receiving
-      // silent worklet blocks long after the last sample. Length alone cannot
-      // distinguish that harmless tail from extra/misaligned music. Check every
-      // extra sample, and require an actual ended event for more than 50 ms.
-      // Never remove opening silence or manufacture missing frames.
+      // Media duration is a sanity check, not a sample boundary. Codec padding
+      // can make PCM shorter, while resampling can add real samples at the tail.
+      // Keep all signal within the existing 50 ms bound at a natural end. Only
+      // discard exact digital zeros beyond BOTH the duration and that signal.
+      const allowance = Math.ceil(this.sampleRate * .05);
       if (this.startVerified) {
         const excess = rawCapturedFrames - expectedFrames;
         if (!Number.isSafeInteger(expectedFrames) || expectedFrames <= 0) {
           this.invalidate('Spotify did not provide a valid song duration.');
-        } else if (excess < 0 && !shortAtNaturalEnd) {
-          this.invalidate(`Recording is ${(-excess / this.sampleRate).toFixed(3)} seconds short.`);
-        } else if (excess > 0 && (!this.tailIsSilent(expectedFrames) ||
-            (excess > this.sampleRate * .05 && !this.ended))) {
-          this.invalidate(`Recording has ${(excess / this.sampleRate).toFixed(3)} seconds of unverified extra audio.`);
-        } else if (excess > 0) this.byteLength = expectedFrames * this.channelCount * 4;
+        } else if (excess < 0) {
+          if (!endVerified || rawCapturedFrames <= 0 || -excess > allowance) {
+            this.invalidate(`Recording is ${(-excess / this.sampleRate).toFixed(3)} seconds short.`);
+          }
+        } else if (excess > 0) {
+          const tailEndFrame = this.signalEndAfter(expectedFrames);
+          if (!Number.isSafeInteger(tailEndFrame) || tailEndFrame - expectedFrames > allowance ||
+              (!endVerified && (tailEndFrame > expectedFrames || excess > allowance))) {
+            this.invalidate(`Recording has ${(excess / this.sampleRate).toFixed(3)} seconds of unverified extra audio.`);
+          } else this.byteLength = tailEndFrame * this.channelCount * 4;
+        }
       }
       const bytes = new Uint8Array(this.byteLength);
       let offset = 0;
@@ -564,18 +572,23 @@
       };
     }
 
-    tailIsSilent(expectedFrames) {
-      let skip = expectedFrames * this.channelCount * 4;
+    signalEndAfter(expectedFrames) {
+      const stride = this.channelCount * 4, expectedBytes = expectedFrames * stride;
+      let base = 0, endFrame = expectedFrames;
       for (const chunk of this.chunks) {
-        if (skip >= chunk.byteLength) { skip -= chunk.byteLength; continue; }
-        const view = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
-        // Exact digital silence only: do not erase quiet music or NaNs.
-        for (let offset = skip; offset < chunk.byteLength; offset += 4) {
-          if (view.getFloat32(offset, true) !== 0) return false;
+        if (base + chunk.byteLength > expectedBytes) {
+          const view = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+          for (let offset = Math.max(0, expectedBytes - base); offset < chunk.byteLength; offset += 4) {
+            const sample = view.getFloat32(offset, true);
+            if (!Number.isFinite(sample)) return NaN;
+            // Preserve even very quiet tails, on either channel. No threshold
+            // and no trimming inside the reported duration (including silence).
+            if (sample !== 0) endFrame = Math.floor((base + offset) / stride) + 1;
+          }
         }
-        skip = 0;
+        base += chunk.byteLength;
       }
-      return true;
+      return endFrame;
     }
 
     handleAudioChunk(message) {
