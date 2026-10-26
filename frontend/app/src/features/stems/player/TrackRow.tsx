@@ -203,7 +203,7 @@ export function TrackRow({
           </label>
           <button type="button" className="stem-effect-value" aria-label={`Reset ${label} effect`} title="Reset to clean"
             onClick={()=>onResetEffect(track.id)}>{effectSettings.bypass?'Bypassed':effectAmountLabel(effectType,effectValue)}</button>
-          {effectType==='delay-pedal' && <div className="stem-echo-timing">
+          {(effectType==='delay-pedal'||effectType==='reverse-echo') && <div className="stem-echo-timing">
             <label>BPM <input type="number" min="40" max="240" step="1" aria-label={`${label} echo BPM`} key={effectSettings.bpm} defaultValue={effectSettings.bpm}
               onBlur={event=>{const n=Number(event.target.value),bpm=Number.isFinite(n)&&event.target.value?Math.max(40,Math.min(240,n)):effectSettings.bpm;event.target.value=String(bpm);onEffectSettingsChange(track.id,{...effectSettings,bpm});}}
               onKeyDown={event=>{if(event.key==='Enter')event.currentTarget.blur();}} /></label>

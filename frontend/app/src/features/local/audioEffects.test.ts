@@ -95,7 +95,7 @@ test('production sample rates preserve character, stereo isolation, and active p
    const x=.95*Math.sin(2*Math.PI*733*i/sampleRate);dsp.tick(x,0,c,i/sampleRate);
    assert.ok(Number.isFinite(dsp.left)&&Math.abs(dsp.left)<=1.000001,`${effect} at ${sampleRate}`);
    // Reverb deliberately diffuses between stereo channels; other effects cannot leak across them.
-   if(effect!=='reverb')assert.equal(dsp.right,0,`${effect} stereo isolation`);
+   if(effect!=='reverb'&&effect!=='shimmer-reverb')assert.equal(dsp.right,0,`${effect} stereo isolation`);
   }
  }
 });

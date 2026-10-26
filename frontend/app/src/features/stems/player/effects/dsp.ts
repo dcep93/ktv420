@@ -1,8 +1,10 @@
+import { OctaveLayer } from './octave';
+import { SampleDelay as Delay, ReverseGrains } from './timeEffects';
 import { effectIds, type AudioEffectType } from './catalog';
 const TAU=Math.PI*2;
 const vowelBands=[[800,1150,2900],[400,1700,2600],[300,2200,3000],[500,800,2800],[350,650,2700]];
 const vowelQ=[5,7,9],phaseRatios=[.35,.65,1,1.7,2.8,4.5],roomLeft=[1,1,-1,-1,1,-1,1,-1],roomRight=[1,-1,1,-1,-1,1,1,-1];
-const bipolarEffects=new Set<AudioEffectType>(['wah','dj-filter','tone','tilt-eq','bass-boost','bright','band-emphasis','lofi']);
+const bipolarEffects=new Set<AudioEffectType>(['wah','dj-filter','tone','tilt-eq','bass-boost','bright','band-emphasis','lofi','octave']);
 const clamp=(x:number,a:number,b:number)=>Math.max(a,Math.min(b,x));
 // Smooth unit ceiling for active processed peaks; exact dry/bypass never pass through it.
 const ceiling=(x:number,dry:number)=>{
@@ -49,13 +51,6 @@ class Filter {
   }
   reset(){this.z1=this.z2=0;}
 }
-class Delay {
-  data:Float32Array;index=0;
-  constructor(length:number){this.data=new Float32Array(length);}
-  read(samples:number){let p=this.index-clamp(samples,1,this.data.length-2);if(p<0)p+=this.data.length;const i=Math.floor(p),f=p-i;return this.data[i]*(1-f)+this.data[(i+1)%this.data.length]*f;}
-  write(x:number){this.data[this.index]=flush(x);if(++this.index===this.data.length)this.index=0;}
-  reset(){this.data.fill(0);this.index=0;}
-}
 class Diffuser {
   line:Delay;
   constructor(length:number){this.line=new Delay(length+2);}
@@ -70,6 +65,10 @@ export class StereoEffects {
   private filters=Array.from({length:6},()=>new Filter());
   private delay:Delay[];
   private room:Delay[];
+  private octaveUp:OctaveLayer;
+  private octaveDown:OctaveLayer;
+  private reverse=new ReverseGrains();
+  private octaveDirection=1;
   private diffusion:Diffuser[];
   private damp=new Float64Array(8);
   private feedback=new Float64Array(8);
@@ -99,9 +98,10 @@ export class StereoEffects {
   private roomCoefficient:number;
   left=0;right=0;
   constructor(rate:number){
+    this.octaveUp=new OctaveLayer(rate,1);this.octaveDown=new OctaveLayer(rate,-1);
     this.rate=rate;this.smoothing=1-Math.exp(-1/(.015*rate));this.attack=1-Math.exp(-1/(.008*rate));this.release=1-Math.exp(-1/(.12*rate));
     this.repeatCoefficient=1-Math.exp(-TAU*3200/rate);this.roomCoefficient=1-Math.exp(-TAU*5500/rate);
-    this.delay=[new Delay(Math.ceil(rate*6.1)),new Delay(Math.ceil(rate*6.1))];
+    this.delay=[new Delay(Math.ceil(rate*12.1)),new Delay(Math.ceil(rate*12.1))];
     this.room=[.0297,.0371,.0411,.0437,.0479,.0533,.0593,.0617].map(seconds=>new Delay(Math.round(seconds*rate)+2));
     this.diffusion=[.0047,.0017,.0053,.0023].map(seconds=>new Diffuser(Math.round(seconds*rate)));
     this.saturator.forEach(filter=>filter.set('lowpass',Math.min(16000,rate*.4),.707,rate*4));
@@ -110,6 +110,7 @@ export class StereoEffects {
     this.filters.forEach(f=>f.reset());this.delay.forEach(d=>d.reset());this.room.forEach(d=>d.reset());this.diffusion.forEach(d=>d.reset());
     this.damp.fill(0);this.phaseState.fill(0);this.repeatLow.fill(0);this.previousInput.fill(0);this.saturator.forEach(f=>f.reset());this.envelope=0;this.coefficientAmount=NaN;
     this.echoTarget=this.echoDelay=this.echoFrom=0;this.echoFade=1;
+    this.octaveUp.reset();this.octaveDown.reset();this.reverse.reset();
   }
   private configure(v:number,time:number){
     const kind=this.effect,amount=Math.abs(v-.5)*2;
@@ -138,7 +139,7 @@ export class StereoEffects {
       const frequency=450*2**(Math.sin(TAU*.16*time)*(1+v));
       for(let i=0;i<phaseRatios.length;i++){const k=Math.tan(Math.PI*Math.min(this.rate*.4,frequency*phaseRatios[i])/this.rate);this.phaseA[i]=(k-1)/(k+1);}
     }
-    if(kind==='reverb')for(let i=0;i<8;i++)this.feedback[i]=10**(-3*(this.room[i].data.length-2)/this.rate/(.8+v*3.2));
+    if(kind==='reverb'||kind==='shimmer-reverb')for(let i=0;i<8;i++)this.feedback[i]=10**(-3*(this.room[i].data.length-2)/this.rate/(kind==='shimmer-reverb'?1.8+v*5:.8+v*3.2));
   }
   tick(l:number,r:number,control:EffectControl,time:number){
     l=Number.isFinite(l)?l:0;r=Number.isFinite(r)?r:0;
@@ -155,12 +156,31 @@ export class StereoEffects {
     const v=this.amount,kind=this.effect,bipolar=bipolarEffects.has(kind);
     const strength=bipolar?Math.abs(v-.5)*2:v;
     let outL=l,outR=r;
-    if(kind==='reverb'){
+    if(kind==='octave'){
+      const direction=v<.5?-1:1,layer=direction<0?this.octaveDown:this.octaveUp;
+      if(direction!==this.octaveDirection){layer.reset();this.octaveDirection=direction;}
+      layer.tick(l,r);
+      outL=l+layer.left*strength*.85;outR=r+layer.right*strength*.85;
+    }else if(kind==='reverse-echo'){
+      const span=clamp(60/clamp(control.bpm,40,240)*control.beats/clamp(control.tempo,.5,2),.02,6)*this.rate;
+      this.reverse.tick(this.delay,span);
+      const feedback=.15+.3*v;
+      this.repeatLow[0]+=this.repeatCoefficient*(this.reverse.left-this.repeatLow[0]);
+      this.repeatLow[1]+=this.repeatCoefficient*(this.reverse.right-this.repeatLow[1]);
+      this.delay[0].write(l+this.repeatLow[0]*feedback);this.delay[1].write(r+this.repeatLow[1]*feedback);
+      outL=l*(1-.15*v)+this.reverse.left*.9*v;outR=r*(1-.15*v)+this.reverse.right*.9*v;
+    }else if(kind==='reverb'||kind==='shimmer-reverb'){
       const dl=this.diffusion[1].tick(this.diffusion[0].tick(l)),dr=this.diffusion[3].tick(this.diffusion[2].tick(r));
       let sum=0,left=0,right=0;
       for(let i=0;i<8;i++){const d=this.room[i];const value=d.read(d.data.length-2);this.damp[i]+=this.roomCoefficient*(value-this.damp[i]);this.roomValues[i]=this.damp[i];sum+=this.damp[i];}
       for(let i=0;i<8;i++){this.room[i].write((i%2?dr:dl)*.3+(this.roomValues[i]-sum*.25)*this.feedback[i]);left+=this.roomValues[i]*roomLeft[i];right+=this.roomValues[i]*roomRight[i];}
-      outL=l*(1-.25*v)+left*.22*v;outR=r*(1-.25*v)+right*.22*v;
+      if(kind==='shimmer-reverb'){
+        // Pitch the diffuse tail, preserving the immediate source. Feed-forward
+        // shimmer keeps octave energy out of the room’s feedback stability loop.
+        this.octaveUp.tick(left*.22,right*.22);
+        outL=l*(1-.2*v)+(left*.22*.25+this.octaveUp.left*1.2)*v;
+        outR=r*(1-.2*v)+(right*.22*.25+this.octaveUp.right*1.2)*v;
+      }else{outL=l*(1-.25*v)+left*.22*v;outR=r*(1-.25*v)+right*.22*v;}
     }else for(let c=0;c<2;c++){
       const x=c?r:l,f=this.filters[c*3],g=this.filters[c*3+1];let y=x;
       switch(kind){

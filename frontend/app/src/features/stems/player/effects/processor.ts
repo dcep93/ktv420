@@ -1,3 +1,4 @@
+import { effectIds } from './catalog';
 import { StereoEffects, type EffectControl } from './dsp';
 declare const sampleRate: number;
 declare const currentFrame: number;
@@ -5,7 +6,7 @@ declare class AudioWorkletProcessor { readonly port: MessagePort; }
 declare function registerProcessor(name:string,processor:typeof AudioWorkletProcessor):void;
 class KtvEffects extends AudioWorkletProcessor {
   static get parameterDescriptors(){return [
-    {name:'effect',defaultValue:0,minValue:0,maxValue:18,automationRate:'k-rate'},
+    {name:'effect',defaultValue:0,minValue:0,maxValue:effectIds.length-1,automationRate:'k-rate'},
     {name:'amount',defaultValue:.5,minValue:0,maxValue:1,automationRate:'k-rate'},
     {name:'bypass',defaultValue:0,minValue:0,maxValue:1,automationRate:'k-rate'},
     {name:'bpm',defaultValue:120,minValue:40,maxValue:240,automationRate:'k-rate'},
