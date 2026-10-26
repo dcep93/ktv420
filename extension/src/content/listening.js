@@ -11,7 +11,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
   let volume = 0, output = 'muted', error = '', armed = false;
   let volumeTimer = null, volumeEdit = 0, volumeSettlesAt = 0, latestState = null;
   const stemClock = new StemClock();
-  let syncedAt = 0, pendingRate = null, rateQueued = false;
+  let pendingRate = null, rateQueued = false;
   let batchPending = false, silentGeneration = -1, replayPreparation = false;
   let frameHeartbeat = 0, failedTrack = '', ignoreUntil = 0, commands = Promise.resolve();
   let lastVolumeDom = null;
@@ -61,7 +61,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
     busy = true;
     const observedVolumeEdit = volumeEdit;
     try {
-      let dom = readTransportDom();
+      const dom = readTransportDom();
       if (!dom.trackId && dom.playing && dom.available) {
         const opener = document.querySelector('[data-testid="cover-art-button"][aria-label="Now playing view"]');
         if (opener && !document.querySelector('#Desktop_PanelContainer_Id a[href*="uri="]')) opener.click();
@@ -142,19 +142,6 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
         if (stemClock.position >= dom.duration) {
           await commandTransport({ action: dom.canNext ? 'next' : 'pause' });
           return;
-        }
-        // Keep Spotify's remote display nearby by seeking its muted DOM player.
-        // Never change its playbackRate or feed these corrections back into the remix clock.
-        const drift = Math.abs(stemClock.position - media.currentTime);
-        const approachingEnd = stemClock.rate < 1 && dom.duration - media.currentTime < 2;
-        if (now - syncedAt >= 1000 && (drift > .75 || approachingEnd)) {
-          // Leave headroom for the next poll: a slowed remix can still be
-          // playing after Spotify would naturally reach the end at 1×.
-          const target = stemClock.rate < 1 ? Math.min(stemClock.position, Math.max(0, dom.duration - 2)) : stemClock.position;
-          await commandTransport({ action: 'seek', trackId: dom.trackId, position: target });
-          syncedAt = Date.now();
-          dom = readTransportDom();
-          if (dom.trackId !== current.trackId || dom.playing !== current.playing) return;
         }
       }
       last = { ...dom, playbackRate: 1, observedAt: Date.now() };

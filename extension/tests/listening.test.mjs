@@ -195,7 +195,7 @@ test('media handoff mute does not reset listening volume, but Spotify slider cha
   await controller.setEnabled(false); controller.dispose();
 });
 
-test('tempo advances the remix clock and seeks the DOM without changing Spotify media rate', async t => {
+test('tempo lets Spotify drift without automatic seeks or media rate changes', async t => {
   let now = 10000, position = 10, playing = true, trackId = '5EGTNEoUpibGgMWf6ECe0X';
   const ticks = [], calls = [], updates = [], seeks = [];
   t.mock.method(Date, 'now', () => now);
@@ -240,9 +240,10 @@ test('tempo advances the remix clock and seeks the DOM without changing Spotify 
   assert.equal(updates.at(-1).playbackRate, 1.5);
   assert.equal(updates.at(-1).position, 13);
   assert.equal(updates.at(-1).error, '');
-  assert.deepEqual(seeks, [13], 'muted Spotify is brought near the remix using its seek slider');
+  assert.deepEqual(seeks, [], 'tempo must not seek Spotify to correct drift');
+  assert.equal(position, 12, 'Spotify continues at its natural speed');
   await tick(.2);
-  assert.ok(Math.abs(updates.at(-1).position - 13.3) < 1e-9, 'our seek must not reset the remix clock');
+  assert.ok(Math.abs(updates.at(-1).position - 13.3) < 1e-9, 'natural Spotify progress must not reset the remix clock');
   await controller.command({ action: 'pause' }); await tick();
   const pausedPosition = updates.at(-1).position;
   await tick(2); assert.equal(updates.at(-1).position, pausedPosition);
@@ -256,7 +257,8 @@ test('tempo advances the remix clock and seeks the DOM without changing Spotify 
   await controller.command({ action: 'seek', trackId, position: 178 }); await tick();
   await tick(1);
   assert.equal(updates.at(-1).position, 178.5);
-  assert.ok(position <= 178, 'slow playback keeps Spotify away from premature auto-advance');
+  assert.equal(position, 179, 'Spotify continues ahead of the slowed remix');
+  assert.deepEqual(seeks, [30, 178], 'only explicit user seeks touch the Spotify timeline');
   await tick(3);
   assert.equal(playing, false, 'end of remix pauses when Spotify has no next song');
   trackId = '6EGTNEoUpibGgMWf6ECe0X'; position = 0; playing = true; await tick(3);
