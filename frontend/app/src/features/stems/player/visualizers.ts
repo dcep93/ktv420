@@ -1,3 +1,4 @@
+import { drawPitchRibbon, resetPitchRibbon } from './visuals/pitchRibbon';
 import { drawKaleidoscope, resetKaleidoscope } from './visuals/kaleidoscope';
 import { seed } from './visuals/stemScene';
 import { drawTimeRibbon, resetTimeRibbon, smoothRibbonColor } from './visuals/timeRibbon';
@@ -15,6 +16,7 @@ function isLowPowerMode(): boolean {
 export function resetVisualizerState(canvas: HTMLCanvasElement) {
   resetKaleidoscope(canvas);
   resetTimeRibbon(canvas);
+  resetPitchRibbon(canvas);
 }
 
 export type VisualizerInputs = {
@@ -1363,6 +1365,7 @@ function drawLegacyVisualizer({
 
 /** Isolate canvas state and draw existing artwork in logical CSS pixels on Retina. */
 export function drawVisualizer(inputs: VisualizerInputs) {
+  if (inputs.visualizerType === 'pitch-ribbon') { drawPitchRibbon(inputs); return; }
   if (inputs.visualizerType === 'kaleidoscope') { drawKaleidoscope(inputs); return; }
   if (inputs.visualizerType === 'time-ribbon' || inputs.visualizerType === 'super-time-ribbon') { drawTimeRibbon(inputs); return; }
   const view = beginVisualizer(inputs.canvas);

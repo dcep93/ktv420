@@ -6,6 +6,7 @@ export const visualizerGroups: Array<{ label: string; options: VisualizerOption[
   { label: "Signal", options: [
     { value: "time-ribbon", label: "Time Ribbon", hint: "Amplitude Timeline" },
     { value: "super-time-ribbon", label: "Super Time Ribbon", hint: "Prismatic trails & beat sparks" },
+    { value: "pitch-ribbon", label: "Pitch Ribbon", hint: "Pitch & volume over time" },
     { value: "waveform-waterline", label: "Waveform Waterline", hint: "Oscilloscope" },
     { value: "spectrum-safari", label: "Spectrum Safari", hint: "Analyzer" },
     { value: "laser-ladders", label: "Laser Ladders", hint: "Graphic EQ" },

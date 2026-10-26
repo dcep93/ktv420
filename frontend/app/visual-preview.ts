@@ -1,3 +1,4 @@
+import { drawPitchRibbon } from './src/features/stems/player/visuals/pitchRibbon';
 import { loadPlateArtwork, musicNoteArtwork } from './src/features/stems/player/visuals/plateArtwork';
 import './src/styles/theme.css';
 import './src/index.css';
@@ -8,7 +9,8 @@ import { drawStereoBloom } from './src/features/stems/player/visuals/stereoBloom
 import { createStereoTap } from './src/features/stems/player/visuals/analysis';
 const canvas = document.querySelector<HTMLCanvasElement>('#scene-canvas')!;
 const spectrogram = document.querySelector<HTMLCanvasElement>('#spectrogram')!, bloom = document.querySelector<HTMLCanvasElement>('#bloom')!;
-const canvases = [canvas, spectrogram, bloom];
+const pitchRibbon = document.querySelector<HTMLCanvasElement>('#pitch-ribbon')!;
+const canvases = [canvas, spectrogram, bloom, pitchRibbon];
 const observer = new ResizeObserver(() => canvases.forEach(resizeVisualizer)); canvases.forEach(c => observer.observe(c));
 document.querySelector('#expand')!.addEventListener('click', () => {
   const expanded = canvas.parentElement!.classList.toggle('combined-visualizer--expanded');
@@ -55,7 +57,7 @@ document.querySelector('#start')!.addEventListener('click', async () => {
       const t = i / context.sampleRate, beat = t % .5, noise = Math.sin(i * 127.1) * 43758.5453 % 1;
       buffer.getChannelData(channel)[i] = name === 'drums' ? .55 * Math.exp(-beat * 30) * (Math.sin(t * 2 * Math.PI * 90) + noise * .5)
         : name === 'bass' ? .23 * Math.sin(2 * Math.PI * 82 * t) * (.65 + .35 * Math.sin(t * Math.PI))
-        : name === 'vocals' ? .16 * (Math.sin(2 * Math.PI * 330 * t + Math.sin(t * 3) * 2) + .3 * Math.sin(t * 2 * Math.PI * 660)) * (.65 + .35 * Math.sin(t * 2))
+        : name === 'vocals' ? .16 * (Math.sin(2 * Math.PI * (330 * t + 150 / 1.2 * Math.sin(t * 1.2))) + .3 * Math.sin(t * 2 * Math.PI * 660)) * (.65 + .35 * Math.sin(t * 2))
         : .12 * (Math.sin(t * 2 * Math.PI * (220 + channel * 2)) + Math.sin(t * 2 * Math.PI * (330 - channel * 2)));
     }
     const source = context.createBufferSource(); source.buffer = buffer; source.loop = true;
@@ -84,6 +86,7 @@ document.querySelector('#start')!.addEventListener('click', async () => {
       const mean = timings.reduce((a, b) => a + b, 0) / timings.length; timings.sort((a, b) => a - b);
       document.querySelector('#timing')!.textContent = `${combinedVisualizers[scene].label}: mean ${mean.toFixed(2)} ms · p95 ${timings[113].toFixed(2)} ms (120 frames, drawing commands + audio analysis)`; timings.length = 0;
     }
+    drawPitchRibbon({ canvas: pitchRibbon, analyser: voices[2].analyser, currentTime: time, duration: 1000, visualizerType: 'pitch-ribbon', sampleRate: context.sampleRate, isPlaying: playing });
     drawSpectrogram(spectrogram, voices[2].analyser, time, playing); drawStereoBloom(bloom, tap); requestAnimationFrame(render);
   }; render();
   document.querySelector('#result')!.textContent = 'Live synthetic audio through the production renderers. Toggle stems to isolate their contributions.';

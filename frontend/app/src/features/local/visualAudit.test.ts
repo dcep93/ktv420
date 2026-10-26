@@ -23,6 +23,8 @@ test('all per-stem renderers keep finite geometry and balanced canvas state',()=
   Object.defineProperty(globalThis,'Image',{configurable:true,value:class {complete=true;naturalWidth=200;width=200;height=200;}});
   Object.defineProperty(globalThis,'window',{configurable:true,value:{addEventListener(){},removeEventListener(){}}});
   const analyser={fftSize:2048,frequencyBinCount:1024,
+    getFloatFrequencyData(data:Float32Array){data.fill(-40);},
+    getFloatTimeDomainData(data:Float32Array){for(let i=0;i<data.length;i++)data[i]=Math.sin(i*.05)*.3;},
     getByteFrequencyData(data:Uint8Array){for(let i=0;i<data.length;i++)data[i]=Math.round(255/(1+i*.03));},
     getByteTimeDomainData(data:Uint8Array){for(let i=0;i<data.length;i++)data[i]=128+Math.round(Math.sin(i*.05)*80);},
   } as unknown as AnalyserNode;

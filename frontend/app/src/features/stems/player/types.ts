@@ -79,6 +79,7 @@ export type VisualizerType =
   | "ripple-weave"
   | "ectoplasm"
   | "super-time-ribbon"
+  | "pitch-ribbon"
   | "prismatic-turbine"
   | "kaleidoscope"
   | "highway"
