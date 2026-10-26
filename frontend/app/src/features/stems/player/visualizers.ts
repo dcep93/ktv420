@@ -1,84 +1,19 @@
+import { drawKaleidoscope, resetKaleidoscope } from './visuals/kaleidoscope';
 import { seed } from './visuals/stemScene';
 import { drawTimeRibbon, resetTimeRibbon, smoothRibbonColor } from './visuals/timeRibbon';
 import { analysisBytes } from './visuals/analysis';
 import { beginVisualizer, surfaceFor } from './visuals/canvas';
 import {
-  AMPLITUDE_WINDOW_SECONDS,
   type VisualizerType,
 } from "./types";
 
 const cachedPerformanceMode = true;
-const HALF_PI = Math.PI / 2;
-const TWO_PI = Math.PI * 2;
-const KALEIDOSCOPE_EASE = 0.01;
-const KALEIDOSCOPE_ENERGY_WINDOW_SECONDS = 0.5;
-const KALEIDOSCOPE_ENERGY_CAP = 0.45;
-const KALEIDOSCOPE_BASE_AREA = 900 * 102;
-const KALEIDOSCOPE_MAX_MOTION_SCALE = 3;
-const KALEIDOSCOPE_MIN_SPOTLIGHT_ENERGY = 0.05;
-const KALEIDOSCOPE_IMAGE_SRC = new URL('../../../assets/kaleidoscope.svg', import.meta.url).href;
-let kaleidoscopeImage: HTMLImageElement | null = null;
-type KaleidoscopeState = {
-  width: number;
-  height: number;
-  radius: number;
-  slices: number;
-  zoom: number;
-  offsetRotation: number;
-  offsetScale: number;
-  offsetX: number;
-  offsetY: number;
-  targetX: number;
-  targetY: number;
-  rotationTarget: number;
-  rotationSpeed: number;
-  lastTime: number;
-  image: HTMLImageElement;
-  pattern: CanvasPattern | null;
-  lastPointerX: number | null;
-  lastPointerY: number | null;
-  onMouseMove?: (event: MouseEvent) => void;
-};
-
-const kaleidoscopeStateMap = new WeakMap<
-  HTMLCanvasElement,
-  KaleidoscopeState
->();
-
-function getKaleidoscopeMotionScale(width: number, height: number) {
-  const areaScale = Math.sqrt(
-    Math.max(1, (width * height) / KALEIDOSCOPE_BASE_AREA)
-  );
-
-  return Math.min(KALEIDOSCOPE_MAX_MOTION_SCALE, areaScale);
-}
-
-function getKaleidoscopeImage() {
-  if (!kaleidoscopeImage) {
-    kaleidoscopeImage = new Image();
-    kaleidoscopeImage.crossOrigin = "Anonymous";
-    kaleidoscopeImage.src = KALEIDOSCOPE_IMAGE_SRC;
-  }
-
-  return kaleidoscopeImage;
-}
-
 function isLowPowerMode(): boolean {
   return cachedPerformanceMode;
 }
 
 export function resetVisualizerState(canvas: HTMLCanvasElement) {
-  const kaleidoscopeState = kaleidoscopeStateMap.get(canvas);
-
-  if (kaleidoscopeState?.onMouseMove) {
-    canvas.removeEventListener(
-      "mousemove",
-      kaleidoscopeState.onMouseMove,
-      false
-    );
-  }
-
-  kaleidoscopeStateMap.delete(canvas);
+  resetKaleidoscope(canvas);
   resetTimeRibbon(canvas);
 }
 
@@ -101,9 +36,6 @@ function drawLegacyVisualizer({
   currentTime,
   visualizerType,
   isPlaying,
-  amplitudeEnvelope,
-  amplitudeMaximum = 1,
-  effectiveVolume = 1,
   sampleRate,
 }: VisualizerInputs) {
   const context = canvas.getContext("2d");
@@ -1346,199 +1278,6 @@ function drawLegacyVisualizer({
     }
     context.globalCompositeOperation = "source-over";
     context.restore();
-  } else if (visualizerType === "kaleidoscope") {
-    let cached = kaleidoscopeStateMap.get(canvas);
-
-    if (!cached) {
-      const radius = 1100;
-      const slices = 24;
-      const zoom = 1.5;
-      const randomOffsetX = (seed(41) * 2 - 1) * radius * 0.6;
-      const randomOffsetY = (seed(73) * 2 - 1) * radius * 0.6;
-
-      const image = getKaleidoscopeImage();
-
-      const state: KaleidoscopeState = {
-        width,
-        height,
-        radius,
-        slices,
-        zoom,
-        offsetRotation: 0,
-        offsetScale: 0.8,
-        offsetX: randomOffsetX,
-        offsetY: randomOffsetY,
-        targetX: randomOffsetX,
-        targetY: randomOffsetY,
-        rotationTarget: 0,
-        rotationSpeed: 0.002,
-        lastTime: currentTime,
-        image,
-        pattern: null,
-        lastPointerX: null,
-        lastPointerY: null,
-      };
-
-      const handleMouseMove = (event: MouseEvent) => {
-        state.lastPointerX = event.clientX;
-        state.lastPointerY = event.clientY;
-        const motionScale = getKaleidoscopeMotionScale(
-          state.width,
-          state.height
-        );
-        const bounds = canvas.getBoundingClientRect();
-        const dx = (event.clientX - bounds.left) / Math.max(1, bounds.width);
-        const dy = (event.clientY - bounds.top) / Math.max(1, bounds.height);
-        const hx = dx - 0.1;
-        const hy = dy - 0.1;
-        state.targetX = hx * state.radius * -0.8 * motionScale;
-        state.targetY = hy * state.radius * 0.8 * motionScale;
-      };
-
-      state.onMouseMove = handleMouseMove;
-      canvas.addEventListener("mousemove", handleMouseMove, false);
-
-      if (image.complete && image.naturalWidth > 0) {
-        state.pattern = context.createPattern(image, "repeat");
-      }
-
-      kaleidoscopeStateMap.set(canvas, state);
-      cached = state;
-    }
-
-    if (cached) {
-      if (cached.width !== width || cached.height !== height) {
-        cached.width = width;
-        cached.height = height;
-
-        if (cached.lastPointerX !== null && cached.lastPointerY !== null) {
-          const motionScale = getKaleidoscopeMotionScale(width, height);
-          const bounds = canvas.getBoundingClientRect();
-          const dx = Math.max(0, Math.min(1, (cached.lastPointerX - bounds.left) / Math.max(1, bounds.width)));
-          const dy = Math.max(0, Math.min(1, (cached.lastPointerY - bounds.top) / Math.max(1, bounds.height)));
-          const hx = dx - 0.1;
-          const hy = dy - 0.1;
-          cached.targetX = hx * cached.radius * -0.8 * motionScale;
-          cached.targetY = hy * cached.radius * 0.8 * motionScale;
-        }
-      }
-
-      if (
-        !cached.pattern &&
-        cached.image.complete &&
-        cached.image.naturalWidth > 0
-      ) {
-        cached.pattern = context.createPattern(cached.image, "repeat");
-      }
-
-      if (
-        !cached.pattern ||
-        cached.image.width === 0 ||
-        cached.image.height === 0
-      ) {
-        context.fillStyle = background;
-        context.fillRect(0, 0, width, height);
-        return;
-      }
-
-      let energy = 0;
-
-      if (amplitudeEnvelope && amplitudeEnvelope.length) {
-        const halfWindow = KALEIDOSCOPE_ENERGY_WINDOW_SECONDS / 2;
-        const startIndex = Math.max(
-          0,
-          Math.floor((currentTime - halfWindow) / AMPLITUDE_WINDOW_SECONDS)
-        );
-        const endIndex = Math.min(
-          amplitudeEnvelope.length - 1,
-          Math.ceil((currentTime + halfWindow) / AMPLITUDE_WINDOW_SECONDS)
-        );
-        let sum = 0;
-        let count = 0;
-        for (let i = startIndex; i <= endIndex; i++) {
-          sum += amplitudeEnvelope[i] ?? 0;
-          count += 1;
-        }
-        const amplitude = count > 0 ? sum / count : 0;
-        energy = amplitudeMaximum > 0 ? amplitude / amplitudeMaximum : 0;
-      } else {
-        const bufferLength = analyser.frequencyBinCount;
-        const frequencyData = analysisBytes(analyser, bufferLength);
-        analyser.getByteFrequencyData(frequencyData);
-
-        if (bufferLength > 0) {
-          let sum = 0;
-          for (let i = 0; i < bufferLength; i++) {
-            sum += frequencyData[i] ?? 0;
-          }
-          energy = sum / (bufferLength * 255);
-        }
-      }
-
-      const deltaTime = Math.max(0, currentTime - cached.lastTime);
-      cached.lastTime = currentTime;
-      const clampedVolume = Math.max(0, Math.min(1, effectiveVolume));
-      energy *= clampedVolume;
-      if (
-        !isPlaying ||
-        deltaTime === 0 ||
-        !Number.isFinite(energy) ||
-        clampedVolume === 0
-      ) {
-        energy = 0;
-      }
-      let clampedEnergy = Math.max(
-        0,
-        Math.min(KALEIDOSCOPE_ENERGY_CAP, energy / 25)
-      );
-      const motionScale = getKaleidoscopeMotionScale(width, height);
-      if (isPlaying && motionScale > 1 && clampedVolume > 0) {
-        clampedEnergy = Math.max(
-          clampedEnergy,
-          KALEIDOSCOPE_MIN_SPOTLIGHT_ENERGY
-        );
-      }
-      const weightedDeltaTime = Math.min(
-        1,
-        deltaTime * clampedEnergy * motionScale
-      );
-      cached.rotationTarget -= cached.rotationSpeed * weightedDeltaTime * 60;
-
-      const ease = 1 - Math.exp(-clampedEnergy * KALEIDOSCOPE_EASE * motionScale * Math.min(.05, deltaTime) * 60);
-
-      cached.offsetX += (cached.targetX - cached.offsetX) * ease;
-      cached.offsetY += (cached.targetY - cached.offsetY) * ease;
-      cached.offsetRotation +=
-        (cached.rotationTarget - cached.offsetRotation) * ease;
-
-      const cx = cached.image.width / 2;
-      const scale =
-        cached.zoom *
-        (cached.radius / Math.min(cached.image.width, cached.image.height));
-      const step = TWO_PI / cached.slices;
-
-      context.save();
-      context.clearRect(0, 0, width, height);
-      context.fillStyle = cached.pattern ?? "#000";
-
-      for (let i = 0; i <= cached.slices; i++) {
-        context.save();
-        context.translate(width / 2, height / 2);
-        context.rotate(i * step);
-        context.beginPath();
-        context.moveTo(-0.5, -0.5);
-        context.arc(0, 0, cached.radius, step * -0.51, step * 0.51);
-        context.rotate(HALF_PI);
-        context.scale(scale, scale);
-        context.scale(i % 2 === 0 ? 1 : -1, 1);
-        context.translate(cached.offsetX - cx, cached.offsetY);
-        context.rotate(cached.offsetRotation);
-        context.scale(cached.offsetScale, cached.offsetScale);
-        context.fill();
-        context.restore();
-      }
-      context.restore();
-    }
   } else if (visualizerType === "delay-pedal") {
     const bufferLength = analyser.fftSize;
     const timeData = analysisBytes(analyser, bufferLength);
@@ -1624,6 +1363,7 @@ function drawLegacyVisualizer({
 
 /** Isolate canvas state and draw existing artwork in logical CSS pixels on Retina. */
 export function drawVisualizer(inputs: VisualizerInputs) {
+  if (inputs.visualizerType === 'kaleidoscope') { drawKaleidoscope(inputs); return; }
   if (inputs.visualizerType === 'time-ribbon' || inputs.visualizerType === 'super-time-ribbon') { drawTimeRibbon(inputs); return; }
   const view = beginVisualizer(inputs.canvas);
   if (!view) return;
