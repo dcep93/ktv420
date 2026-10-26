@@ -141,3 +141,60 @@ test('Highway palette evolves continuously across minute boundaries and wraparou
   for(const time of [60,120,180,240,300])assert.ok(distance(highwayHue(time-.001),highwayHue(time+.001))<.0001);
   assert.ok(Number.isFinite(highwayHue(NaN)));
 });
+
+const artModes = ['signal-loom', 'ink-tank', 'resonance-plate', 'glassworks'] as const;
+for (const mode of artModes) test(`${mode} is bounded at full height, supports solos and clears every muted layer`, async () => {
+  const { drawArtScene, resetArtScene } = await import('../stems/player/visuals/artScenes');
+  for (const [width, height] of [[360, 210], [1600, 360], [2400, 1200]]) {
+    const s = surface(width, height), voices = stemRoles.map(role => voice(role));
+    for (let frame = 0; frame < 120; frame++) {
+      s.reset(); drawArtScene(mode, s.canvas, voices, frame / 60, true);
+      assert.equal(s.read().depth, 0); assert.ok(s.read().operations < 6500, `${mode}: ${s.read().operations}`);
+    }
+    voices.forEach(v => { v.audible = false; });
+    s.reset(); drawArtScene(mode, s.canvas, voices, 2, true);
+    assert.equal(s.read().marks, 1);
+    for (const v of voices) {
+      v.audible = true; s.reset(); drawArtScene(mode, s.canvas, voices, 2.1, true);
+      assert.ok(s.read().marks > 1, `${mode} should draw ${v.name}`); v.audible = false;
+    }
+    for (const time of [2.1, 2.1, 1, 4000]) {
+      s.reset(); drawArtScene(mode, s.canvas, voices, time, false);
+      assert.equal(s.read().depth, 0); assert.equal(s.read().marks, 1);
+    }
+    resetArtScene(s.canvas);
+  }
+});
+
+test('art histories are bounded, stop when paused and reset on seek; mute removes old samples', async () => {
+  const { createArtState, updateArtState, HISTORY } = await import('../stems/player/visuals/artSceneState');
+  const state = createArtState(), voices = stemRoles.map(role => voice(role));
+  for (let i = 0; i < 2000; i++) updateArtState(state, voices, i / 60, true);
+  assert.equal(state.count, HISTORY); assert.equal(state.history.reduce((sum, b) => sum + b.length, 0), HISTORY * 5);
+  const before = state.history.map(b => Array.from(b)), time = state.time;
+  for (let i = 0; i < 10; i++) updateArtState(state, voices, time, false);
+  assert.equal(state.time, time); assert.deepEqual(state.history.map(b => Array.from(b)), before);
+  voices[2].audible = false; updateArtState(state, voices, time, false);
+  assert.ok(state.history[2].every(v => v === 0)); assert.equal(state.audio.levels.vocals, 0);
+  updateArtState(state, voices, 1, true);
+  const fresh = createArtState(); updateArtState(fresh, voices, 1, true);
+  assert.deepEqual(state, fresh);
+});
+
+test('Delay Pedal is retired from picker but old replay IDs work; Hollow Echoes stays', async () => {
+  const { supportsVisualizer } = await import('../stems/player/visualizerOptions');
+  assert.equal(visualizerOptions.some(v => v.value === 'delay-pedal'), false);
+  assert.ok(visualizerOptions.some(v => v.value === 'hollow-echoes'));
+  assert.ok(supportsVisualizer('delay-pedal')); assert.equal(supportsVisualizer('unknown'), false);
+});
+
+test('paused art keeps its geometry even after analyser output goes silent', async () => {
+  const { createArtState, updateArtState } = await import('../stems/player/visuals/artSceneState');
+  const state = createArtState(); updateArtState(state, [voice('vocals', .2)], 1, true);
+  updateArtState(state, [voice('vocals', 0)], 1, false);
+  const paused = structuredClone(state);
+  for (let i = 0; i < 120; i++) updateArtState(state, [voice('vocals', 0)], 1, false);
+  assert.deepEqual(state, paused); assert.ok(state.audio.levels.vocals > 0);
+  const muted = voice('vocals', 0); muted.audible = false;
+  updateArtState(state, [muted], 1, false); assert.equal(state.audio.levels.vocals, 0);
+});

@@ -52,7 +52,7 @@ import {
   type Track,
   type VisualizerType,
 } from "./types";
-import { visualizerOptions } from "./visualizerOptions";
+import { visualizerOptions, supportsVisualizer } from "./visualizerOptions";
 import { drawVisualizer, resetVisualizerState } from "./visualizers";
 
 type SpotlightIntent =
@@ -1465,7 +1465,7 @@ export default function Player({
       seek:async position => { Object.values(canvasRefs.current).forEach(canvas => { if (canvas) resetSpectrogram(canvas); }); const resume = isPlaying; stopAllSources(); startOffsetRef.current = Math.max(0,Math.min(duration,position)); setCurrentTime(startOffsetRef.current); if (resume) await schedulePlayback(startOffsetRef.current); },
       apply:value => {
         applyTempoPitch(value.tempo ?? 1, value.pitch ?? 0);
-        if (!visualizerOptions.some(option => option.value === value.visualizer) || value.stems.length !== tracks.length) throw new Error('Recording requires an unsupported mixer layout.');
+        if (!supportsVisualizer(value.visualizer) || value.stems.length !== tracks.length) throw new Error('Recording requires an unsupported mixer layout.');
         const v: Record<string,number> = {}, m: Record<string,boolean> = {}, d: Record<string,boolean> = {}, e: Record<string,AudioEffectType> = {}, x: Record<string,number> = {}, options: Record<string,EffectSettings> = {};
         for (const track of tracks) {
           const stem = value.stems.find(stem => stem.name === track.name && stem.input === track.isInput);

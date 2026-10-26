@@ -41,26 +41,30 @@ The strongest direction is the combined scene: each stem has a readable contribu
 | Echo Lantern | Keep provisionally: pleasant radial display, but repeats visual vocabulary already covered by Orbit and Prism Bloom. |
 | Ember Mandala | Keep: distinct petal composition. Match onset response to the combined-scene envelope model. |
 | Hippie Mirage | Keep: intentionally psychedelic. Simplify overlapping layers for legibility at compact size. |
-| Hollow Echoes | **Propose removal:** another small bar display, less readable than Laser Ladders; the “Harmonic cavities” label overstates what its bin averages measure. |
+| Hollow Echoes | **Keep, per user preference.** Small bar/pillar display; revisit the “Harmonic cavities” wording separately. |
 | Opal Current | Keep: layered flowing waveform. Trigger alignment and fewer glow passes would improve steadiness/performance. |
 | Solstice Waves | Keep: recognizable scenic composition. Scale fixed-amplitude geometry with height for expanded per-stem spotlight. |
 | Ripple Weave | Keep: relatively clear waveform variation. Trigger alignment would help sustained notes. |
 | Ectoplasm | Spark jitter fixed. Next, integrate energy-dependent angular velocity rather than multiplying the entire song time by current energy; this avoids large turns when energy changes late in a song. |
 | Prismatic Turbine | Keep for high-energy listening, but slow its three-second hue cycle and smooth energy-driven angular offsets. |
 | Kaleidoscope | Pointer/easing fixed. Strong distinct identity; audit touch-free energy motion separately before increasing sensitivity. |
-| Delay Pedal | **Propose removal:** colorful waveform cells and rings, but no actual delay history; confusing beside the real Echo audio effect. |
+| Delay Pedal | **Removed from picker.** Recorded IDs still work; the real Echo audio effect is unchanged. |
 
-Removal is only a proposal. If approved, remove the choices from the picker but retain their recorded IDs for existing replay files.
+User approved removing Delay Pedal only and retaining Hollow Echoes.
 
-## Four proposed additions — not implemented
+## Four additions — implemented
 
-1. **Signal Loom:** one combined fabric. Vocals and other draw flowing threads; bass stretches the weave; drum onsets add short cross-stitches. Keep a bounded history so patterns show the mix over time. Muted stems stop adding their threads.
-2. **Ink Tank:** four translucent inks in a dark fluid chamber. Bass drives slow circulation, drums produce small jets, vocals draw ribbons, and other supplies diffusion. Use a bounded low-resolution simulation, with a measured CPU/GPU budget before shipping.
+1. **Signal Loom:** one combined fabric. Vocals and other draw flowing threads; bass stretches the weave; drum energy adds short cross-stitches. Keep a bounded history so patterns show the mix over time. Muted stems stop adding their threads.
+2. **Ink Tank:** four translucent inks in a dark fluid chamber. Bass drives slow circulation, drums produce small jets, vocals draw ribbons, and other supplies diffusion. Uses bounded analytic advection and reusable analysis buffers, avoiding a fluid solver.
 3. **Resonance Plate:** a cymatics-inspired sand surface. Frequency-band energy selects/interpolates stable nodal patterns; drums disturb particles, bass changes large-scale symmetry, vocals sharpen fine detail. Describe it as frequency-reactive art, not a physical/acoustic measurement.
 4. **Glassworks:** a slowly evolving stained-glass mosaic. Each stem lights its own connected cell family; transients send light across borders, sustained notes hold a soft glow. Deterministic topology and restrained illumination keep it readable rather than flashing random tiles.
 
-All four should start as combined scenes with mute/solo/fader fidelity, the shared full-height toggle, deterministic seek behavior and capped rendering cost. Do not add all four before proving that each earns its place beside the strongest existing scenes.
+All four should start as combined scenes with mute/solo/fader fidelity, the shared full-height toggle, deterministic seek behavior and capped rendering cost. The four renderers use separate modules and fixed drawing/history budgets.
 
 ## Validation
 
 153 tests pass, including new Super Ribbon smoothing/pause checks, Highway palette continuity across minute/wrap boundaries, and every legacy renderer's finite coordinates and balanced save/restore at compact and large sizes. Browser inspection verified an 800px panel at an 800px viewport, click and keyboard expansion/collapse, all gallery groups, and the revised Highway palette. Expanded Highway's synthetic drawing/analysis measured approximately 0.84 ms mean / 1.30 ms p95 at 1359 × 765 CSS pixels (CPU command generation, not total compositor cost). Production build/lint and deployment are recorded in the task result.
+
+### Four-scene release verification
+
+160 tests pass (38 extension/script, 122 frontend), including all four scenes at compact and full-height dimensions, individual stem/original solo, immediate mute clearing, bounded history, deterministic seek resets, paused-state stability and legacy Delay Pedal replay acceptance. Browser previews verified scene selection and an 800px panel in an 800px viewport. Synthetic full-height drawing/analysis samples: Signal Loom 0.81 ms mean / 1.40 ms p95, Ink Tank 0.34 / 0.50 before curve smoothing (final compact preview 1.05 / 2.20), Resonance Plate 1.31 / 1.90, Glassworks 1.13 / 2.10. These measure CPU command generation plus analysis, not GPU/compositor time or an end-to-end playback benchmark. Hardware/browser variance applies.

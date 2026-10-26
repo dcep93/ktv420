@@ -9,6 +9,11 @@ const canvas = document.querySelector<HTMLCanvasElement>('#scene-canvas')!;
 const spectrogram = document.querySelector<HTMLCanvasElement>('#spectrogram')!, bloom = document.querySelector<HTMLCanvasElement>('#bloom')!;
 const canvases = [canvas, spectrogram, bloom];
 const observer = new ResizeObserver(() => canvases.forEach(resizeVisualizer)); canvases.forEach(c => observer.observe(c));
+document.querySelector('#expand')!.addEventListener('click', () => {
+  const expanded = canvas.parentElement!.classList.toggle('combined-visualizer--expanded');
+  canvas.style.height = expanded ? '0' : '340px';
+  document.querySelector('#expand')!.textContent = expanded ? 'Compact height' : 'Full height';
+});
 const picker = document.querySelector<HTMLSelectElement>('#scene')!;
 let scene: CombinedVisualizerType = 'night-city', started = false, offset = 0;
 const timings: number[] = [];

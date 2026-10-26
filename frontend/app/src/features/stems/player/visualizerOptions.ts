@@ -6,6 +6,10 @@ export const visualizerOptions: Array<{
   hint: string;
 }> = [
   { value: "time-ribbon", label: "Time Ribbon", hint: "Amplitude Timeline" },
+  { value: "signal-loom", label: "Signal Loom", hint: "The mix weaves light" },
+  { value: "ink-tank", label: "Ink Tank", hint: "Flowing stem pigments" },
+  { value: "resonance-plate", label: "Resonance Plate", hint: "Frequency becomes sand" },
+  { value: "glassworks", label: "Glassworks", hint: "The mix lights stained glass" },
   { value: "stem-weather", label: "Stem Weather", hint: "The whole mix" },
   { value: "night-city", label: "Night City", hint: "The mix lights a skyline" },
   { value: "stem-garden", label: "Stem Garden", hint: "The mix grows a garden" },
@@ -50,5 +54,9 @@ export const visualizerOptions: Array<{
   },
   { value: "kaleidoscope", label: "Kaleidoscope", hint: "Mirrored Lenses" },
   { value: "highway", label: "Highway", hint: "The mix drives a neon desert" },
-  { value: "delay-pedal", label: "Delay Pedal", hint: "Echo Ripples" },
 ];
+
+// Retired picker entries still render faithfully in saved replays.
+export function supportsVisualizer(value: string): value is VisualizerType {
+  return value === "delay-pedal" || visualizerOptions.some(option => option.value === value);
+}

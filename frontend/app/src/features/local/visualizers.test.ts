@@ -25,8 +25,8 @@ test('analysis buffers reuse storage per analyser and sample window', () => {
   assert.equal(frequencyBin(50000,44100,2048),1023);
 });
 test('new visualizer identities preserve existing replay choices and classify original separately', () => {
-  assert.equal(visualizerOptions.length,30);
-  assert.equal(new Set(visualizerOptions.map(v=>v.value)).size,30);
+  assert.equal(visualizerOptions.length,33);
+  assert.equal(new Set(visualizerOptions.map(v=>v.value)).size,33);
   assert.equal(weatherRole('drums.mp3',false),'drums');
   assert.equal(weatherRole('vocals.wav',false),'vocals');
   assert.equal(weatherRole('input.mp3',true),'original');

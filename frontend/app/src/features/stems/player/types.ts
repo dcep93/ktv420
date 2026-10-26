@@ -45,6 +45,10 @@ export type RecordingStartRequest = {
 };
 
 export type VisualizerType =
+  | "signal-loom"
+  | "ink-tank"
+  | "resonance-plate"
+  | "glassworks"
   | "stem-weather"
   | "night-city"
   | "stem-garden"
