@@ -1,4 +1,5 @@
-import { color, stemRoles, type ArtFrame } from './artSceneState';
+import { stemRoles, type ArtFrame } from './artSceneState';
+import { sceneColors } from './stemScene';
 import { musicNoteArtwork, type PlateArtwork } from './plateArtwork';
 
 export function drawPlate({ c, w, h, state }: ArtFrame, artwork: PlateArtwork = musicNoteArtwork) {
@@ -11,9 +12,9 @@ export function drawPlate({ c, w, h, state }: ArtFrame, artwork: PlateArtwork = 
   for (let role = 0; role < 4; role++) {
     const level = state.audio.levels[stemRoles[role]];
     if (level < .001) continue;
-    // Square the already-squared opacity again: quieter averages, unchanged peaks.
-    // color's power curve commutes with this exponent, so final alpha is squared too.
-    c.fillStyle = color(stemRoles[role], (.55 + .45 * level) ** 4); c.beginPath();
+    // No brightness floor or shared quiet-detail boost: half level is 12.5%
+    // opacity, while full peaks retain 100% of the four original palette colors.
+    c.fillStyle = `rgba(${sceneColors[stemRoles[role]]},${Math.min(1, level) ** 3})`; c.beginPath();
     for (let i = 0; i < artwork.grains.length; i += 4) {
       const phase = (artwork.grains[i + 3] + travel) % 4;
       const distance = Math.min(Math.abs(phase - role), 4 - Math.abs(phase - role));

@@ -83,22 +83,23 @@ test('fully lit artwork remains bounded, pause-stable and uses only four colors'
   drawPlate({ c, w: 2400, h: 1200, state }, field); assert.equal(marks.length, 0);
 });
 
-test('plate dims moderate stems again while preserving full-opacity peaks and ignoring Original', async () => {
+test('plate has no brightness floor, suppresses averages, and preserves peaks without Original', async () => {
   const { drawPlate } = await import('../stems/player/visuals/resonancePlate');
   const { createArtState } = await import('../stems/player/visuals/artSceneState');
-  const { color } = await import('../stems/player/visuals/stemScene');
   const state = createArtState();
   const colors: string[] = [];
   const c = { set fillStyle(value: string) { colors.push(value); }, beginPath() {}, fill() {}, rect() {} } as unknown as CanvasRenderingContext2D;
   const alpha = (value: string) => Number(value.slice(value.lastIndexOf(',') + 1, -1));
-  for (const level of [.1, .5, .8, 1]) {
+  let previous = 0;
+  for (const level of [.01, .1, .5, .8, 1]) {
     state.audio.levels.vocals = level; state.audio.levels.original = 1; colors.length = 0;
     drawPlate({ c, w: 800, h: 400, state });
     assert.equal(colors.length, 1, 'Original cannot enable the three silent stems');
-    const before = alpha(color('vocals', (.55 + .45 * level) ** 2));
     const after = alpha(colors[0]);
-    assert.ok(Math.abs(after - before ** 2) < 1e-12);
+    assert.ok(after > previous); previous = after;
+    if (level === .01) assert.ok(after < .00001, 'near silence must not retain a brightness floor');
+    if (level === .5) assert.equal(after, .125);
     if (level === 1) assert.equal(after, 1);
-    else assert.ok(after < before);
+    else assert.ok(after < level * level);
   }
 });

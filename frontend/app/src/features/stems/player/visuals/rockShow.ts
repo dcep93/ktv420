@@ -1,4 +1,4 @@
-import { seed, type ArtFrame } from './artSceneState';
+import { type ArtFrame } from './artSceneState';
 import { sceneEnergy, sceneLevel } from './sceneMotion';
 
 export function drawRockShow({ c, w, h, state }: ArtFrame) {
@@ -24,7 +24,7 @@ export function drawRockShow({ c, w, h, state }: ArtFrame) {
       if (level < .001) continue;
       const angle = Math.sin(t * .24 + i * .43 + row * 1.6) * .85;
       const endX = x + Math.sin(angle + (p - .5) * .7) * h * .75;
-      const endY = h * (.76 + .07 * Math.sin(t * .19 + i));
+      const endY = h * (.94 + .07 * Math.sin(t * .19 + i));
       const spread = size * (.027 + .04 * (.5 + .5 * Math.sin(t * .17 + i)));
       const rgb = (i + row) % 3 === 0 ? '137,239,216' : (i + row) % 3 === 1 ? '171,111,255' : '237,207,255';
       c.save(); c.globalCompositeOperation = 'lighter';
@@ -43,7 +43,7 @@ export function drawRockShow({ c, w, h, state }: ArtFrame) {
   if (bass > .001) {
     c.globalCompositeOperation = 'lighter';
     for (let i = 0; i < 7; i++) {
-      const x = w * (.13 + i * .123), y = h * .8;
+      const x = w * (.13 + i * .123), y = h * 1.02;
       const wash = c.createRadialGradient(x, y, 0, x, y, size * .23);
       wash.addColorStop(0, `rgba(151,91,223,${bass * .25})`); wash.addColorStop(1, 'rgba(151,91,223,0)');
       c.fillStyle = wash; c.fillRect(x - size * .23, y - size * .23, size * .46, size * .46);
@@ -53,36 +53,5 @@ export function drawRockShow({ c, w, h, state }: ArtFrame) {
       c.fillStyle = up; c.beginPath(); c.moveTo(x - 1, y); c.lineTo(endX - size * .045, h * .02); c.lineTo(endX + size * .045, h * .02); c.lineTo(x + 1, y); c.closePath(); c.fill();
     }
     c.globalCompositeOperation = 'source-over';
-  }
-  // Stage, speaker stacks, drum kit and band silhouettes anchor the light show.
-  c.fillStyle = '#15101d'; c.fillRect(w * .08, h * .81, w * .84, h * .045);
-  c.strokeStyle = `rgba(187,148,211,${.15 + bass * .4})`; c.lineWidth = 1;
-  c.beginPath(); c.moveTo(w * .08, h * .81); c.lineTo(w * .92, h * .81); c.stroke();
-  for (const x of [w * .06, w * .9]) { c.fillStyle = '#08080e'; c.fillRect(x, h * .61, w * .045, h * .22); }
-  c.fillStyle = '#10101a'; c.strokeStyle = '#777184'; c.lineWidth = 1;
-  c.beginPath(); c.arc(w * .53, h * .778, size * .032, 0, Math.PI * 2); c.fill(); c.stroke();
-  for (let i = 0; i < 3; i++) {
-    const x = w * (.49 + i * .04); c.beginPath(); c.moveTo(x, h * .74); c.lineTo(x, h * .8); c.stroke();
-    c.beginPath(); c.ellipse(x, h * .735, size * .022, size * .004, -.12, 0, Math.PI * 2); c.stroke();
-  }
-  for (let i = 0; i < 5; i++) {
-    const x = w * (.2 + i * .145), y = h * (.72 + (i === 2 ? .025 : 0)), lean = Math.sin(t * .9 + i) * size * .004;
-    c.fillStyle = '#090b12'; c.strokeStyle = '#090b12'; c.lineWidth = size * .011; c.lineCap = 'round';
-    c.beginPath(); c.arc(x + lean, y - size * .025, size * .012, 0, Math.PI * 2); c.fill();
-    c.beginPath(); c.moveTo(x + lean, y); c.lineTo(x, h * .78); c.lineTo(x - size * .012, h * .81);
-    c.moveTo(x, h * .78); c.lineTo(x + size * .012, h * .81); c.moveTo(x, y + size * .02); c.lineTo(x + size * .033, y + size * .04); c.stroke();
-    if (i !== 2) {
-      c.fillStyle = '#514455'; c.beginPath(); c.ellipse(x + size * .014, y + size * .05, size * .016, size * .01, -.6, 0, Math.PI * 2); c.fill();
-      c.strokeStyle = '#64566b'; c.lineWidth = 2; c.beginPath(); c.moveTo(x + size * .017, y + size * .05); c.lineTo(x + size * .05, y + size * .02); c.stroke();
-    }
-  }
-  for (let i = 0; i < 95; i++) {
-    const x = i / 94 * w, y = h * (.91 + seed(i + 34) * .07), radius = size * (.009 + seed(i + 101) * .009);
-    c.fillStyle = i % 3 ? '#06060b' : '#0e0b17';
-    c.beginPath(); c.arc(x, y, radius, 0, Math.PI * 2); c.fill(); c.fillRect(x - radius, y, radius * 2, h - y);
-    if (i % 5 === 0) {
-      c.strokeStyle = '#09070f'; c.lineWidth = radius * .45;
-      c.beginPath(); c.moveTo(x, y + radius); c.lineTo(x + Math.sin(t * .7 + i) * radius * 2, y - radius * 3); c.stroke();
-    }
   }
 }

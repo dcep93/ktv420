@@ -9,7 +9,7 @@ import type { StemVoice } from './stemScene';
 export const combinedVisualizers = {
   beach: { label: 'Beach', legend: ['Drums · foam', 'Bass · surf', 'Vocals · sunlight', 'Other · sky'] },
   aquarium: { label: 'Aquarium', legend: ['Drums · bubbles', 'Bass · plants', 'Vocals · fish', 'Other · jellyfish'] },
-  'rock-show': { label: 'Rock Show', legend: ['Drums · rig lights', 'Bass · stage glow', 'Vocals · beams', 'Other · overhead fans'] },
+  'rock-show': { label: 'Rock Show', legend: ['Drums · rig lights', 'Bass · light wash', 'Vocals · beams', 'Other · overhead fans'] },
   'disco-ball': { label: 'Disco Ball', legend: ['Drums · gold', 'Bass · bronze', 'Vocals · pink', 'Other · teal'] },
   'signal-loom': { label: 'Signal Loom', legend: ['Drums · stitches', 'Bass · warp', 'Vocals · silk', 'Other · weave'] },
   'ink-tank': { label: 'Ink Tank', legend: ['Drums · jets', 'Bass · circulation', 'Vocals · ribbons', 'Other · diffusion'] },
