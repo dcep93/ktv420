@@ -1,3 +1,4 @@
+import { SpotifyRemoteObserver } from '../../local/spotifySync';
 import { resizeVisualizer, canvasVisible } from './visuals/canvas';
 import { createStereoTap, type StereoTap } from './visuals/analysis';
 import { drawSpectrogram, resetSpectrogram } from './visuals/spectrogram';
@@ -91,7 +92,6 @@ export default function Player({
   useEffect(() => { playbackErrorRef.current = onPlaybackError; }, [onPlaybackError]);
   const [transportError, setTransportError] = useState('');
   const playbackEpoch = useRef(0);
-  const syncBusy = useRef(false);
   const masterGain = useRef<GainNode | null>(null);
   const engine = useRef<TempoEngine | null>(null);
   const [engineReady, setEngineReady] = useState(false);
@@ -1079,7 +1079,7 @@ export default function Player({
   const commitSeek = useCallback(
     async (targetTime: number) => {
       Object.values(canvasRefs.current).forEach(canvas => { if (canvas) resetSpectrogram(canvas); });
-      if (onTransportCommand) { onTransportCommand({ action: 'seek', position: targetTime }); return; }
+      remoteObserver.current.commanded();
       const clampedTime = Math.max(0, Math.min(targetTime, duration || 0));
 
       if (isPlaying) {
@@ -1090,6 +1090,7 @@ export default function Player({
         startOffsetRef.current = clampedTime;
         setCurrentTime(clampedTime);
       }
+      onTransportCommand?.({ action: 'seek', position: clampedTime });
     },
     [duration, isPlaying, schedulePlayback, stopAllSources, onTransportCommand]
   );
@@ -1176,10 +1177,7 @@ export default function Player({
   }, [stopAllSources]);
 
   const handlePlayPause = useCallback(async () => {
-    if (onTransportCommand) {
-      await ensureAudioContext().resume(); setTransportError('');
-      onTransportCommand({ action: isPlaying ? 'pause' : 'play' }); return;
-    }
+    remoteObserver.current.commanded();
     if (!tracks.length) {
       return;
     }
@@ -1188,6 +1186,7 @@ export default function Player({
       const pausedAt = pausePlayback();
       pausedAtPerformanceTimeRef.current = performance.now();
       emitRecordingEvent("transport_pause", undefined, pausedAt);
+      onTransportCommand?.({action:'pause'});
       return;
     }
 
@@ -1201,12 +1200,13 @@ export default function Player({
     pausedAtPerformanceTimeRef.current = null;
     await schedulePlayback(startOffsetRef.current);
     emitRecordingEvent("transport_play", playPayload);
+    onTransportCommand?.({action:'play'});
   }, [
     emitRecordingEvent,
     isPlaying,
     pausePlayback,
     schedulePlayback,
-    tracks.length, onTransportCommand, ensureAudioContext,
+    tracks.length, onTransportCommand,
   ]);
 
   const selectVisualizerType = useCallback(
@@ -1400,37 +1400,33 @@ export default function Player({
     const update = () => {
       const context = audioCtxRef.current, gain = masterGain.current;
       if (context && gain) {
-        const fresh = !transport || Date.now() - transport.observedAt < 1800;
-        const volume = fresh ? Math.max(0, Math.min(1, masterVolume)) : 0;
+        const volume = Math.max(0, Math.min(1, masterVolume));
         gain.gain.cancelScheduledValues(context.currentTime);
         if (volume === 0) gain.gain.setValueAtTime(0, context.currentTime);
         else gain.gain.setTargetAtTime(volume, context.currentTime, 0.005);
       }
     };
     update(); const timer = setInterval(update, 200); return () => clearInterval(timer);
-  }, [masterVolume, transport]);
-  const observedTransport = useRef<{position:number;playing:boolean;at:number;rate:number} | null>(null);
+  }, [masterVolume]);
+  const remoteObserver = useRef(new SpotifyRemoteObserver());
   useEffect(() => {
-    if (!transport || !areTracksReady || (transport.trackId && record.md5!==`spotify-${transport.trackId}`)) return;
-    const previous = observedTransport.current;
-    const now = {position:transport.position,playing:transport.playing,at:transport.observedAt,rate:transport.playbackRate ?? 1};
-    observedTransport.current = now;
-    if (!isRecording) return;
-    if (previous && Math.abs(now.position - previous.position - (previous.playing ? (now.at-previous.at)/1000 * previous.rate : 0)) > .6) emitRecordingEvent('seek_commit',{targetSeconds:now.position},now.position);
-    if (!previous || previous.playing !== now.playing) emitRecordingEvent(now.playing ? 'transport_play' : 'transport_pause',undefined,now.position);
-  }, [transport,areTracksReady,isRecording,emitRecordingEvent,record.md5]);
-  useEffect(() => {
-    if (!transport || !areTracksReady) return;
-    applyTempoPitch(transport.playbackRate ?? 1, pitchRef.current);
-    const playing = transport.playing && Date.now() - transport.observedAt < 1800;
-    const position = Math.min(duration, transport.position + (playing ? Math.max(0, Date.now() - transport.observedAt) / 1000 * (transport.playbackRate ?? 1) : 0));
-    if (!playing) {
-      stopAllSources(); startOffsetRef.current = position; setCurrentTime(position); setIsPlaying(false); return;
+    const change = remoteObserver.current.observe(transport);
+    if (!change || !transport || !areTracksReady || record.md5 !== `spotify-${transport.trackId}`) return;
+    if (change.playing === false) {
+      const position = pausePlayback();
+      emitRecordingEvent('transport_pause', undefined, position);
     }
-    if (syncBusy.current || (isPlaying && Math.abs(currentPlaybackTime() - position) < 0.5)) return;
-    stopAllSources(); startOffsetRef.current = position; syncBusy.current = true;
-    void schedulePlayback(position).catch(reason => setTransportError(String(reason))).finally(() => { syncBusy.current = false; });
-  }, [transport, areTracksReady, duration, isPlaying, currentPlaybackTime, schedulePlayback, stopAllSources, applyTempoPitch]);
+    if (change.position !== undefined) {
+      const position = Math.max(0, Math.min(duration, change.position));
+      stopAllSources(); startOffsetRef.current = position; setCurrentTime(position);
+      emitRecordingEvent('seek_commit', {source:'remote'}, position);
+    }
+    if (change.playing === true || (change.position !== undefined && isPlaying && change.playing !== false)) {
+      void schedulePlayback(startOffsetRef.current).then(() => {
+        if (change.playing === true) emitRecordingEvent('transport_play');
+      }).catch(reason => setTransportError(String(reason)));
+    }
+  }, [transport, areTracksReady, record.md5, duration, isPlaying, pausePlayback, schedulePlayback, stopAllSources, emitRecordingEvent]);
   useEffect(() => {
     if (transport && tracks.length && readyTrackIds.length < tracks.length && unavailableMessage) onPlaybackError?.(unavailableMessage);
   }, [transport, tracks.length, readyTrackIds.length, unavailableMessage, onPlaybackError]);
@@ -1473,7 +1469,8 @@ export default function Player({
   const handleRecordingButton = useCallback(async () => {
     if (isRecording) {
       flushDebouncedRecordingEvents();
-      if (onTransportCommand) onTransportCommand({action:'pause'});
+      remoteObserver.current.commanded();
+      onTransportCommand?.({action:'pause'});
       const stoppedAt = isPlaying ? pausePlayback() : currentPlaybackTime();
       pausedAtPerformanceTimeRef.current = null;
       await onStopRecording?.(
@@ -1498,10 +1495,13 @@ export default function Player({
 
     pausedAtPerformanceTimeRef.current = null;
     isRecordingRef.current = true;
-    if (onTransportCommand) onTransportCommand({action: 'play'});
-    else await schedulePlayback(startOffsetRef.current);
+    remoteObserver.current.commanded();
+    await schedulePlayback(startOffsetRef.current);
+    emitRecordingEvent('transport_play');
+    onTransportCommand?.({action: 'play'});
   }, [
     onTransportCommand,
+    emitRecordingEvent,
     areTracksReady,
     snapshot,
     createRecordingEvent,
@@ -1536,6 +1536,7 @@ export default function Player({
     const playWhenReady = async () => {
       try {
         await schedulePlayback(0);
+        emitRecordingEvent('transport_play', undefined, 0);
       } catch (error) {
         console.error("Failed to auto-play next track", error);
       } finally {
@@ -1550,6 +1551,7 @@ export default function Player({
     isPlaying,
     onAutoPlayOnReadyHandled,
     schedulePlayback,
+    emitRecordingEvent,
   ]);
 
   useEffect(() => {
@@ -1707,8 +1709,8 @@ export default function Player({
               <div className="player-tuning" aria-label="Tempo and pitch">
                 <label>Tempo<input type="range" aria-label="Tempo" min="0.5" max="1.5" step="0.01" value={tempo}
                   disabled={!areTracksReady || !tempoSupported || replaying} title={!tempoSupported ? 'Update the ktv420 extension to change tempo.' : 'Change tempo, preserve pitch'}
-                  onChange={event => { const rate = Number(event.target.value); if (onTransportCommand) onTransportCommand({action:'rate',rate}); else applyTempoPitch(rate,pitchRef.current); }} /></label>
-                <button type="button" className="player-tuning-reset" aria-label="Reset tempo" disabled={!tempoSupported || replaying} onClick={() => { if (onTransportCommand) onTransportCommand({action:'rate',rate:1}); else applyTempoPitch(1,pitchRef.current); }}>{tempo.toFixed(2)}×</button>
+                  onChange={event => { const rate = Number(event.target.value); applyTempoPitch(rate,pitchRef.current); }} /></label>
+                <button type="button" className="player-tuning-reset" aria-label="Reset tempo" disabled={!tempoSupported || replaying} onClick={() => { applyTempoPitch(1,pitchRef.current); }}>{tempo.toFixed(2)}×</button>
                 <label>Pitch<input type="range" aria-label="Pitch" min="-12" max="12" step="1" value={pitch} disabled={!areTracksReady || replaying}
                   onChange={event => applyTempoPitch(tempoRef.current,Number(event.target.value))} /></label>
                 <button type="button" className="player-tuning-reset" aria-label="Reset pitch" disabled={replaying} onClick={() => applyTempoPitch(tempoRef.current,0)}>{pitch > 0 ? '+' : ''}{pitch} st</button>

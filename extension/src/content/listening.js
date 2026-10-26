@@ -6,7 +6,7 @@ import { StemClock } from './stemClock.js';
 export function createListeningController({ bridge, emit, ensurePlayer, getRunner, getTrackIds = () => [], getTrackMetadata = () => null }) {
   let busy = false, disposed = false, owner = false, lastLease = 0, catalogAt = 0;
   let enabled = false, activation = Promise.resolve();
-  let halted = false;
+  let halted = false, customPlayback = false, syncPending = 0, syncSettlesAt = 0;
   let catalog = new Map(), recording = null, last = null, generation = 0, lastSource = '';
   let volume = 0, output = 'muted', error = '', armed = false;
   let volumeTimer = null, volumeEdit = 0, volumeSettlesAt = 0, latestState = null;
@@ -35,7 +35,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
         const gain = output === 'capture' && silentGeneration === generation &&
           Date.now() - frameHeartbeat < 2000 ? volume : 0;
         void policy(gain).catch(reason => { error = reason?.message || String(reason); });
-      } catch (reason) { error = reason?.message || String(reason); }
+      } catch (reason) { console.debug('[ktv420] Spotify volume sync unavailable', reason); }
     }, 32);
   }
   async function finish(valid) {
@@ -123,7 +123,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       // Start the PCM tap while the player loads, so a cold iframe does not
       // discard the beginning of a newly selected song. Monitoring still waits
       // for the hosted player's explicit silence acknowledgment below.
-      if (playing && armed && !replayPreparation && !batch && !ready && !batchPending && now > ignoreUntil && !recording) {
+      if (playing && armed && !replayPreparation && !customPlayback && !batch && !ready && !batchPending && now > ignoreUntil && !recording) {
         const result = await bridge.command('capture-begin');
         recording = withTrackMetadata({ ...dom, complete: result.target.currentTime <= 0.35 && !catalog.has(dom.trackId) && !storing.has(dom.trackId) }, getTrackMetadata(dom.trackId));
       }
@@ -156,6 +156,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       const overallCaptureFraction = recording && scope.length ? (captured + saving + partial) / scope.length : null;
       publish({ ...dom, overallCaptureFraction, generation, position: stemClock.active ? Math.min(dom.duration, stemClock.position) : local ? media.currentTime : dom.position, observedAt: Date.now(),
         playing: playing && connected, local: owner && local, output, volume, error,
+        syncing: syncPending > 0 || now < syncSettlesAt,
         capability: 1, tempoSupported: true, playbackRate: stemClock.active ? stemClock.rate : 1, capturing: !!recording || !!batch,
         captureProgress: recording ? { trackId: recording.trackId, fraction: dom.duration > 0 ? Math.min(.99, dom.position / dom.duration) : null } : null,
       });
@@ -182,7 +183,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
         volume = replayPreparation ? 0 : lastVolumeDom ?? 0;
         volumeSettlesAt = 0; latestState = null;
         output = 'muted'; armed = false; stemClock.reset(); silentGeneration = -1; generation++;
-        halted = false;
+        halted = false; customPlayback = false;
         enabled = value && !disposed;
         if (enabled) void tick();
       });
@@ -195,6 +196,8 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       if (!enabled) return Promise.resolve();
       if (command.action === 'volume') { changeVolume(command.volume); return Promise.resolve(); }
       if (command.action === 'rate') { pendingRate=command; if (rateQueued) return commands; rateQueued=true; }
+      const bestEffort = command.bestEffort === true;
+      if (bestEffort) { syncPending++; customPlayback = true; }
       commands = commands.catch(() => {}).then(async () => {
         if (!enabled) return;
         if (command.action === 'rate') { command=pendingRate; pendingRate=null; rateQueued=false; }
@@ -219,6 +222,11 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
           return;
         }
         getRunner()?.handoff();
+        if (bestEffort) {
+          stemClock.reset();
+          await policy(0);
+          if (recording) await finish(false);
+        }
         if (command.action !== 'pause' && command.action !== 'play') {
           await policy(0); generation++;
           if (recording) await finish(false);
@@ -229,7 +237,12 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
           if (!page.media || Math.abs(page.media.currentTime - command.position) > 1.5) throw new Error('Spotify did not apply the requested seek to its local audio.');
           stemClock.observe(page.media.currentTime, !page.media.paused, true);
         }
-      }).catch(reason => { error = reason?.message || String(reason); });
+      }).catch(reason => {
+        if (bestEffort) console.debug('[ktv420] Spotify sync unavailable', reason);
+        else error = reason?.message || String(reason);
+      }).finally(() => {
+        if (bestEffort) { syncPending--; syncSettlesAt = Date.now() + 1000; }
+      });
       return commands;
     },
     async stopCapture() {
@@ -244,7 +257,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       }
     },
     afterBatch() { batchPending = false; },
-    async beforeBatch() { batchPending = true; halted = false; stemClock.reset(); while (busy) await new Promise(resolve => setTimeout(resolve, 20)); await finish(false); last = null; lastSource = ''; },
+    async beforeBatch() { customPlayback = false; batchPending = true; halted = false; stemClock.reset(); while (busy) await new Promise(resolve => setTimeout(resolve, 20)); await finish(false); last = null; lastSource = ''; },
     dispose() { disposed = true; clearInterval(timer); if (enabled) void this.setEnabled(false).catch(() => {}); },
   };
 }

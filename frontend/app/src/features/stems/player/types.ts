@@ -81,7 +81,7 @@ export type PlayerProps = {
   onControls?: (control: MixerControl | null) => void;
   masterVolume?: number;
   tempoSupported?: boolean;
-  transport?: { playbackRate?: number; trackId?: string; position: number; playing: boolean; generation: number; observedAt: number };
+  transport?: { playbackRate?: number; trackId?: string; position: number; playing: boolean; generation: number; observedAt: number; local?: boolean; error?: string; syncing?: boolean };
   onTransportCommand?: (command: { action: 'play' | 'pause' | 'seek' | 'rate'; position?: number; rate?: number }) => void;
   onPlaybackError?: (message: string) => void;
   record: PlaybackRecord;

@@ -134,3 +134,29 @@ With five synthetic stems loaded and visible panels rendering at 1.5× tempo / +
 These are short, synthetic, local-browser measurements with the viewport's visible panels; they do not guarantee performance on every device or fullscreen size. The separate minified synthetic visual preview rendered all three modes under the exact Firebase player CSP with no console errors, and was visually inspected for theme, stereo shape and frequency history. Both preview fixtures are excluded from deployment.
 
 91 automated tests (10 Node / 81 TypeScript), lint, TypeScript, and hosted/extension production builds passed. Extension APIs, permissions and installed files remain unchanged. Existing recordings continue using their original visualizer IDs; new IDs use the existing recording format.
+
+## Best-effort Spotify synchronization (6.3.17)
+
+The hosted player now performs play, pause, seek and tempo changes locally.
+Ready-song selection and local next/previous navigation do not wait for Spotify.
+Replay waits for local stems, never for Spotify acknowledgments. Reliable remote
+play/pause/seek edges are still observed; stale state, disconnection, ordinary
+timeline drift and reflected commands do not continuously steer the local clock.
+Spotify remains at 1× with no periodic seeks. Native song changes still select a
+prepared song outside replay; replay retains its recorded sequence.
+
+The extension marks best-effort commands and their settling observations, keeps
+Spotify monitoring silent during custom playback, and logs sync failures without
+turning them into capture/player errors. Explicit capture retains its stricter
+validation. Volume responds locally before Spotify's DOM update.
+
+Validation: a regression test reproduces the exact rejected-native-seek message,
+checks that best-effort failure preserves volume and does not start capture, and
+checks that strict seek failure is still reported. Observer tests cover drift,
+remote edges, stale/error/disconnected observations, reflected commands and
+protocol validation. A temporary browser fixture exercised the actual Player:
+local play/seek/pause under rejected sync, 1.5× tempo under stale state, continued
+playback after disconnection, and fresh remote play/pause. The actual useReplay
+hook completed a track/play/seek/pause/play/stop performance while Spotify
+continually reported a seek error and never acknowledged commands. This uses
+synthetic audio and state, not a claim of a completed real-Spotify device test.

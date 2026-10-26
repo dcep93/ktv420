@@ -270,3 +270,48 @@ test('tempo lets Spotify drift without automatic seeks or media rate changes', a
   assert.equal(updates.at(-1).playbackRate, 1, 'new song starts at neutral tempo');
   await controller.setEnabled(false); controller.dispose();
 });
+
+test('a rejected native seek is nonfatal for custom audio, while strict seeks still report failure', async t => {
+  const ticks = [], updates = [], calls = [];
+  const id = '5EGTNEoUpibGgMWf6ECe0X';
+  const link = {getAttribute:() => `/track/${id}`};
+  class Input {
+    constructor(max,value) { this.max=max;this._value=value; }
+    get value() {return this._value;} set value(value) {this._value=value;}
+    getAttribute() {return null;} dispatchEvent() {}
+  }
+  const seek=new Input('180000','0'), volume=new Input('1','.43');
+  for (const [key,value] of Object.entries({
+    HTMLInputElement:Input,
+    document:{
+      querySelector:selector => selector.includes('control-button-playpause') ? {disabled:false,getAttribute:()=>'Pause'} :
+        selector.includes('now-playing-widget') ? {contains:()=>true,querySelector:()=>null}:null,
+      querySelectorAll:selector => selector.includes('input[type="range"]') ? [seek,volume]:[link],
+    },
+    location:{origin:'https://open.spotify.com'},
+    chrome:{runtime:{async sendMessage(message) {return {ok:true,result:message.type==='ktv420:listening-claim'?true:[{trackId:id,status:'ready'}]};}}},
+    setInterval(callback) {ticks.push(callback);return 0;},clearInterval(){},
+  })) {
+    const previous=Object.getOwnPropertyDescriptor(globalThis,key);
+    Object.defineProperty(globalThis,key,{value,writable:true,configurable:true});
+    t.after(()=>previous?Object.defineProperty(globalThis,key,previous):delete globalThis[key]);
+  }
+  const controller=createListeningController({
+    bridge:{async command(command,payload) {
+      calls.push({command,payload});
+      return command==='listening-state'?{media:{source:'song',readyState:4,paused:false,currentTime:0,playbackRate:1}}:{};
+    }},emit:state=>updates.push(state),ensurePlayer(){},getRunner:()=>null,
+  });
+  const settle=()=>new Promise(resolve=>setImmediate(resolve));
+  controller.heartbeat();await controller.setEnabled(true);await settle();
+  await controller.command({action:'seek',trackId:id,position:30,bestEffort:true});
+  seek.value='0';ticks[0]();await settle();
+  assert.equal(updates.at(-1).error,'');
+  assert.equal(updates.at(-1).volume,.43);
+  assert.equal(updates.at(-1).syncing,true);
+  assert.equal(calls.some(call=>call.command==='capture-begin'),false);
+  await controller.command({action:'seek',trackId:id,position:30});
+  seek.value='0';ticks[0]();await settle();
+  assert.match(updates.at(-1).error,/did not apply the requested seek/);
+  await controller.setEnabled(false);controller.dispose();
+});
