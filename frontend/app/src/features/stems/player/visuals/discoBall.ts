@@ -24,7 +24,8 @@ export function drawDiscoBall({ c, w, h, state }: ArtFrame) {
   c.fillStyle = shadow; c.fillRect(-radius * 1.1, -radius * 1.1, radius * 2.2, radius * 2.2); c.restore();
   c.strokeStyle = '#665869'; c.lineWidth = 1; c.beginPath(); c.moveTo(cx, 0); c.lineTo(cx, cy - radius); c.stroke();
   c.fillStyle = '#0a0910'; c.beginPath(); c.arc(cx, cy, radius, 0, Math.PI * 2); c.fill();
-  const rotation = t * .11, rows = 18, cols = 36;
+  // A hanging mirror ball turns leisurely: one revolution per four song minutes.
+  const rotation = t * Math.PI * 2 / 240, rows = 18, cols = 36;
   for (let row = 0; row < rows; row++) for (let col = 0; col < cols; col++) {
     const lat = -Math.PI / 2 + (row + .5) / rows * Math.PI;
     const lon = col / cols * Math.PI * 2 + rotation;
@@ -53,7 +54,7 @@ export function drawDiscoBall({ c, w, h, state }: ArtFrame) {
   c.globalCompositeOperation = 'lighter';
   for (let i = 0; i < 64; i++) {
     const role = stemRoles[i % 4], level = sceneLevel(state, role); if (level < .001) continue;
-    const a = seed(i + 771) * Math.PI * 2 + t * .08;
+    const a = seed(i + 771) * Math.PI * 2 + rotation * .75;
     const x = cx + Math.sin(a) * w * (.2 + seed(i + 13) * .35), y = h * (.13 + seed(i + 45) * .84);
     if (Math.hypot(x - cx, y - cy) < radius * 1.1) continue;
     const shimmer = .3 + .7 * (.5 + .5 * Math.sin(t * .7 + i * 2.8));
