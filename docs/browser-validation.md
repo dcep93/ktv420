@@ -233,3 +233,26 @@ These are synthetic signal checks, not a listening audition with real songs.
 
 All 150 tests, lint and both production builds passed. Existing recordings remain
 readable but deliberately use the new effect sound, not a legacy bit-exact engine.
+
+
+## Visualizer polish and audit (2026-10-26)
+
+Super Time Ribbon shares Time Ribbon's stable source vertices and smoothed
+spectral color, adding bounded waveform motion while keeping the seek line fixed.
+Its wide/compact browser previews remained pixel-identical while paused and
+continued correctly after seeking and resuming. The shared combined-scene panel
+toggles through click, Enter and Space between compact height and 100vh in normal
+page flow, including its legend. The measured expanded panel was 800px at an 800px
+viewport; the canvas was 765px after legend/borders.
+
+Highway now interpolates coordinated palettes over eased sixty-second intervals,
+with deterministic subtle star twinkle. An expanded synthetic scene measured
+0.84 ms mean / 1.30 ms p95 for drawing/analysis at 1359 × 765 CSS pixels; this is
+CPU command generation rather than total rendering cost. A temporary thirty-view
+gallery was inspected, and the full audit records fixes and remaining priorities
+in `visualizer-audit-2026-10-26.md`. Catalog deletions/additions remain proposals.
+
+Spectrum Safari color/fill, Cascade stars, Ectoplasm spark motion, Laser Ladders
+banding/scaling and Kaleidoscope pointer/easing were corrected. New tests exercise
+every legacy per-stem renderer's geometry/state at compact and large sizes, Super
+Ribbon motion bounds and Highway palette continuity. All 153 tests pass.

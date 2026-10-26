@@ -1032,3 +1032,10 @@
 .stem-echo-timing { display:flex; align-items:center; gap:.35rem; font-size:.72rem; }
 .stem-echo-timing label { display:flex; align-items:center; gap:.25rem; }
 .stem-echo-timing input { width:4.5rem; border:1px solid var(--ww-border); border-radius:5px; padding:.2rem; background:var(--ww-panel-strong); color:var(--ww-text); }
+
+.combined-visualizer { cursor: zoom-in; }
+.combined-visualizer:focus-visible { outline: 2px solid var(--ww-title-pink); outline-offset: 3px; }
+.combined-visualizer--expanded { height: 100vh; box-sizing: border-box; display: flex; flex-direction: column; cursor: zoom-out; }
+.combined-visualizer--expanded canvas { flex: 1 1 0; min-height: 0; height: 0; }
+.combined-visualizer__legend { flex: 0 0 auto; }
+.combined-visualizer__legend .combined-visualizer__size { color: var(--ww-text-soft); opacity: .65; margin-left: auto; }

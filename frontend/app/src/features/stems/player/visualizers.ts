@@ -1,10 +1,9 @@
-import { drawTimeRibbon, resetTimeRibbon } from './visuals/timeRibbon';
+import { seed } from './visuals/stemScene';
+import { drawTimeRibbon, resetTimeRibbon, smoothRibbonColor } from './visuals/timeRibbon';
 import { analysisBytes } from './visuals/analysis';
 import { beginVisualizer, surfaceFor } from './visuals/canvas';
 import {
   AMPLITUDE_WINDOW_SECONDS,
-  FUTURE_WINDOW_SECONDS,
-  PAST_WINDOW_SECONDS,
   type VisualizerType,
 } from "./types";
 
@@ -72,7 +71,7 @@ export function resetVisualizerState(canvas: HTMLCanvasElement) {
   const kaleidoscopeState = kaleidoscopeStateMap.get(canvas);
 
   if (kaleidoscopeState?.onMouseMove) {
-    window.removeEventListener(
+    canvas.removeEventListener(
       "mousemove",
       kaleidoscopeState.onMouseMove,
       false
@@ -113,7 +112,7 @@ function drawLegacyVisualizer({
     return;
   }
 
-  const { width, height, background, font, text } = surfaceFor(canvas);
+  const { width, height, background, font } = surfaceFor(canvas);
   const performanceMode = isLowPowerMode();
   context.clearRect(0, 0, width, height);
 
@@ -124,44 +123,25 @@ function drawLegacyVisualizer({
     const bufferLength = analyser.frequencyBinCount;
     const dataArray = analysisBytes(analyser, bufferLength);
     analyser.getByteFrequencyData(dataArray);
-    const barWidth = (width / bufferLength) * 2.5;
-
-    let x = 0;
-
-    for (let i = 0; i < bufferLength; i++) {
-      const barHeight = dataArray[i] / 2;
-      const gradient = context.createLinearGradient(
-        0,
-        height,
-        0,
-        height - barHeight
-      );
-      gradient.addColorStop(0, "#1dd3b0");
-      gradient.addColorStop(1, "#6c43f3");
-      context.fillStyle = gradient;
-      context.fillRect(x, height - barHeight, barWidth - 1, barHeight);
-      x += barWidth;
+    const bars = Math.max(8, Math.min(64, Math.floor(width / 10)));
+    const barWidth = width / bars;
+    const gradient = context.createLinearGradient(0, height, 0, 0);
+    gradient.addColorStop(0, '#1dd3b0'); gradient.addColorStop(1, '#6c43f3');
+    context.fillStyle = gradient;
+    for (let i = 0; i < bars; i++) {
+      const from = Math.floor((Math.exp(i / bars * Math.log(bufferLength + 1)) - 1));
+      const to = Math.min(bufferLength, Math.max(from + 1, Math.ceil(Math.exp((i + 1) / bars * Math.log(bufferLength + 1)) - 1)));
+      let peak = 0;
+      for (let bin = from; bin < to; bin++) peak = Math.max(peak, dataArray[bin]);
+      const barHeight = peak / 255 * height * .95;
+      context.fillRect(i * barWidth, height - barHeight, Math.max(1, barWidth - 2), barHeight);
     }
   } else if (visualizerType === "spectrum-safari") {
     const bufferLength = analyser.frequencyBinCount;
     const dataArray = analysisBytes(analyser, bufferLength);
     analyser.getByteFrequencyData(dataArray);
     const sliceWidth = width / bufferLength;
-    let peakIndex = 0;
-    let peakValue = 0;
-
-    for (let i = 0; i < bufferLength; i++) {
-      const value = dataArray[i] ?? 0;
-      if (value > peakValue) {
-        peakValue = value;
-        peakIndex = i;
-      }
-    }
-
-    const nyquist = sampleRate / 2;
-    const dominantFrequency =
-      bufferLength > 0 ? (peakIndex / bufferLength) * nyquist : 0;
-    const hue = Math.max(0, Math.min(280, (dominantFrequency / 2000) * 280));
+    const hue = smoothRibbonColor(canvas, dataArray, sampleRate, currentTime, isPlaying);
     const strokeColor = `hsl(${hue}, 80%, 60%)`;
     const fillColor = `hsla(${hue}, 80%, 60%, 0.12)`;
     context.beginPath();
@@ -181,6 +161,7 @@ function drawLegacyVisualizer({
     context.strokeStyle = strokeColor;
     context.lineWidth = 2;
     context.stroke();
+    context.lineTo(width, height); context.lineTo(0, height); context.closePath();
     context.fillStyle = fillColor;
     context.fill();
   } else if (visualizerType === "waveform-waterline") {
@@ -553,9 +534,9 @@ function drawLegacyVisualizer({
     context.shadowBlur = 0;
     context.fillStyle = "rgba(255, 255, 255, 0.12)";
     for (let i = 0; i < 30; i++) {
-      const x = Math.random() * width;
-      const y = Math.random() * height * 0.6;
-      const size = Math.random() * 2 + 0.5;
+      const x = seed(i + 100) * width;
+      const y = seed(i + 200) * height * 0.6;
+      const size = seed(i + 300) * 2 + 0.5;
       context.beginPath();
       context.arc(x, y, size, 0, Math.PI * 2);
       context.fill();
@@ -1196,8 +1177,7 @@ function drawLegacyVisualizer({
     const spiralStrength = 0.7 + totalEnergy * 0.8;
     const musicSpin = 0.35 + totalEnergy * 1.2 + bassEnergy * 0.8;
     const spinNoise = (seed: number) => {
-      const x = Math.sin(seed * 12.9898 + currentTime * 0.9) * 43758.5453;
-      return (x - Math.floor(x)) * Math.PI * 2;
+      return seed * 2.399963 + currentTime * .18 + Math.sin(seed * 1.7 + currentTime * .35) * .45;
     };
 
     for (let arm = 0; arm < arms; arm++) {
@@ -1269,125 +1249,6 @@ function drawLegacyVisualizer({
     context.fill();
     context.globalCompositeOperation = "source-over";
 
-    context.restore();
-  } else if (visualizerType === "super-time-ribbon") {
-    const totalWindowSeconds = PAST_WINDOW_SECONDS + FUTURE_WINDOW_SECONDS;
-    const baseY = height - 24;
-    const ribbonHeight = height - 40;
-
-    if (!amplitudeEnvelope || !amplitudeEnvelope.length) {
-      context.fillStyle = text;
-      context.font = font;
-      context.fillText(
-        "Analyzing track envelope for ribbon view...",
-        10,
-        baseY
-      );
-      return;
-    }
-
-    const amplitudeAtTime = (time: number) => {
-      const index = time / AMPLITUDE_WINDOW_SECONDS;
-      const baseIndex = Math.floor(index);
-      const nextIndex = Math.min(baseIndex + 1, amplitudeEnvelope.length - 1);
-      const fraction = index - baseIndex;
-      const first =
-        amplitudeEnvelope[
-          Math.max(0, Math.min(baseIndex, amplitudeEnvelope.length - 1))
-        ] ?? 0;
-      const second = amplitudeEnvelope[nextIndex] ?? first;
-      return first + (second - first) * fraction;
-    };
-
-    const centerX = (PAST_WINDOW_SECONDS / totalWindowSeconds) * width;
-    const frequencyBins = analyser.frequencyBinCount;
-    const frequencyData = analysisBytes(analyser, frequencyBins);
-    const timeDomain = analysisBytes(analyser, analyser.fftSize);
-
-    analyser.getByteFrequencyData(frequencyData);
-    analyser.getByteTimeDomainData(timeDomain);
-
-    let peakIndex = 0;
-    let peakValue = 0;
-
-    for (let i = 0; i < frequencyBins; i++) {
-      const binValue = frequencyData[i] ?? 0;
-
-      if (binValue > peakValue) {
-        peakValue = binValue;
-        peakIndex = i;
-      }
-    }
-
-    let rms = 0;
-    for (let i = 0; i < timeDomain.length; i++) {
-      const sample = ((timeDomain[i] ?? 128) - 128) / 128;
-      rms += sample * sample;
-    }
-    rms = Math.sqrt(rms / timeDomain.length);
-
-    const nyquist = sampleRate / 2;
-    const dominantFrequency =
-      frequencyBins > 0 ? (peakIndex / frequencyBins) * nyquist : 0;
-    const hue = Math.max(0, Math.min(280, (dominantFrequency / 2000) * 280));
-    const ribbonColor = `hsl(${hue}, 80%, 60%)`;
-    const ribbonFillColor = `hsla(${hue}, 80%, 60%, 0.12)`;
-    const shakeX = Math.sin(currentTime * 7.5) * rms * 18;
-    const shakeY = Math.cos(currentTime * 6.3) * rms * 18;
-
-    context.save();
-    context.translate(shakeX, shakeY);
-    context.fillStyle = background;
-    context.fillRect(
-      -Math.abs(shakeX),
-      -Math.abs(shakeY),
-      width + Math.abs(shakeX) * 2,
-      height + Math.abs(shakeY) * 2
-    );
-
-    context.strokeStyle = "rgba(255, 255, 255, 0.08)";
-    context.lineWidth = 1;
-    const subtleGap = 48;
-    for (let x = 0; x < width; x += subtleGap) {
-      context.beginPath();
-      context.moveTo(x, 0);
-      context.lineTo(x, height);
-      context.stroke();
-    }
-
-    context.beginPath();
-
-    for (let x = 0; x <= width; x += 2) {
-      const timeOffset = (x / width) * totalWindowSeconds - PAST_WINDOW_SECONDS;
-      const sampleTime = currentTime + timeOffset;
-      const amplitude =
-        sampleTime >= 0 ? amplitudeAtTime(sampleTime) : amplitudeAtTime(0);
-      const normalized = Math.min(1, amplitude / amplitudeMaximum);
-      const y = baseY - normalized * ribbonHeight;
-
-      if (x === 0) {
-        context.moveTo(x, y);
-      } else {
-        context.lineTo(x, y);
-      }
-    }
-
-    context.strokeStyle = ribbonColor;
-    context.lineWidth = 3;
-    context.stroke();
-
-    context.lineTo(width, baseY);
-    context.lineTo(0, baseY);
-    context.closePath();
-    context.fillStyle = ribbonFillColor;
-    context.fill();
-
-    context.strokeStyle = "rgba(255, 255, 255, 0.65)";
-    context.lineWidth = 2;
-    context.beginPath();
-    context.moveTo(centerX, 0);
-    context.lineTo(centerX, height);
-    context.stroke();
     context.restore();
   } else if (visualizerType === "prismatic-turbine") {
     const bufferLength = analyser.frequencyBinCount;
@@ -1492,8 +1353,8 @@ function drawLegacyVisualizer({
       const radius = 1100;
       const slices = 24;
       const zoom = 1.5;
-      const randomOffsetX = (Math.random() * 2 - 1) * radius * 0.6;
-      const randomOffsetY = (Math.random() * 2 - 1) * radius * 0.6;
+      const randomOffsetX = (seed(41) * 2 - 1) * radius * 0.6;
+      const randomOffsetY = (seed(73) * 2 - 1) * radius * 0.6;
 
       const image = getKaleidoscopeImage();
 
@@ -1519,14 +1380,15 @@ function drawLegacyVisualizer({
       };
 
       const handleMouseMove = (event: MouseEvent) => {
-        state.lastPointerX = event.pageX;
-        state.lastPointerY = event.pageY;
+        state.lastPointerX = event.clientX;
+        state.lastPointerY = event.clientY;
         const motionScale = getKaleidoscopeMotionScale(
           state.width,
           state.height
         );
-        const dx = event.pageX / Math.max(1, state.width);
-        const dy = event.pageY / Math.max(1, state.height);
+        const bounds = canvas.getBoundingClientRect();
+        const dx = (event.clientX - bounds.left) / Math.max(1, bounds.width);
+        const dy = (event.clientY - bounds.top) / Math.max(1, bounds.height);
         const hx = dx - 0.1;
         const hy = dy - 0.1;
         state.targetX = hx * state.radius * -0.8 * motionScale;
@@ -1534,7 +1396,7 @@ function drawLegacyVisualizer({
       };
 
       state.onMouseMove = handleMouseMove;
-      window.addEventListener("mousemove", handleMouseMove, false);
+      canvas.addEventListener("mousemove", handleMouseMove, false);
 
       if (image.complete && image.naturalWidth > 0) {
         state.pattern = context.createPattern(image, "repeat");
@@ -1551,8 +1413,9 @@ function drawLegacyVisualizer({
 
         if (cached.lastPointerX !== null && cached.lastPointerY !== null) {
           const motionScale = getKaleidoscopeMotionScale(width, height);
-          const dx = cached.lastPointerX / Math.max(1, width);
-          const dy = cached.lastPointerY / Math.max(1, height);
+          const bounds = canvas.getBoundingClientRect();
+          const dx = Math.max(0, Math.min(1, (cached.lastPointerX - bounds.left) / Math.max(1, bounds.width)));
+          const dy = Math.max(0, Math.min(1, (cached.lastPointerY - bounds.top) / Math.max(1, bounds.height)));
           const hx = dx - 0.1;
           const hy = dy - 0.1;
           cached.targetX = hx * cached.radius * -0.8 * motionScale;
@@ -1641,7 +1504,7 @@ function drawLegacyVisualizer({
       );
       cached.rotationTarget -= cached.rotationSpeed * weightedDeltaTime * 60;
 
-      const ease = clampedEnergy * KALEIDOSCOPE_EASE * motionScale;
+      const ease = 1 - Math.exp(-clampedEnergy * KALEIDOSCOPE_EASE * motionScale * Math.min(.05, deltaTime) * 60);
 
       cached.offsetX += (cached.targetX - cached.offsetX) * ease;
       cached.offsetY += (cached.targetY - cached.offsetY) * ease;
@@ -1761,7 +1624,7 @@ function drawLegacyVisualizer({
 
 /** Isolate canvas state and draw existing artwork in logical CSS pixels on Retina. */
 export function drawVisualizer(inputs: VisualizerInputs) {
-  if (inputs.visualizerType === 'time-ribbon') { drawTimeRibbon(inputs); return; }
+  if (inputs.visualizerType === 'time-ribbon' || inputs.visualizerType === 'super-time-ribbon') { drawTimeRibbon(inputs); return; }
   const view = beginVisualizer(inputs.canvas);
   if (!view) return;
   try { drawLegacyVisualizer(inputs); } finally { view.context.restore(); }

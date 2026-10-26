@@ -1,10 +1,11 @@
+import { CombinedVisualizerPanel } from './CombinedVisualizerPanel';
 import { settingsForTracks } from './mixerSettings';
 import { SpotifyRemoteObserver } from '../../local/spotifySync';
 import { resizeVisualizer, canvasVisible } from './visuals/canvas';
 import { createStereoTap, type StereoTap } from './visuals/analysis';
 import { drawSpectrogram, resetSpectrogram } from './visuals/spectrogram';
 import { drawStereoBloom } from './visuals/stereoBloom';
-import { combinedVisualizers, isCombinedVisualizer, drawCombinedVisualizer, resetCombinedVisualizer } from './visuals/combinedVisualizers';
+import { isCombinedVisualizer, drawCombinedVisualizer, resetCombinedVisualizer } from './visuals/combinedVisualizers';
 import { getLogarithmicVolumeGain } from './mixerGain';
 import { connectStemEffects } from './stemGraph';
 import { TempoEngine } from './tempoEngine';
@@ -1801,10 +1802,7 @@ export default function Player({
       </div>
       {tracks.length ? (
         <>
-          {isCombinedVisualizer(visualizerType) && <section className="combined-visualizer" aria-label={combinedVisualizers[visualizerType].label}>
-            <canvas ref={combinedCanvas} aria-label="Combined stem visualization" />
-            <div className="combined-visualizer__legend">{combinedVisualizers[visualizerType].legend.map(label => <span key={label}>{label}</span>)}</div>
-          </section>}
+          {isCombinedVisualizer(visualizerType) && <CombinedVisualizerPanel type={visualizerType} canvasRef={combinedCanvas} />}
           <div className="player-track-list" style={{ marginTop: "1rem" }}>
             {tracks.map((track) => (
               <TrackRow

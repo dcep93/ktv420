@@ -7,7 +7,7 @@ const observer=new ResizeObserver(()=>canvases.forEach(resizeVisualizer));
 canvases.forEach(c=>observer.observe(c));
 const envelope=Array.from({length:6000},(_,i)=>.15+.18*(1+Math.sin(i*.037))+(i%11===0?.4:0));
 let frame=0,time=10,playing=true,last=performance.now();
-const analyser={frequencyBinCount:1024,getByteFrequencyData(data:Uint8Array){
+const analyser={fftSize:2048,getByteTimeDomainData(data:Uint8Array){for(let i=0;i<data.length;i++)data[i]=128+Math.round(Math.sin(i*.06)*45);},frequencyBinCount:1024,getByteFrequencyData(data:Uint8Array){
   data.fill(0);data[4]=frame%2?255:254;data[92]=frame%2?254:255;
 }} as unknown as AnalyserNode;
 document.querySelector('#pause')!.addEventListener('click',event=>{
@@ -17,7 +17,7 @@ document.querySelector('#seek')!.addEventListener('click',()=>{time+=15;});
 function draw(now:number){
   if(playing)time+=Math.min(.1,(now-last)/1000);
   last=now;frame++;
-  for(const canvas of canvases)drawTimeRibbon({canvas,analyser,visualizerType:'time-ribbon',currentTime:time,duration:300,isPlaying:playing,
+  for(const canvas of canvases)drawTimeRibbon({canvas,analyser,visualizerType:(document.querySelector<HTMLSelectElement>('#mode')!.value as 'time-ribbon'|'super-time-ribbon'),currentTime:time,duration:300,isPlaying:playing,
     amplitudeEnvelope:envelope,amplitudeMaximum:.91,sampleRate:44100});
   document.querySelector('#status')!.textContent=`${playing?'Playing':'Paused'} · ${time.toFixed(2)} seconds`;
   requestAnimationFrame(draw);

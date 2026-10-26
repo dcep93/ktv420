@@ -51,3 +51,16 @@ test('renderer stays finite and balanced at silence, track boundaries and short 
   }
   assert.equal(reads,5);
 });
+
+test('Super ribbon movement is smoothed, bounded and frozen when paused',async()=>{
+  const {ribbonMotion}=await import('../stems/player/visuals/timeRibbon');
+  let state=ribbonMotion(undefined,0,0,true);
+  for(let i=1;i<180;i++){
+    const next=ribbonMotion(state,i%2?1:0,i/60,true);
+    assert.ok(next.level>=0&&next.level<=1);
+    assert.ok(Math.abs(next.level-state.level)<.07);
+    state=next;
+  }
+  assert.equal(ribbonMotion(state,0,10,false).level,state.level);
+  assert.equal(ribbonMotion(state,1,0,true).level,state.level);
+});

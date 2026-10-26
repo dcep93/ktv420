@@ -131,3 +131,13 @@ test('Highway is a bounded combined scene with independent stem contributions an
     assert.equal(s.read().depth,0);
   }
 });
+
+test('Highway palette evolves continuously across minute boundaries and wraparound',async()=>{
+  const {highwayHue}=await import('../stems/player/visuals/highway');
+  const distance=(a:number,b:number)=>Math.abs(((a-b+540)%360)-180);
+  assert.ok(distance(highwayHue(0),highwayHue(60))>100);
+  assert.equal(highwayHue(0),highwayHue(300));
+  for(let i=0;i<360*60;i++)assert.ok(distance(highwayHue(i/60),highwayHue((i+1)/60))<.07);
+  for(const time of [60,120,180,240,300])assert.ok(distance(highwayHue(time-.001),highwayHue(time+.001))<.0001);
+  assert.ok(Number.isFinite(highwayHue(NaN)));
+});
