@@ -15,10 +15,23 @@ test('Octave shifts actual frequencies up and down, preserving stereo isolation 
   for(const rate of [44100,48000])for(const [amount,ratio] of [[0,.5],[1,2]]){
     const dsp=new StereoEffects(rate),c=control('octave',amount),samples=new Float32Array(rate*2);
     for(let i=0;i<samples.length;i++){const x=.1*Math.sin(2*Math.PI*440*i/rate);dsp.tick(x,0,c,i/rate);samples[i]=dsp.left;assert.equal(dsp.right,0);}
-    assert.ok(amplitude(samples,440,rate)>.09,'dry source remains');
+    assert.ok(Math.abs(amplitude(samples,440,rate)-.015)<.003,'full effect retains 15% dry alongside 85% shifted');
     const shifted=amplitude(samples,440*ratio,rate);
     assert.ok(shifted>.025,`audible ${ratio}×: ${shifted}`);
     assert.ok(amplitude(samples,440*(ratio===2?.5:2),rate)<shifted*.2,'does not produce the opposite octave');
+  }
+});
+test('Octave fades the original as the shifted blend increases in either direction',()=>{
+  const rate=48000;
+  for(const amount of [.25,.5,.75]){
+    const dsp=new StereoEffects(rate),c=control('octave',amount),samples=new Float32Array(rate*2);
+    for(let i=0;i<samples.length;i++){
+      const input=.1*Math.sin(2*Math.PI*440*i/rate);
+      dsp.tick(input,0,c,i/rate); samples[i]=dsp.left;
+      if(amount===.5)assert.equal(dsp.left,input,'neutral is exactly the original');
+    }
+    const original=amplitude(samples,440,rate);
+    assert.ok(Math.abs(original-(amount===.5?.1:.0575))<.003,`original gain at ${amount}: ${original}`);
   }
 });
 test('octave-up band limiting reduces high-frequency foldback',()=>{

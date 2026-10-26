@@ -160,7 +160,8 @@ export class StereoEffects {
       const direction=v<.5?-1:1,layer=direction<0?this.octaveDown:this.octaveUp;
       if(direction!==this.octaveDirection){layer.reset();this.octaveDirection=direction;}
       layer.tick(l,r);
-      outL=l+layer.left*strength*.85;outR=r+layer.right*strength*.85;
+      const wet=strength*.85, dry=1-wet;
+      outL=l*dry+layer.left*wet;outR=r*dry+layer.right*wet;
     }else if(kind==='reverse-echo'){
       const span=clamp(60/clamp(control.bpm,40,240)*control.beats/clamp(control.tempo,.5,2),.02,6)*this.rate;
       this.reverse.tick(this.delay,span);
