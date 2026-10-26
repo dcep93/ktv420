@@ -201,3 +201,35 @@ position. On the player page, the header scrolled to y=-596; returning to a
 previously unscrolled playlist showed the first row again. Lint and production
 builds passed. This validates the layout locally; it does not establish which
 browser paint/scroll condition caused the user's original intermittent symptom.
+
+
+## Effects rebuild (2026-10-26)
+
+Replaced the reconnecting native effect graph with one stereo AudioWorklet per stem,
+shared by live playback and offline export. The twelve visible choices consolidate
+overlapping filters; all nineteen current/legacy IDs remain accepted. No panning
+was added. Amount/bypass smoothing, fade-through-dry selection changes and stable
+feedback state avoid reinitializing tails while adjusting controls. Echo has manual
+BPM/beat timing, darkening repeats and feedback compensation. Envelope Filter
+follows loudness, Vowels uses three resonances, Chorus has independent stereo
+delays, and Saturation uses four filtered waveshaping substeps.
+
+Nine signal/compatibility tests cover exact neutral/bypass, resonant Wah gain,
+finite output across every ID, stereo Chorus, envelope response, Echo interval and
+feedback headroom, reverb tails, deterministic automation, smooth switching and
+optional recording settings. The existing cross-song settings test also checks
+that Echo/bypass settings are copied without sharing mutable nested state.
+
+A temporary browser fixture exercised the actual Player controls and live silent
+playback, checked saved effect amount/BPM/bypass, and rendered all rebuilt effects
+through OfflineAudioContext. Two 48 kHz Chorus renders were sample-identical. The
+actual replay export renderer completed a three-second sequence with effect and
+tempo changes plus pause/resume: 132,300 stereo frames, finite peak 0.0927. The
+minified fixture passed again under the exact Firebase player CSP. For five
+simultaneous effects at 48 kHz, the pure DSP benchmark measured about 0.037 ms
+mean / 0.10 ms p95 per 128-frame block against a 2.67 ms budget. This measures DSP
+CPU work on the development machine, not total playback cost or all user devices.
+These are synthetic signal checks, not a listening audition with real songs.
+
+All 150 tests, lint and both production builds passed. Existing recordings remain
+readable but deliberately use the new effect sound, not a legacy bit-exact engine.

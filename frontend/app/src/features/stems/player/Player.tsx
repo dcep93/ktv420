@@ -27,7 +27,7 @@ import {
   applyAudioEffect,
   audioEffectOptions,
   type AudioEffectType,
-  createEffectNodes,
+  createEffectNodes, prepareAudioEffects, disposeAudioEffects, syncAudioEffects, defaultEffectSettings, type EffectSettings, isAudioEffect,
   type EffectNodes,
   getDefaultEffectValue,
 } from "./audioEffects";
@@ -103,6 +103,12 @@ export default function Player({
   const applyTempoPitch = useCallback((rate: number, semitones: number) => {
     if (!validTempo(rate) || !validPitch(semitones)) throw new Error('Invalid tempo or pitch.');
     engine.current?.set(rate, semitones);
+    const context=audioCtxRef.current;
+    if(context)Object.values(effectNodesRef.current).forEach(nodes=>{
+      nodes.node.parameters.get('tempo')!.setValueAtTime(rate,context.currentTime);
+      const playing=nodes.node.parameters.get('clockRate')!.value>0;
+      syncAudioEffects(nodes,engine.current?.position ?? startOffsetRef.current,playing?rate:0,context.currentTime);
+    });
     tempoRef.current = rate; pitchRef.current = semitones;
     setTempo(rate); setPitch(semitones);
   }, []);
@@ -148,6 +154,8 @@ export default function Player({
   const trackMuteStatesRef = useRef<Record<string, boolean>>({});
   const trackDeafenStatesRef = useRef<Record<string, boolean>>({});
   const effectValuesRef = useRef<Record<string, number>>({});
+  const [effectSettings,setEffectSettings] = useState<Record<string,EffectSettings>>({});
+  const effectSettingsRef = useRef<Record<string,EffectSettings>>({});
   const effectTypesRef = useRef<Record<string, AudioEffectType>>({});
   const isRecordingRef = useRef(isRecording);
   const onRecordingEventRef = useRef(onRecordingEvent);
@@ -159,7 +167,7 @@ export default function Player({
   const analyserNodesRef = useRef<Record<string, AnalyserNode>>({});
   const combinedCanvas = useRef<HTMLCanvasElement | null>(null);
   const visualRevision = useRef(0);
-  useEffect(() => { visualRevision.current++; }, [volumes, trackMuteStates, trackDeafenStates, effectValues, effectTypes]);
+  useEffect(() => { visualRevision.current++; }, [volumes, trackMuteStates, trackDeafenStates, effectValues, effectTypes, effectSettings]);
   const canvasRefs = useRef<Record<string, HTMLCanvasElement | null>>({});
   const drawAnimationFrameRef = useRef<number | null>(null);
   const timeAnimationFrameRef = useRef<number | null>(null);
@@ -412,7 +420,9 @@ export default function Player({
 
   const stopAllSources = useCallback(() => {
     playbackEpoch.current++;
-    engine.current?.pause();
+    const position=engine.current?.pause() ?? startOffsetRef.current;
+    const context=audioCtxRef.current;
+    if(context)Object.values(effectNodesRef.current).forEach(nodes=>syncAudioEffects(nodes,position,0,context.currentTime));
   }, []);
 
   const applyEffectiveVolume = useCallback(
@@ -452,7 +462,7 @@ export default function Player({
         context,
         nodes: effectNodes,
         effect: effectType,
-        value: effectValue,
+        value: effectValue, settings: effectSettingsRef.current[trackId], tempo: tempoRef.current,
       });
     },
     [ensureAudioContext]
@@ -542,7 +552,7 @@ export default function Player({
     visualizer: visualizerType,
     stems: tracks.map(track => ({name:track.name,input:track.isInput,volume:volumesRef.current[track.id] ?? 1,
       mute:trackMuteStatesRef.current[track.id] ?? false,deafen:trackDeafenStatesRef.current[track.id] ?? false,
-      effect:effectTypesRef.current[track.id] ?? 'wah',value:effectValuesRef.current[track.id] ?? getDefaultEffectValue('wah')})),
+      effect:effectTypesRef.current[track.id] ?? 'wah',value:effectValuesRef.current[track.id] ?? getDefaultEffectValue('wah'),effectSettings:{...(effectSettingsRef.current[track.id] ?? defaultEffectSettings)}})),
     spotlight: spotlightState,
   }), [tracks,visualizerType,spotlightState]);
 
@@ -574,6 +584,7 @@ export default function Player({
     const initialMuteStates: Record<string, boolean> = {};
     const initialDeafenStates: Record<string, boolean> = {};
     const initialEffectValues: Record<string, number> = {};
+    const initialEffectSettings: Record<string,EffectSettings> = {};
     const initialEffectTypes: Record<string, AudioEffectType> = {};
 
     const inherited = settingsForTracks(inheritedSettings.current, tracks);
@@ -583,6 +594,7 @@ export default function Player({
       initialMuteStates[track.id] = stem.mute;
       initialDeafenStates[track.id] = stem.deafen;
       initialEffectValues[track.id] = stem.value;
+      initialEffectSettings[track.id] = {...(stem.effectSettings ?? defaultEffectSettings)};
       initialEffectTypes[track.id] = stem.effect as AudioEffectType;
     }
 
@@ -590,6 +602,7 @@ export default function Player({
     trackMuteStatesRef.current = initialMuteStates;
     trackDeafenStatesRef.current = initialDeafenStates;
     effectValuesRef.current = initialEffectValues;
+    effectSettingsRef.current=initialEffectSettings;setEffectSettings(initialEffectSettings);
     effectTypesRef.current = initialEffectTypes;
 
     setVolumes(initialVolumes);
@@ -639,23 +652,7 @@ export default function Player({
 
     Object.entries(effectNodesRef.current).forEach(([id, effectNodes]) => {
       if (!activeIds.has(id)) {
-        effectNodes.filter.disconnect();
-        effectNodes.phaserStages.forEach((stage) => stage.disconnect());
-        effectNodes.phaserFeedbackGain.disconnect();
-        effectNodes.wetGain.disconnect();
-        effectNodes.dryGain.disconnect();
-        effectNodes.delay.disconnect();
-        effectNodes.feedbackGain.disconnect();
-        effectNodes.shaper.disconnect();
-        effectNodes.convolver.disconnect();
-        effectNodes.delayLfoGain.disconnect();
-        effectNodes.filterLfoGain.disconnect();
-        try {
-          effectNodes.lfo.stop();
-        } catch (error) {
-          console.warn("Failed to stop LFO", error);
-        }
-        effectNodes.lfo.disconnect();
+        disposeAudioEffects(effectNodes);
         delete effectNodesRef.current[id];
       }
     });
@@ -695,9 +692,12 @@ export default function Player({
           return;
         }
 
+        await prepareAudioEffects(context);
+        if (isCancelled) return;
         buffersRef.current[track.id] = audioBuffer;
         const gain = context.createGain();
         const effectNodes = createEffectNodes(context);
+        effectNodes.node.onprocessorerror = () => playbackErrorRef.current?.('Audio effects stopped. Reload the player to retry.');
         const analyser = context.createAnalyser();
 
         analyser.fftSize = 2048;
@@ -1074,6 +1074,7 @@ export default function Player({
       setTransportError('');
       if (!engine.current) throw new Error('Audio processor is still loading.');
       engine.current.set(tempoRef.current, pitchRef.current);
+      Object.values(effectNodesRef.current).forEach(nodes=>syncAudioEffects(nodes,offsetSeconds,tempoRef.current,context.currentTime+.02));
       await engine.current.start(offsetSeconds);
       if (epoch !== playbackEpoch.current) return;
       startOffsetRef.current = offsetSeconds;
@@ -1178,6 +1179,7 @@ export default function Player({
     }
 
     startOffsetRef.current = engine.current?.pause() ?? startOffsetRef.current;
+    if(audioCtxRef.current)Object.values(effectNodesRef.current).forEach(nodes=>syncAudioEffects(nodes,startOffsetRef.current,0,audioCtxRef.current!.currentTime));
     stopAllSources();
     setIsPlaying(false);
     return startOffsetRef.current;
@@ -1313,6 +1315,7 @@ export default function Player({
   const handleEffectValueChange = (trackId: string, value: number) => {
     const clamped = Math.min(1, Math.max(0, value));
 
+    effectValuesRef.current[trackId]=clamped;
     setEffectValues((previous) => ({ ...previous, [trackId]: clamped }));
     applyEffectValue(trackId, clamped);
     queueDebouncedRecordingEvent(
@@ -1324,6 +1327,13 @@ export default function Player({
     );
   };
 
+  const handleEffectSettingsChange = (trackId:string,settings:EffectSettings) => {
+    effectSettingsRef.current={...effectSettingsRef.current,[trackId]:settings};
+    setEffectSettings(effectSettingsRef.current);
+    applyEffectValue(trackId);
+    emitRecordingEvent('effect_value_change',getStemRecordingPayload(trackId));
+  };
+
   const handleEffectTypeChange = (
     trackId: string,
     effectType: AudioEffectType
@@ -1332,6 +1342,7 @@ export default function Player({
     const defaultValue = getDefaultEffectValue(effectType);
     effectValuesRef.current[trackId] = defaultValue;
     setEffectValues((previous) => ({ ...previous, [trackId]: defaultValue }));
+    effectTypesRef.current[trackId]=effectType;
     setEffectTypes((previous) => ({ ...previous, [trackId]: effectType }));
     applyEffectValue(trackId, defaultValue, effectType);
     emitRecordingEvent("effect_type_change", {
@@ -1439,11 +1450,11 @@ export default function Player({
   }, [transport, tracks.length, readyTrackIds.length, unavailableMessage, onPlaybackError]);
   useEffect(() => {
     if (isRecording && areTracksReady) onRecordingEventRef.current?.({type:'mixer_snapshot',trackTimeSeconds:currentPlaybackTime(),payload:{snapshot:snapshot()}});
-  }, [isRecording,areTracksReady,tempo,pitch,volumes,trackMuteStates,trackDeafenStates,effectValues,effectTypes,visualizerType,spotlightState,snapshot,currentPlaybackTime]);
+  }, [isRecording,areTracksReady,tempo,pitch,volumes,trackMuteStates,trackDeafenStates,effectValues,effectTypes,effectSettings,visualizerType,spotlightState,snapshot,currentPlaybackTime]);
 
   useEffect(() => {
     if (areTracksReady && !replaying) onSettingsChange?.(snapshot());
-  }, [areTracksReady, replaying, onSettingsChange, snapshot, tempo, pitch, volumes, trackMuteStates, trackDeafenStates, effectValues, effectTypes]);
+  }, [areTracksReady, replaying, onSettingsChange, snapshot, tempo, pitch, volumes, trackMuteStates, trackDeafenStates, effectValues, effectTypes, effectSettings]);
 
   useEffect(() => {
     onControls?.({
@@ -1454,12 +1465,13 @@ export default function Player({
       apply:value => {
         applyTempoPitch(value.tempo ?? 1, value.pitch ?? 0);
         if (!visualizerOptions.some(option => option.value === value.visualizer) || value.stems.length !== tracks.length) throw new Error('Recording requires an unsupported mixer layout.');
-        const v: Record<string,number> = {}, m: Record<string,boolean> = {}, d: Record<string,boolean> = {}, e: Record<string,AudioEffectType> = {}, x: Record<string,number> = {};
+        const v: Record<string,number> = {}, m: Record<string,boolean> = {}, d: Record<string,boolean> = {}, e: Record<string,AudioEffectType> = {}, x: Record<string,number> = {}, options: Record<string,EffectSettings> = {};
         for (const track of tracks) {
           const stem = value.stems.find(stem => stem.name === track.name && stem.input === track.isInput);
-          if (!stem || !audioEffectOptions.some(option => option.value === stem.effect)) throw new Error('Recording requires a different stem or effect version.');
-          v[track.id]=stem.volume; m[track.id]=stem.mute; d[track.id]=stem.deafen; e[track.id]=stem.effect as AudioEffectType; x[track.id]=stem.value;
+          if (!stem || !isAudioEffect(stem.effect)) throw new Error('Recording requires a different stem or effect version.');
+          v[track.id]=stem.volume; m[track.id]=stem.mute; d[track.id]=stem.deafen; e[track.id]=stem.effect as AudioEffectType; x[track.id]=stem.value;options[track.id]={...(stem.effectSettings ?? defaultEffectSettings)};
         }
+        effectSettingsRef.current=options;setEffectSettings(options);
         volumesRef.current=v; trackMuteStatesRef.current=m; trackDeafenStatesRef.current=d; effectTypesRef.current=e; effectValuesRef.current=x;
         setVolumes(v);setTrackMuteStates(m);setTrackDeafenStates(d);setEffectTypes(e);setEffectValues(x);
         setVisualizerType(value.visualizer as VisualizerType);setSpotlightState(value.spotlight as SpotlightState | null);
@@ -1809,6 +1821,8 @@ export default function Player({
                   getDefaultEffectValue(effectTypes[track.id] ?? "wah")
                 }
                 effectOptions={audioEffectOptions}
+                effectSettings={effectSettings[track.id] ?? defaultEffectSettings}
+                onEffectSettingsChange={handleEffectSettingsChange}
                 onVolumeChange={handleVolumeChange}
                 onVolumeReset={handleVolumeReset}
                 onEffectValueChange={handleEffectValueChange}

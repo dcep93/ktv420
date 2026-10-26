@@ -1,5 +1,5 @@
 import { TempoEngine } from '../../stems/player/tempoEngine';
-import { applyAudioEffect, createEffectNodes, type AudioEffectType } from '../../stems/player/audioEffects';
+import { applyAudioEffect, createEffectNodes, prepareAudioEffects, syncAudioEffects, type AudioEffectType } from '../../stems/player/audioEffects';
 import { connectStemEffects, disposeStemEffects } from '../../stems/player/stemGraph';
 import { getLogarithmicVolumeGain } from '../../stems/player/mixerGain';
 import type { PlaybackRecord } from '../../stems/player/types';
@@ -27,11 +27,12 @@ export async function renderSection(section: ExportSection, source: RenderSource
     }
     buffers.push(buffer);
   }
+  await prepareAudioEffects(context);
   const stems = buffers.map(()=>{
     const input=context.createGain(),effects=createEffectNodes(context);
     connectStemEffects(input,effects,context.destination);return {input,effects};
   });
-  let engine: TempoEngine | undefined, playing=false, position=0;
+  let engine: TempoEngine | undefined, playing=false, position=0,tempo=1;
   const apply = (value: MixerSnapshot, initial=false) => {
     if(value.stems.length!==snapshot.stems.length) throw new Error('Recording stem layout changed unexpectedly.');
     const solo=value.stems.some(stem=>stem.deafen);
@@ -41,19 +42,23 @@ export async function renderSection(section: ExportSection, source: RenderSource
       const gain=valueStem.mute || (solo && !valueStem.deafen) ? 0 : getLogarithmicVolumeGain(valueStem.volume);
       if(initial) stems[i].input.gain.setValueAtTime(gain,context.currentTime);
       else stems[i].input.gain.setTargetAtTime(gain,context.currentTime,.01);
-      applyAudioEffect({context,nodes:stems[i].effects,effect:valueStem.effect as AudioEffectType,value:valueStem.value});
+      applyAudioEffect({context,nodes:stems[i].effects,effect:valueStem.effect as AudioEffectType,value:valueStem.value,settings:valueStem.effectSettings,tempo:value.tempo ?? 1});
     });
-    return engine!.set(value.tempo ?? 1,value.pitch ?? 0);
+    const current=engine!.position;
+    tempo=value.tempo ?? 1;
+    stems.forEach(stem=>syncAudioEffects(stem.effects,current,playing?tempo:0,context.currentTime));
+    return engine!.set(tempo,value.pitch ?? 0);
   };
   const act = async (event: PerformanceEvent) => {
     signal.throwIfAborted();
     if (event.type==='mix') { await apply(event.snapshot!); return; }
     if (event.type==='track') { position=Math.max(0,event.position-source.offset); await apply(event.snapshot!,true); return; }
-    if (event.type==='pause' || event.type==='stop') {position=engine!.pause();playing=false;return;}
+    if (event.type==='pause' || event.type==='stop') {position=engine!.pause();playing=false;stems.forEach(stem=>syncAudioEffects(stem.effects,position,0,context.currentTime));return;}
     if (event.type==='play' || event.type==='seek') {
       engine!.pause();position=Math.max(0,event.position-source.offset);
       if (position>buffers[0].duration+.1) throw new Error('Recorded position is outside the saved audio.');
       if(event.type==='play') playing=true;
+      stems.forEach(stem=>syncAudioEffects(stem.effects,position,playing?tempo:0,context.currentTime+(playing?.02:0)));
       if(playing) await engine!.start(Math.min(position,buffers[0].duration));
     }
   };
@@ -66,6 +71,7 @@ export async function renderSection(section: ExportSection, source: RenderSource
   const perform = (event: PerformanceEvent) => Promise.race([act(event), processorFailed]);
   try {
     engine = await TempoEngine.create(context,buffers,stems.map(stem=>stem.input),message=>rejectProcessor(new Error(message)));
+    stems.forEach(stem=>{stem.effects.node.onprocessorerror=()=>rejectProcessor(new Error('Audio effects stopped during export.'));});
     signal.throwIfAborted();
     const groups=eventQuanta(section);
     const initial=groups[0]?.[0]===0 ? groups.shift()![1] : [];

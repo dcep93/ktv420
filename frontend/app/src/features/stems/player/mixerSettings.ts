@@ -1,5 +1,5 @@
 import type { MixerSnapshot } from '../../local/recording';
-import { getDefaultEffectValue } from './audioEffects';
+import { getDefaultEffectValue } from './effects/catalog';
 import type { Track } from './types';
 import { visualizerOptions } from './visualizerOptions';
 
@@ -14,7 +14,7 @@ export function settingsForTracks(saved: MixerSnapshot | null | undefined, track
     spotlight: hasSpotlight ? structuredClone(spotlight) : null,
     stems: tracks.map(track => {
       const previous = saved?.stems.find(stem => stem.name === track.name && stem.input === track.isInput);
-      return previous ? {...previous} : {
+      return previous ? structuredClone(previous) : {
         name:track.name, input:track.isInput, volume:1,
         mute:track.isInput && tracks.some(candidate => !candidate.isInput), deafen:false,
         effect:'wah', value:getDefaultEffectValue('wah'),

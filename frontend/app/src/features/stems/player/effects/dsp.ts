@@ -1,0 +1,192 @@
+import { effectIds, type AudioEffectType } from './catalog';
+const TAU=Math.PI*2;
+const vowelBands=[[800,1150,2900],[400,1700,2600],[300,2200,3000],[500,800,2800],[350,650,2700]];
+const vowelQ=[5,7,9],phaseRatios=[.5,1,1.8,3],roomLeft=[1,1,-1,-1,1,-1,1,-1],roomRight=[1,-1,1,-1,-1,1,1,-1];
+const bipolarEffects=new Set<AudioEffectType>(['wah','dj-filter','tone','tilt-eq','bass-boost','bright','band-emphasis','lofi']);
+const clamp=(x:number,a:number,b:number)=>Math.max(a,Math.min(b,x));
+const flush=(x:number)=>Math.abs(x)<1e-20?0:x;
+
+/** Transposed direct-form II, with coefficients updated at control rate. */
+class Filter {
+  b0=1;b1=0;b2=0;a1=0;a2=0;z1=0;z2=0;
+  set(type:'lowpass'|'highpass'|'bandpass'|'lowshelf'|'highshelf',frequency:number,q:number,rate:number,gain=0){
+    const w=TAU*clamp(frequency,10,rate*.45)/rate,c=Math.cos(w),s=Math.sin(w),alpha=s/(2*q);
+    let a0=1+alpha,a1=-2*c,a2=1-alpha,b0=1,b1=0,b2=0;
+    if(type==='lowpass'){b0=(1-c)/2;b1=1-c;b2=b0;}
+    else if(type==='highpass'){b0=(1+c)/2;b1=-1-c;b2=b0;}
+    else if(type==='bandpass'){b0=alpha;b1=0;b2=-alpha;}
+    else {
+      const a=10**(gain/40),b=2*Math.sqrt(a)*s/Math.SQRT2;
+      if(type==='lowshelf'){
+        b0=a*((a+1)-(a-1)*c+b);b1=2*a*((a-1)-(a+1)*c);b2=a*((a+1)-(a-1)*c-b);
+        a0=(a+1)+(a-1)*c+b;a1=-2*((a-1)+(a+1)*c);a2=(a+1)+(a-1)*c-b;
+      }else{
+        b0=a*((a+1)+(a-1)*c+b);b1=-2*a*((a-1)+(a+1)*c);b2=a*((a+1)+(a-1)*c-b);
+        a0=(a+1)-(a-1)*c+b;a1=2*((a-1)-(a+1)*c);a2=(a+1)-(a-1)*c-b;
+      }
+    }
+    this.b0=b0/a0;this.b1=b1/a0;this.b2=b2/a0;this.a1=a1/a0;this.a2=a2/a0;
+  }
+  tick(x:number){const y=this.b0*x+this.z1;this.z1=flush(this.b1*x-this.a1*y+this.z2);this.z2=flush(this.b2*x-this.a2*y);return y;}
+  reset(){this.z1=this.z2=0;}
+}
+class Delay {
+  data:Float32Array;index=0;
+  constructor(length:number){this.data=new Float32Array(length);}
+  read(samples:number){let p=this.index-clamp(samples,1,this.data.length-2);if(p<0)p+=this.data.length;const i=Math.floor(p),f=p-i;return this.data[i]*(1-f)+this.data[(i+1)%this.data.length]*f;}
+  write(x:number){this.data[this.index]=flush(x);if(++this.index===this.data.length)this.index=0;}
+  reset(){this.data.fill(0);this.index=0;}
+}
+class Diffuser {
+  line:Delay;
+  constructor(length:number){this.line=new Delay(length+2);}
+  tick(x:number){const delayed=this.line.read(this.line.data.length-2),y=delayed-.65*x;this.line.write(x+.65*y);return y;}
+  reset(){this.line.reset();}
+}
+
+export type EffectControl = { effect:number; amount:number; bypass:number; bpm:number; beats:number; tempo:number };
+/** Bounded, allocation-free sample loop shared by the worklet and signal tests. */
+export class StereoEffects {
+  readonly rate:number;
+  private filters=Array.from({length:6},()=>new Filter());
+  private delay:Delay[];
+  private room:Delay[];
+  private diffusion:Diffuser[];
+  private damp=new Float64Array(8);
+  private feedback=new Float64Array(8);
+  private roomValues=new Float64Array(8);
+  private phaseState=new Float64Array(8);
+  private phaseA=new Float64Array(4);
+  private repeatLow=new Float64Array(2);
+  private previousInput=new Float64Array(2);
+  private saturator=Array.from({length:2},()=>new Filter());
+  private envelope=0;
+  private effect:AudioEffectType='wah';
+  private requested:AudioEffectType='wah';
+  private initialized=false;
+  private amount=.5;
+  private gate=1;
+  private bypass=0;
+  private n=0;
+  private coefficientAmount=NaN;
+  private echoDelay=0;
+  private echoFrom=0;
+  private echoTarget=0;
+  private echoFade=1;
+  private smoothing:number;
+  private attack:number;
+  private release:number;
+  private repeatCoefficient:number;
+  private roomCoefficient:number;
+  left=0;right=0;
+  constructor(rate:number){
+    this.rate=rate;this.smoothing=1-Math.exp(-1/(.015*rate));this.attack=1-Math.exp(-1/(.008*rate));this.release=1-Math.exp(-1/(.12*rate));
+    this.repeatCoefficient=1-Math.exp(-TAU*3200/rate);this.roomCoefficient=1-Math.exp(-TAU*5500/rate);
+    this.delay=[new Delay(Math.ceil(rate*6.1)),new Delay(Math.ceil(rate*6.1))];
+    this.room=[.0297,.0371,.0411,.0437,.0479,.0533,.0593,.0617].map(seconds=>new Delay(Math.round(seconds*rate)+2));
+    this.diffusion=[.0047,.0017,.0053,.0023].map(seconds=>new Diffuser(Math.round(seconds*rate)));
+    this.saturator.forEach(filter=>filter.set('lowpass',Math.min(16000,rate*.4),.707,rate*4));
+  }
+  private reset(){
+    this.filters.forEach(f=>f.reset());this.delay.forEach(d=>d.reset());this.room.forEach(d=>d.reset());this.diffusion.forEach(d=>d.reset());
+    this.damp.fill(0);this.phaseState.fill(0);this.repeatLow.fill(0);this.previousInput.fill(0);this.saturator.forEach(f=>f.reset());this.envelope=0;this.coefficientAmount=NaN;
+    this.echoTarget=this.echoDelay=this.echoFrom=0;this.echoFade=1;
+  }
+  private configure(v:number,time:number){
+    const kind=this.effect,amount=Math.abs(v-.5)*2;
+    if(Math.abs(v-this.coefficientAmount)<.0001 && kind!=='envelope-filter' && kind!=='phaser')return;
+    this.coefficientAmount=v;
+    for(let c=0;c<2;c++){
+      const f=this.filters[c*3],g=this.filters[c*3+1];
+      switch(kind){
+        case 'wah':case 'band-emphasis':f.set('bandpass',220*(3400/220)**v,2+amount*3,this.rate);break;
+        case 'envelope-filter':f.set('bandpass',250+4300*Math.sqrt(clamp(this.envelope*3,0,1))*v,1.4+v*2.6,this.rate);break;
+        case 'telephone':f.set('highpass',350,.707,this.rate);g.set('lowpass',3000,.707,this.rate);break;
+        case 'dj-filter':f.set(v<.5?'lowpass':'highpass',v<.5?20000*(120/20000)**amount:25*(6000/25)**amount,.707,this.rate);break;
+        case 'warm':case 'lofi':case 'submerge':f.set('lowpass',18000*(180/18000)**(kind==='lofi'?amount:v),.707,this.rate);break;
+        case 'tone':case 'tilt-eq':f.set('lowshelf',350,.707,this.rate,-(v*2-1)*6);g.set('highshelf',2200,.707,this.rate,(v*2-1)*6);break;
+        case 'bass-boost':f.set('lowshelf',180,.707,this.rate,(v*2-1)*9);break;
+        case 'bright':f.set('highshelf',3500,.707,this.rate,(v*2-1)*9);break;
+        case 'formant-filter':{
+          const p=clamp((v-.2)*5,0,4),a=Math.floor(p),b=Math.min(4,a+1),t=p-a;
+          for(let band=0;band<3;band++)this.filters[c*3+band].set('bandpass',vowelBands[a][band]*(1-t)+vowelBands[b][band]*t,vowelQ[band],this.rate);
+          break;
+        }
+      }
+    }
+    if(kind==='phaser'){
+      const frequency=450*2**(Math.sin(TAU*.16*time)*(1+v));
+      for(let i=0;i<4;i++){const k=Math.tan(Math.PI*Math.min(this.rate*.4,frequency*phaseRatios[i])/this.rate);this.phaseA[i]=(k-1)/(k+1);}
+    }
+    if(kind==='reverb')for(let i=0;i<8;i++)this.feedback[i]=10**(-3*(this.room[i].data.length-2)/this.rate/(.8+v*3.2));
+  }
+  tick(l:number,r:number,control:EffectControl,time:number){
+    l=Number.isFinite(l)?l:0;r=Number.isFinite(r)?r:0;
+    this.requested=effectIds[Math.round(control.effect)]??'wah';
+    const target=clamp(Number.isFinite(control.amount)?control.amount:.5,0,1);
+    if(!this.initialized){this.initialized=true;this.effect=this.requested;this.amount=target;this.bypass=control.bypass?1:0;}
+    // Fade through the dry signal before replacing any delay/filter state.
+    if(this.requested!==this.effect){this.gate=Math.max(0,this.gate-1/(this.rate*.02));if(this.gate===0){this.reset();this.effect=this.requested;this.amount=target;}}
+    else this.gate=Math.min(1,this.gate+1/(this.rate*.02));
+    this.amount+=(target-this.amount)*this.smoothing;
+    this.bypass+=((control.bypass?1:0)-this.bypass)*this.smoothing;
+    const level=Math.max(Math.abs(l),Math.abs(r));this.envelope+=(level-this.envelope)*(level>this.envelope?this.attack:this.release);
+    if((this.n++&15)===0 || !Number.isFinite(this.coefficientAmount))this.configure(this.amount,time);
+    const v=this.amount,kind=this.effect,bipolar=bipolarEffects.has(kind);
+    const strength=bipolar?Math.abs(v-.5)*2:v;
+    let outL=l,outR=r;
+    if(kind==='reverb'){
+      const dl=this.diffusion[1].tick(this.diffusion[0].tick(l)),dr=this.diffusion[3].tick(this.diffusion[2].tick(r));
+      let sum=0,left=0,right=0;
+      for(let i=0;i<8;i++){const d=this.room[i];const value=d.read(d.data.length-2);this.damp[i]+=this.roomCoefficient*(value-this.damp[i]);this.roomValues[i]=this.damp[i];sum+=this.damp[i];}
+      for(let i=0;i<8;i++){this.room[i].write((i%2?dr:dl)*.3+(this.roomValues[i]-sum*.25)*this.feedback[i]);left+=this.roomValues[i]*roomLeft[i];right+=this.roomValues[i]*roomRight[i];}
+      outL=l*(1-.25*v)+left*.22*v;outR=r*(1-.25*v)+right*.22*v;
+    }else for(let c=0;c<2;c++){
+      const x=c?r:l,f=this.filters[c*3],g=this.filters[c*3+1];let y=x;
+      switch(kind){
+        case 'wah':case 'band-emphasis':y=x*(1-.85*strength)+f.tick(x)*.85*strength;break;
+        case 'telephone':y=x*(1-v)+g.tick(f.tick(x))*v;break;
+        case 'dj-filter':case 'warm':case 'lofi':case 'submerge':y=x*(1-Math.min(1,strength*8))+f.tick(x)*Math.min(1,strength*8);break;
+        case 'tone':case 'tilt-eq':y=g.tick(f.tick(x))*10**(-strength*2/20);break;
+        case 'bass-boost':case 'bright':y=f.tick(x)*10**(-Math.max(0,v*2-1)*3/20);break;
+        case 'envelope-filter':y=x*(1-v*.85)+f.tick(x)*v*.85;break;
+        case 'formant-filter':{const wet=f.tick(x)*.85+g.tick(x)*.55+this.filters[c*3+2].tick(x)*.35,mix=Math.min(1,v/.15);y=x*(1-.95*mix)+wet*mix;break;}
+        case 'delay-pedal':{
+          const targetDelay=clamp(60/clamp(control.bpm,40,240)*control.beats/clamp(control.tempo,.5,2),.02,6)*this.rate;
+          if(c===0 && Math.abs(targetDelay-this.echoTarget)>.01){this.echoFrom=this.echoDelay || targetDelay;this.echoTarget=targetDelay;this.echoFade=0;}
+          const d=this.delay[c],wet=d.read(this.echoFrom)*(1-this.echoFade)+d.read(this.echoTarget)*this.echoFade;
+          const feedback=.12+.58*v;
+          this.repeatLow[c]+=this.repeatCoefficient*(wet-this.repeatLow[c]);d.write(x+this.repeatLow[c]*feedback);
+          // Normalize the repeat train as feedback rises, preserving headroom.
+          y=x*(1-.65*v)+wet*.65*v*(1-feedback);
+          if(c===1){this.echoFade=Math.min(1,this.echoFade+1/(this.rate*.04));this.echoDelay=this.echoFrom*(1-this.echoFade)+this.echoTarget*this.echoFade;}
+          break;
+        }
+        case 'chorus':case 'flange':{
+          const chorus=kind==='chorus',depth=chorus?(.0003+v*.0028):(.0001+v*.0022);
+          const delay=(chorus?.019:.003)+Math.sin(TAU*(chorus?.32:.12)*time+(chorus?c*Math.PI/2:0))*depth;
+          const wet=this.delay[c].read(delay*this.rate);this.delay[c].write(x+wet*(chorus?.08:.35*v));
+          y=x*(1-v*.45)+wet*v*.45;break;
+        }
+        case 'phaser':{
+          let wet=x+this.repeatLow[c]*.22*v;
+          for(let i=0;i<4;i++){const index=c*4+i,a=this.phaseA[i],next=a*wet+this.phaseState[index];this.phaseState[index]=flush(wet-a*next);wet=next;}
+          this.repeatLow[c]=wet;y=x*(1-.5*v)+wet*.5*v;break;
+        }
+        case 'saturation':{
+          const drive=1+v*7,normal=Math.tanh(drive*.25)/.25;
+          // Four substeps with a reconstruction filter reduce waveshaping aliases.
+          let wet=0;
+          for(let step=1;step<=4;step++)wet=this.saturator[c].tick(Math.tanh((this.previousInput[c]+(x-this.previousInput[c])*step/4)*drive)/normal);
+          this.previousInput[c]=x;y=x*(1-v)+wet*v;break;
+        }
+      }
+      if(c===0)outL=y;else outR=y;
+    }
+    const mix=this.gate*(1-this.bypass);
+    // At neutral use the exact dry samples (filters still keep their state warm).
+    if(strength<1e-7 || mix<1e-7){this.left=l;this.right=r;return;}
+    this.left=l+(outL-l)*mix;this.right=r+(outR-r)*mix;
+    if(!Number.isFinite(this.left)||!Number.isFinite(this.right)){this.reset();this.left=l;this.right=r;}
+  }
+}

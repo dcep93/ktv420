@@ -7,7 +7,7 @@ const saved: MixerSnapshot = {
   tempo:1.24,pitch:-3,visualizer:'stem-garden',
   spotlight:{intent:{kind:'output',name:'vocals.mp3'},level:'track-with-selectors'},
   stems:[
-    {name:'vocals.mp3',input:false,volume:.42,mute:false,deafen:true,effect:'reverb',value:.81},
+    {name:'vocals.mp3',input:false,volume:.42,mute:false,deafen:true,effect:'reverb',value:.81,effectSettings:{bypass:true,bpm:128,beats:1}},
     {name:'drums.mp3',input:false,volume:.7,mute:true,deafen:false,effect:'chorus',value:.2},
     {name:'original.mp3',input:true,volume:.1,mute:true,deafen:false,effect:'wah',value:.5},
   ],
@@ -18,6 +18,8 @@ test('new songs inherit every mixer choice by stem identity, independent of orde
   ]);
   assert.deepEqual(next,{...saved,stems:[saved.stems[1],saved.stems[0],saved.stems[2]]});
   next.stems[1].volume=1;
+  next.stems[1].effectSettings!.bpm=140;
+  assert.equal(saved.stems[0].effectSettings!.bpm,128);
   next.spotlight!.level='track';
   assert.equal(saved.stems[0].volume,.42);
   assert.equal(saved.spotlight!.level,'track-with-selectors');

@@ -1,5 +1,5 @@
 import { parseRecording, type PerformanceEvent, type PerformanceRecording } from '../recording';
-import { audioEffectOptions } from '../../stems/player/audioEffects';
+import { isAudioEffect } from '../../stems/player/effects/catalog';
 export const EXPORT_RATE = 44100;
 export type ExportSection = { trackId: string; start: number; frames: number; events: PerformanceEvent[] };
 export function compileExport(recording: PerformanceRecording): { sections: ExportSection[]; frames: number } {
@@ -8,7 +8,7 @@ export function compileExport(recording: PerformanceRecording): { sections: Expo
   if (!frames) throw new Error('This recording has no audio timeline to export.');
   const sections: ExportSection[] = [];
   for (const event of value.events) {
-    if (event.snapshot?.stems.some(stem => !audioEffectOptions.some(effect => effect.value === stem.effect))) throw new Error('This recording uses an unsupported audio effect.');
+    if (event.snapshot?.stems.some(stem => !isAudioEffect(stem.effect))) throw new Error('This recording uses an unsupported audio effect.');
     if (event.type === 'track') sections.push({ trackId:event.trackId, start:event.at, frames:0, events:[] });
     sections.at(-1)!.events.push(event);
   }

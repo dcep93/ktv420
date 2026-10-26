@@ -1022,3 +1022,13 @@
 .combined-visualizer__legend span:nth-child(4) { color: #9cbcc4; }
 .player-track-row__name:disabled { opacity: 1; cursor: default; }
 .player-track-row canvas, .combined-visualizer canvas { font-family: inherit; border-radius: 5px; }
+
+.stem-effect-controls { display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:.34rem; position:relative; }
+.stem-effect-controls .stem-effect-value { min-width:5.2em; padding:.25rem; font-size:.72rem; color:var(--ww-accent-cyan); border-color:transparent; background:transparent; }
+.stem-effect-bypass { display:flex; align-items:center; justify-content:center; padding:.4rem; }
+.stem-effect-bypass[aria-pressed="true"] { color:var(--ww-text-muted); opacity:.65; }
+.stem-effect-bypass[aria-pressed="false"] { color:var(--ww-title-pink); }
+.stem-effect-neutral { flex-basis:100%; text-align:right; font-size:.65rem; color:var(--ww-text-muted); }
+.stem-echo-timing { display:flex; align-items:center; gap:.35rem; font-size:.72rem; }
+.stem-echo-timing label { display:flex; align-items:center; gap:.25rem; }
+.stem-echo-timing input { width:4.5rem; border:1px solid var(--ww-border); border-radius:5px; padding:.2rem; background:var(--ww-panel-strong); color:var(--ww-text); }

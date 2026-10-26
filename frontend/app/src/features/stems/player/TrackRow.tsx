@@ -1,6 +1,6 @@
 import { type CSSProperties, type PointerEvent } from "react";
 
-import { type AudioEffectOption, type AudioEffectType } from "./audioEffects";
+import { type AudioEffectOption, type AudioEffectType, type EffectSettings, getEffectOption, getDefaultEffectValue, effectAmountLabel, beatOptions } from "./audioEffects";
 import { type Track } from "./types";
 
 type TrackRowProps = {
@@ -13,6 +13,8 @@ type TrackRowProps = {
   effectType: AudioEffectType;
   effectValue: number;
   effectOptions: AudioEffectOption[];
+  effectSettings: EffectSettings;
+  onEffectSettingsChange: (trackId:string,settings:EffectSettings) => void;
   onVolumeChange: (trackId: string, value: number) => void;
   onVolumeReset: (trackId: string) => void;
   onEffectValueChange: (trackId: string, value: number) => void;
@@ -35,7 +37,7 @@ export function TrackRow({
   isDeafened,
   effectType,
   effectValue,
-  effectOptions,
+  effectOptions, effectSettings, onEffectSettingsChange,
   onVolumeChange,
   onVolumeReset,
   onEffectValueChange,
@@ -51,9 +53,7 @@ export function TrackRow({
   const label = track.isInput
     ? "Original"
     : track.name.replace(/\.(wav|mp3)$/i, "").replace(/^./, (letter) => letter.toUpperCase());
-  const selectedEffect = effectOptions.find(
-    (option) => option.value === effectType
-  );
+  const selectedEffect = getEffectOption(effectType);
   const effectDescription = selectedEffect?.description ?? "";
 
   const controlButtonStyle = (isActive: boolean): CSSProperties => ({
@@ -154,7 +154,7 @@ export function TrackRow({
             {isDeafened ? "🎧" : "🎧"}
           </button>
         </div>
-        <div style={{ display: "flex", gap: "0.34rem" }}>
+        <div className="stem-effect-controls">
           <label
             style={{ display: "flex", alignItems: "center", gap: "0.34rem" }}
           >
@@ -178,6 +178,7 @@ export function TrackRow({
                 borderRadius: "7px",
               }}
             >
+              {!effectOptions.some(option=>option.value===effectType) && <option value={effectType}>{selectedEffect.label} (saved)</option>}
               {effectOptions.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
@@ -191,6 +192,9 @@ export function TrackRow({
               max={1}
               step={0.01}
               value={effectValue}
+              aria-valuetext={effectAmountLabel(effectType,effectValue)}
+              disabled={effectSettings.bypass}
+              title={effectDescription}
               onChange={(event) =>
                 onEffectValueChange(track.id, Number(event.target.value))
               }
@@ -198,6 +202,21 @@ export function TrackRow({
               style={{ width: "102px" }}
             />
           </label>
+          <button type="button" className="stem-effect-value" aria-label={`Reset ${label} effect`} title="Reset to clean"
+            onClick={()=>onResetEffect(track.id)}>{effectSettings.bypass?'Bypassed':effectAmountLabel(effectType,effectValue)}</button>
+          <button type="button" className="stem-effect-bypass" aria-label={`Bypass ${label} effect`} aria-pressed={effectSettings.bypass}
+            title={effectSettings.bypass?'Enable effect':'Bypass effect'} onClick={()=>onEffectSettingsChange(track.id,{...effectSettings,bypass:!effectSettings.bypass})}>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M12 2v9M6 5a9 9 0 1 0 12 0"/></svg>
+          </button>
+          {effectType==='delay-pedal' && <div className="stem-echo-timing">
+            <label>BPM <input type="number" min="40" max="240" step="1" aria-label={`${label} echo BPM`} key={effectSettings.bpm} defaultValue={effectSettings.bpm}
+              onBlur={event=>{const n=Number(event.target.value),bpm=Number.isFinite(n)&&event.target.value?Math.max(40,Math.min(240,n)):effectSettings.bpm;event.target.value=String(bpm);onEffectSettingsChange(track.id,{...effectSettings,bpm});}}
+              onKeyDown={event=>{if(event.key==='Enter')event.currentTarget.blur();}} /></label>
+            <select aria-label={`${label} echo interval`} value={effectSettings.beats} onChange={event=>onEffectSettingsChange(track.id,{...effectSettings,beats:Number(event.target.value)})}>
+              {beatOptions.map(beats=><option key={beats} value={beats}>{beats===.25?'¼':beats===.5?'½':beats} {beats===1?'beat':'beats'}</option>)}
+            </select>
+          </div>}
+          <span className="stem-effect-neutral" aria-hidden="true">{getDefaultEffectValue(effectType)===.5?'Center = clean':'Left = clean'}</span>
         </div>
       </div>
       {!hideCanvas && <div className="player-track-row__canvas" style={{ marginTop: "0.34rem" }}>
