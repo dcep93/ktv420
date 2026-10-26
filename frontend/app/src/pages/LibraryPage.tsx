@@ -83,6 +83,8 @@ export default function LibraryPage() {
   const mix = useRef<PerformanceRecording | null>(null);
   const recordingClock = useRef(new PerformanceClock());
   const mixer = useRef<MixerControl | null>(null);
+  // View preferences outlive the per-song Player (including its loading gap).
+  const [combinedVisualizerExpanded, setCombinedVisualizerExpanded] = useState(false);
   const mixerSettings = useRef<MixerSnapshot | null>(null);
   const rememberMixerSettings = useCallback((settings: MixerSnapshot) => { mixerSettings.current = settings; }, []);
   const [savedMix,setSavedMix] = useState<PerformanceRecording | null>(null);
@@ -464,6 +466,7 @@ export default function LibraryPage() {
     {activeTrack && record && record.md5 === selected && <section className="iframe-player-view" hidden={viewMode !== 'player'} aria-label="Player">
       <button className="iframe-player-back" aria-label="Back to tracks" onClick={() => setViewMode('tracks')}><OverlayIcon name="back" /></button>
       <div className={replay.active ? "replay-mixer" : undefined} inert={!!spotify.replay || mp3Export.busy}><Player key={record.md5} record={record} title={activeTrack.title} replaying={replay.active || mp3Export.busy} onControls={onControls}
+        combinedVisualizerExpanded={combinedVisualizerExpanded} onCombinedVisualizerExpandedChange={setCombinedVisualizerExpanded}
         initialSettings={spotify.replay ? undefined : mixerSettings.current} onSettingsChange={spotify.replay ? undefined : rememberMixerSettings}
         masterVolume={listening?.capturing ? 0 : masterVolume}
         tempoSupported

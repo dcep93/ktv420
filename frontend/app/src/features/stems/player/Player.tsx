@@ -71,6 +71,7 @@ type SpotlightState = {
 
 export default function Player({
   record, replaying = false, onControls, initialSettings, onSettingsChange,
+  combinedVisualizerExpanded, onCombinedVisualizerExpandedChange,
   masterVolume = 1, tempoSupported = true, transport, onTransportCommand, onPlaybackError,
   title,
   trackMetadata,
@@ -1836,7 +1837,8 @@ export default function Player({
               />
             ))}
           </div>
-          {isCombinedVisualizer(visualizerType) && <CombinedVisualizerPanel type={visualizerType} canvasRef={combinedCanvas} />}
+          {isCombinedVisualizer(visualizerType) && <CombinedVisualizerPanel type={visualizerType} canvasRef={combinedCanvas}
+            expanded={combinedVisualizerExpanded} onExpandedChange={onCombinedVisualizerExpandedChange} ready={areTracksReady} />}
           <div
             className="player-visualizer-picker"
             hidden={!shouldShowVisualizerPicker}

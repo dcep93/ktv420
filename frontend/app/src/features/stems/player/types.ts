@@ -81,6 +81,8 @@ export type VisualizerType =
   | "delay-pedal";
 
 export type PlayerProps = {
+  combinedVisualizerExpanded: boolean;
+  onCombinedVisualizerExpandedChange: (expanded: boolean) => void;
   initialSettings?: MixerSnapshot | null;
   onSettingsChange?: (settings: MixerSnapshot) => void;
   replaying?: boolean;
