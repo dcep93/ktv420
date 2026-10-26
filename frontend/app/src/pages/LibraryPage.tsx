@@ -466,7 +466,6 @@ export default function LibraryPage() {
     </ol>}
     <PlayerViewport contentKey={activeTrack && record && record.md5 === selected ? record.md5 : null} hidden={viewMode !== 'player'}>
     {activeTrack && record && record.md5 === selected && <>
-      <button className="iframe-player-back" aria-label="Back to tracks" onClick={() => setViewMode('tracks')}><OverlayIcon name="back" /></button>
       <div className={replay.active ? "replay-mixer" : undefined} inert={!!spotify.replay || mp3Export.busy}><Player key={record.md5} record={record} title={activeTrack.title} replaying={replay.active || mp3Export.busy} onControls={onControls}
         combinedVisualizerExpanded={combinedVisualizerExpanded} onCombinedVisualizerExpandedChange={setCombinedVisualizerExpanded}
         initialSettings={spotify.replay ? undefined : mixerSettings.current} onSettingsChange={spotify.replay ? undefined : rememberMixerSettings}
