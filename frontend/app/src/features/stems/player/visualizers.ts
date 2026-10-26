@@ -1,3 +1,4 @@
+import { drawTimeRibbon, resetTimeRibbon } from './visuals/timeRibbon';
 import { analysisBytes } from './visuals/analysis';
 import { beginVisualizer, surfaceFor } from './visuals/canvas';
 import {
@@ -79,6 +80,7 @@ export function resetVisualizerState(canvas: HTMLCanvasElement) {
   }
 
   kaleidoscopeStateMap.delete(canvas);
+  resetTimeRibbon(canvas);
 }
 
 export type VisualizerInputs = {
@@ -1754,111 +1756,12 @@ function drawLegacyVisualizer({
       context.shadowColor = `hsla(${260 + t * 80}, 90%, 70%, 0.6)`;
       context.stroke();
     }
-  } else {
-    const totalWindowSeconds = PAST_WINDOW_SECONDS + FUTURE_WINDOW_SECONDS;
-    const baseY = height - 24;
-    const ribbonHeight = height - 40;
-
-    context.fillStyle = background;
-    context.fillRect(0, 0, width, height);
-
-    context.strokeStyle = "rgba(255, 255, 255, 0.08)";
-    context.lineWidth = 1;
-    const subtleGap = 48;
-    for (let x = 0; x < width; x += subtleGap) {
-      context.beginPath();
-      context.moveTo(x, 0);
-      context.lineTo(x, height);
-      context.stroke();
-    }
-
-    if (!amplitudeEnvelope || !amplitudeEnvelope.length) {
-      context.fillStyle = text;
-      context.font = font;
-      context.fillText(
-        "Analyzing track envelope for ribbon view...",
-        10,
-        baseY
-      );
-      return;
-    }
-
-    const amplitudeAtTime = (time: number) => {
-      const index = time / AMPLITUDE_WINDOW_SECONDS;
-      const baseIndex = Math.floor(index);
-      const nextIndex = Math.min(baseIndex + 1, amplitudeEnvelope.length - 1);
-      const fraction = index - baseIndex;
-      const first =
-        amplitudeEnvelope[
-          Math.max(0, Math.min(baseIndex, amplitudeEnvelope.length - 1))
-        ] ?? 0;
-      const second = amplitudeEnvelope[nextIndex] ?? first;
-      return first + (second - first) * fraction;
-    };
-
-    const centerX = (PAST_WINDOW_SECONDS / totalWindowSeconds) * width;
-    const frequencyBins = analyser.frequencyBinCount;
-    const frequencyData = analysisBytes(analyser, frequencyBins);
-
-    analyser.getByteFrequencyData(frequencyData);
-
-    let peakIndex = 0;
-    let peakValue = 0;
-
-    for (let i = 0; i < frequencyBins; i++) {
-      const binValue = frequencyData[i] ?? 0;
-
-      if (binValue > peakValue) {
-        peakValue = binValue;
-        peakIndex = i;
-      }
-    }
-
-    const nyquist = sampleRate / 2;
-    const dominantFrequency =
-      frequencyBins > 0 ? (peakIndex / frequencyBins) * nyquist : 0;
-    const hue = Math.max(0, Math.min(280, (dominantFrequency / 2000) * 280));
-    const ribbonColor = `hsl(${hue}, 80%, 60%)`;
-    const ribbonFillColor = `hsla(${hue}, 80%, 60%, 0.12)`;
-
-    context.beginPath();
-
-    for (let x = 0; x <= width; x += 2) {
-      const timeOffset = (x / width) * totalWindowSeconds - PAST_WINDOW_SECONDS;
-      const sampleTime = currentTime + timeOffset;
-      const amplitude =
-        sampleTime >= 0 ? amplitudeAtTime(sampleTime) : amplitudeAtTime(0);
-      const normalized = Math.min(1, amplitude / amplitudeMaximum);
-      const y = baseY - normalized * ribbonHeight;
-
-      if (x === 0) {
-        context.moveTo(x, y);
-      } else {
-        context.lineTo(x, y);
-      }
-    }
-
-    context.strokeStyle = ribbonColor;
-    context.lineWidth = 3;
-    context.stroke();
-
-    context.lineTo(width, baseY);
-    context.lineTo(0, baseY);
-    context.closePath();
-    context.fillStyle = ribbonFillColor;
-    context.fill();
-
-    context.strokeStyle = "rgba(255, 255, 255, 0.65)";
-    context.lineWidth = 2;
-    context.beginPath();
-    context.moveTo(centerX, 0);
-    context.lineTo(centerX, height);
-    context.stroke();
   }
 }
 
 /** Isolate canvas state and draw existing artwork in logical CSS pixels on Retina. */
 export function drawVisualizer(inputs: VisualizerInputs) {
+  if (inputs.visualizerType === 'time-ribbon') { drawTimeRibbon(inputs); return; }
   const view = beginVisualizer(inputs.canvas);
   if (!view) return;
   try { drawLegacyVisualizer(inputs); } finally { view.context.restore(); }

@@ -171,3 +171,14 @@ The 1050 × 340 preview measured 0.39 ms mean / 0.90 ms p95 for 120 frames of CP
 drawing commands plus analysis (not total GPU/compositor cost). Automated checks
 cover monotonic perspective, finite bounded rendering at three sizes, solo/mute,
 large/backward seeks, balanced canvas state, and replay registration.
+
+## Time Ribbon stability (2026-10-26)
+
+The ribbon uses fixed song-time envelope vertices and gradual spectral-centroid
+color transitions. The development-only `ribbon-preview.html` drives the actual
+renderer with narrow waveform peaks and two frequency bins whose loudest winner
+alternates every frame. Wide and compact browser views were inspected while
+playing, paused, seeking fifteen seconds ahead and resuming. No audio output is
+used by this synthetic fixture. Three regression tests cover stable translation,
+bounded hue transitions, silence, seeks, finite coordinates and balanced canvas
+state. All 141 tests, lint and both production builds passed.
