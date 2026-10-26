@@ -357,10 +357,11 @@ export default function LibraryPage() {
   }, [spotify.navigation, spotify.tracks, spotify.replay, capture.active, spotify.starting, tracks, selected, selectedRowIndex, pauseForEntry, stopRecording]);
   useEffect(() => {
     if (!listening || listening.error || !listening.local || Date.now() - listening.observedAt > 1800) return;
-    const changed = observedTrack.current !== listening.trackId;
-    observedTrack.current = listening.trackId;
     if (entryPausedAt.current !== null || (spotify.navigation && appliedNavigation.current !== spotify.navigation.revision)) return;
     if (listening.syncing || Date.now() < selectionGuard.current || replay.active || spotify.replay) return;
+    // A guarded snapshot must not consume a remote track-change edge.
+    const changed = observedTrack.current !== listening.trackId;
+    observedTrack.current = listening.trackId;
     const desired = `spotify-${listening.trackId}`;
     if ((!changed && selected) || !listening.playing || listening.output !== 'stems' || selected === desired ||
         !tracks.some(track => track.id === desired && track.status === 'ready')) return;
