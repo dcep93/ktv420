@@ -123,12 +123,16 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
     return isSupportedRoute() && route === location.pathname && tracks.length > 0;
   }
   function prepareRequestedView() {
-    if (!navigation.open || !hasCurrentTracks()) return;
+    if (!navigation.open || !isSupportedRoute() || !document.body) return;
+    // Load the player alongside Spotify, rather than adding both load times.
+    // reveal() still requires current tracks and their rendered acknowledgement.
+    if (!overlay.isConnected) document.body.append(overlay);
     prepare(); post();
   }
   async function show(fromButton = true) {
     if (!isSupportedRoute()) return;
     if (fromButton) { writeView(true); navigation = { ...navigation, revision: navigation.revision + 1 }; }
+    prepareRequestedView();
     await updateTracks();
     prepareRequestedView();
   }
@@ -168,7 +172,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
     event.preventDefault(); event.stopPropagation(); close();
   };
   button.onclick = () => { void show(); };
-  function refresh() {
+  function refresh(domChanged = false) {
     readView();
     if (isRunActive()) starting = false;
     const parent = document.querySelector(SELECTORS.spotifyLogo)?.closest('a')?.parentElement;
@@ -189,7 +193,8 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
     }
     post();
     const missingTracks = !tracks.length || (navigation.trackIndex !== null && !tracks.some(track => track.rowIndex + 1 === navigation.trackIndex)) || replay?.tracks.some(item => !tracks.some(t => t.trackId === item.id));
-    if (navigation.open && !isRunActive() && (route !== location.pathname || (missingTracks && Date.now() - lastTrackRefresh > 1000))) void updateTracks();
+    const rowsArrived = domChanged && missingTracks && collectTrackRows().length > 0;
+    if (navigation.open && !isRunActive() && (route !== location.pathname || (missingTracks && (rowsArrived || Date.now() - lastTrackRefresh > 1000)))) void updateTracks();
     prepareRequestedView();
   }
   const handleMessage = async event => {
@@ -239,10 +244,22 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
     return true;
   };
   chrome.runtime.onMessage.addListener(toolbar);
+  // Spotify renders asynchronously. Coalesce DOM arrivals into one refresh per
+  // frame, and stop reacting once the requested rows and logo are available.
+  let domRefresh = null;
+  const observer = new MutationObserver(() => {
+    const needsRows = navigation.open && (!hasCurrentTracks() ||
+      (navigation.trackIndex !== null && !tracks.some(track => track.rowIndex + 1 === navigation.trackIndex)));
+    if (domRefresh !== null || (button.isConnected && !needsRows)) return;
+    domRefresh = requestAnimationFrame(() => { domRefresh = null; refresh(true); });
+  });
+  observer.observe(document.documentElement, { childList: true, subtree: true });
   const timer = setInterval(refresh, 1000);
   queueMicrotask(refresh);
   window.addEventListener('popstate', readView);
   window.addEventListener('pagehide', () => {
+    observer.disconnect();
+    if (domRefresh !== null) cancelAnimationFrame(domRefresh);
     window.removeEventListener('popstate', readView);
     clearInterval(timer); window.removeEventListener('message', handleMessage); window.removeEventListener('keydown', keydown, true); chrome.runtime.onMessage.removeListener(toolbar);
   }, { once: true });

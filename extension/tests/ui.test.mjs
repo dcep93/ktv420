@@ -6,6 +6,8 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
   const elements = [];
   const messages = [];
   const timers = [];
+  const animationFrames = [];
+  let domChanged, disconnected = false;
   const listeners = {};
   let resolveTracks; const trackLoad = new Promise(resolve => { resolveTracks = resolve; });
   let pendingReply;const captureRequests=[],transportRequests=[],replayModes=[];
@@ -31,7 +33,7 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
     return element;
   };
   const parent = makeElement('nav');
-  const pageLocation = new URL('https://open.spotify.com/playlist/1111111111111111111111?ktv420=1');
+  const pageLocation = new URL('https://open.spotify.com/playlist/1111111111111111111111');
   const globals = {
     document: {
       getElementById: () => null,
@@ -47,6 +49,14 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
     history: { state: { spotify: true }, pushState(state, _title, href) { assert.deepEqual(state, {spotify:true}); pageLocation.href = href; }, replaceState(state, title, href) { this.pushState(state, title, href); } },
     chrome: { runtime: { id: 'test', sendMessage(message, respond) { if (message.type === 'ktv420:pending-replay') pendingReply=respond; respond({ok:true,result:null}); }, getManifest: () => ({ version: '0.5.0' }), getURL: path => `chrome-extension://test/${path}`, onMessage: { addListener() {}, removeListener() {} } } },
     setInterval: callback => { timers.push(callback); return 1; },
+    clearInterval() {},
+    MutationObserver: class {
+      constructor(callback) { domChanged = callback; }
+      observe() {}
+      disconnect() { disconnected = true; }
+    },
+    requestAnimationFrame(callback) { animationFrames.push(callback); return animationFrames.length; },
+    cancelAnimationFrame() {},
   };
   for (const [key, value] of Object.entries(globals)) {
     const descriptor = Object.getOwnPropertyDescriptor(globalThis, key);
@@ -55,9 +65,23 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
   }
   const ui = mountButton({ isRunActive: () => false, onToggleRun: async options => {captureRequests.push(options);}, loadSpotifyTracks: () => trackLoad, onTransport: async command => {transportRequests.push(command);}, onReplay: enabled => replayModes.push(enabled) });
   await new Promise(resolve => setImmediate(resolve));
+  assert.equal(elements.some(element => element.tag === 'iframe'), false, 'ordinary Spotify loads do not load or activate the player');
+  pageLocation.search = '?ktv420=1'; listeners.popstate();
   assert.notEqual(elements.find(element => element.id === 'ktv420-prepared-iframe').dataset.open, 'true', 'deep link waits while Spotify tracks load');
   assert.equal(transportRequests.length, 0, 'waiting must not take over playback');
-  assert.equal(elements.some(element => element.tag === 'iframe'), false);
+  assert.equal(elements.some(element => element.tag === 'iframe'), true, 'requested player loads in parallel with unresolved Spotify metadata');
+  const earlyFrame = elements.find(element => element.tag === 'iframe');
+  const earlyReady = { source: earlyFrame.contentWindow, origin: 'chrome-extension://test',
+    data: { source: 'ktv420-overlay', version: 2, type: 'ready' } };
+  await listeners.message(earlyReady);
+  const emptyState = messages.at(-1);
+  assert.deepEqual(emptyState.tracks, []);
+  await listeners.message({ ...earlyReady, data: { ...earlyReady.data, type: 'view-ready',
+    spotifyPath: emptyState.spotifyPath, revision: emptyState.navigation.revision } });
+  assert.equal(transportRequests.length, 0, 'preloaded player cannot activate Spotify before tracks arrive');
+  assert.notEqual(elements.find(element => element.id === 'ktv420-prepared-iframe').dataset.open, 'true');
+  earlyFrame.contentDocument = { URL: 'about:blank' }; ui.notifyListening(null);
+  earlyFrame.contentDocument = null; messages.length = 0;
   resolveTracks([]);
   await new Promise(resolve => setImmediate(resolve));
   const frame = elements.find(element => element.tag === 'iframe');
@@ -161,9 +185,12 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
   await renderView();
   assert.equal(overlay.dataset.open,'false','empty Spotify rows keep the requested overlay hidden');
   rowsAvailable = true;
-  elements.find(element=>element.id==='ktv420-spotify-capture-button').onclick();
+  const scheduled = animationFrames.length;
+  domChanged(); domChanged(); domChanged();
+  assert.equal(animationFrames.length, scheduled + 1, 'Spotify DOM bursts schedule one refresh');
+  animationFrames.at(-1)();
   await new Promise(resolve=>setImmediate(resolve)); await renderView();
-  assert.equal(overlay.dataset.open,'true','tracks arriving later allow the overlay to open');
+  assert.equal(overlay.dataset.open,'true','arriving rows open the overlay without waiting for the one-second poll');
   await listeners.message({...ready,data:{...ready.data,type:'close'}});
 
   for (const invalidate of [
@@ -210,5 +237,8 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
     assert.ok(messages.length > before, 'new trusted broker restores the overlay');
     assert.equal(transportRequests.length, commandsBefore, 'repair must not stop capture or change volume');
   }
+
+  listeners.pagehide();
+  assert.equal(disconnected, true, 'page teardown disconnects the DOM observer');
 
 });
