@@ -150,12 +150,15 @@ export function drawHighway(canvas: HTMLCanvasElement, voices: StemVoice[], time
     c.fillStyle=color(40,90,82,Math.min(.8,intensity)*p);
     c.fillRect(point.x-2-p*3,point.y-height-1-p*2,4+p*6,2+p*4);
   }
-  // Bounded, deterministic roadside objects; no ever-growing spawn queue.
-  for(let i=0;i<22;i++){
-    const q=(seed(i+400)+state.travel)%1,p=q*q;
+  // One tiny cluster per long stretch of road; each cactus passes only once.
+  // Fade at the horizon and near edge so sparse scenery never pops into view.
+  for(let i=0;i<2;i++){
+    const q=state.travel%12-4-i*.2;
+    if(q<=0||q>=1)continue;
+    const p=q*q, fade=Math.min(1,q*12,(1-q)*12);
     const side=i%2?-1:1,point=highwayPoint(p,side*(1.45+seed(i+330)*2.2),w,h,time);
     const height=h*(.012+p*.25)*( .55+seed(i+220)*.6), arm=height*.29;
-    c.strokeStyle=color(150,35,28+daylight*19,Math.min(1,desert*(.25+p*.9)));c.lineWidth=Math.max(.8,height*.065);c.lineCap='round';
+    c.strokeStyle=color(150,35,28+daylight*19,fade*Math.min(1,desert*(.25+p*.9)));c.lineWidth=Math.max(.8,height*.065);c.lineCap='round';
     c.beginPath();c.moveTo(point.x,point.y);c.lineTo(point.x,point.y-height);
     c.moveTo(point.x,point.y-height*.45);c.lineTo(point.x-arm,point.y-height*.45);c.lineTo(point.x-arm,point.y-height*.76);
     c.moveTo(point.x,point.y-height*.64);c.lineTo(point.x+arm*.8,point.y-height*.64);c.lineTo(point.x+arm*.8,point.y-height*.9);c.stroke();
