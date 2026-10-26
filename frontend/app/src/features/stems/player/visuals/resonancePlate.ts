@@ -11,7 +11,8 @@ export function drawPlate({ c, w, h, state }: ArtFrame, artwork: PlateArtwork = 
   for (let role = 0; role < 4; role++) {
     const level = Math.max(state.audio.levels[stemRoles[role]], state.audio.levels.original);
     if (level < .001) continue;
-    c.fillStyle = color(stemRoles[role], .55 + .45 * level); c.beginPath();
+    // Squaring before color's power curve also squares the final rendered alpha.
+    c.fillStyle = color(stemRoles[role], (.55 + .45 * level) ** 2); c.beginPath();
     for (let i = 0; i < artwork.grains.length; i += 4) {
       const phase = (artwork.grains[i + 3] + travel) % 4;
       const distance = Math.min(Math.abs(phase - role), 4 - Math.abs(phase - role));
