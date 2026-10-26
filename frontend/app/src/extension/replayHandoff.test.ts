@@ -25,6 +25,14 @@ test('external handoff restricts origin/frame, validates files, persists before 
  assert.equal((await call(external!,{...request,recording:{version:1}},sender)).ok,false);assert.equal(operations.length,0);
  assert.equal((await call(external!,request,sender)).ok,true);
  assert.deepEqual(operations,['create:about:blank',`navigate:44:https://open.spotify.com/playlist/${id}`]);
+ const savedSender={url:'https://ktv420.web.app/saved',frameId:0};
+ const listSaved={type:'ktv420:saved-collections'};
+ for(const untrusted of [sender,{...savedSender,url:'https://evil.example/saved'},{...savedSender,frameId:2}]) {
+  assert.equal(external!(listSaved,untrusted,()=>assert.fail('registry disclosed to wrong page/frame')),false);
+ }
+ for(const type of ['read-audio','ktv420:open-replay','ktv420:register-collection']) assert.equal(external!({type},savedSender,()=>assert.fail('Saved page gained write/audio access')),false);
+ const summary=await new Promise(resolve=>external!(listSaved,savedSender,resolve));
+ assert.deepEqual(summary,{ok:true,collections:[]});
  const content={id:'self',url:`https://open.spotify.com/playlist/${id}`,tab:{id:44} as chrome.tabs.Tab};
  assert.deepEqual((await call(internal!,{type:'ktv420:pending-replay'},content)).result,recording);
  assert.equal((await call(internal!,{type:'ktv420:pending-replay'},{...content,tab:{id:45} as chrome.tabs.Tab})).result,null);

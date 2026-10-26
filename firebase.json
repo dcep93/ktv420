@@ -10,6 +10,14 @@
     ],
     "rewrites": [
       {
+        "source": "/saved",
+        "destination": "/player/index.html"
+      },
+      {
+        "source": "/saved/**",
+        "destination": "/player/index.html"
+      },
+      {
         "source": "/replay",
         "destination": "/player/index.html"
       },
@@ -109,6 +117,15 @@
       },
       {
         "source": "/replay",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      },
+      {
+        "source": "/saved{,/**}",
         "headers": [
           {
             "key": "Cache-Control",

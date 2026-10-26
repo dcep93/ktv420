@@ -47,3 +47,14 @@ test('capture accepts the exact 1 GiB boundary and rejects one frame above it', 
  await beginCapture(999,{...meta,audioByteLength:limit},limit);
  await assert.rejects(beginCapture(999,{...meta,audioByteLength:limit+8},limit+8),/maximum 1 GiB/);
 });
+
+test('successful capture registers its original collection without duplicating membership in audio metadata', async () => {
+  const { savedCollections } = await import('./collectionRegistry');
+  const collection = {path:'playlist/1111111111111111111111',title:'Capture context',artwork:'',trackIds:['testCapture']};
+  const id = await beginCapture(12,{...meta,collection},bytes.length);
+  await appendCapture(12,id,0,b64(bytes));
+  await finishCapture(12,id);
+  assert.equal((await savedCollections()).find(c => c.path === collection.path)?.captured,1);
+  assert.equal((await getTrack('spotify-testCapture'))?.metadata?.collection,undefined);
+  await deleteTrack('spotify-testCapture');
+});

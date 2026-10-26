@@ -1,3 +1,4 @@
+import { rememberCollection } from './collectionRegistry';
 import { transaction, saveInput, type CaptureSession } from '../features/local/library';
 import { encodeFloat32Wav } from '../features/local/audio/wav';
 
@@ -76,9 +77,11 @@ export async function finishCapture(tabId: number, id: string): Promise<void> {
     right[i] = data.getFloat32((i * channels + channels - 1) * 4, true);
   }
   const wav = new Blob([encodeFloat32Wav({ left, right, sampleRate }, channels as 1 | 2)], { type: 'audio/wav' });
+  const { collection, ...metadata } = capture.metadata;
   await saveInput({ id: `spotify-${capture.metadata.trackId}`, title: String(capture.metadata.trackName || 'Spotify capture'),
     artist: String(capture.metadata.trackArtist || ''), createdAt: Date.now(), source: 'spotify', sampleRate, frames,
-    status: 'captured', bytes: wav.size, metadata: capture.metadata }, wav);
+    status: 'captured', bytes: wav.size, metadata }, wav);
+  if (collection) await rememberCollection(collection);
   await transaction(['captures', 'chunks'], 'readwrite', tx => {
     tx.objectStore('captures').delete(id);
     for (const chunk of chunks) tx.objectStore('chunks').delete(`${id}/${chunk.index}`);

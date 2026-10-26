@@ -1,3 +1,4 @@
+import { parseOverlayNavigation } from '../features/local/overlayNavigation';
 import { parseRecording, spotifyContext } from '../features/local/recording';
 import { parseListeningState, parseTransportCommand } from '../features/local/listeningProtocol';
 import { createLibraryBrokerSession, LIBRARY_PROTOCOL_VERSION } from './libraryBroker';
@@ -55,6 +56,8 @@ export function createBrokerBridge(options: BridgeOptions) {
             trackId: track.trackId, trackName: track.trackName, trackArtist: track.trackArtist,
             trackArtworkSrc: track.trackArtworkSrc, rowIndex: track.rowIndex,
           })) };
+        const navigation = parseOverlayNavigation(data.navigation);
+        if (navigation) state.navigation = navigation;
         if (data.captureProgress !== undefined) {
           const progress = data.captureProgress as { trackId: string; fraction: number | null } | null;
           state.captureProgress = progress === null ? null : { trackId: progress.trackId, fraction: progress.fraction };
@@ -87,6 +90,10 @@ export function createBrokerBridge(options: BridgeOptions) {
       if (replay) options.player.postMessage(replay,options.playerOrigin);
     } else if (ready && data.type === 'listening-heartbeat') {
       options.parent.postMessage({ source: 'ktv420-overlay', version: LIBRARY_PROTOCOL_VERSION, type: data.type }, options.parentOrigin);
+    } else if (ready && data.type === 'view') {
+      const view = parseOverlayNavigation({ revision: data.revision, open: true, trackIndex: data.trackIndex });
+      if (view) options.parent.postMessage({ source: 'ktv420-overlay', version: LIBRARY_PROTOCOL_VERSION, type: 'view',
+        revision: view.revision, trackIndex: view.trackIndex, replace: data.replace === true }, options.parentOrigin);
     } else if (ready && data.type === 'transport') {
       const command = parseTransportCommand(data.command);
       if (command) options.parent.postMessage({ source: 'ktv420-overlay', version: LIBRARY_PROTOCOL_VERSION, type: 'transport', command }, options.parentOrigin);

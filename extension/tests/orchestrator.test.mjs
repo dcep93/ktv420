@@ -134,3 +134,14 @@ test('a mid-song source replacement still fails rather than saving mixed audio',
   const runner = new CaptureOrchestrator({ bridge: { command: async () => states.shift() } });
   await assert.rejects(runner.recordUntilBoundary(item, {}, { events: [] }), /media source changed/);
 });
+
+
+test('capture deduplicates playlist positions without renumbering its track snapshot', async t => {
+  mockPage(t);
+  const previous=Object.getOwnPropertyDescriptor(globalThis,'chrome');
+  Object.defineProperty(globalThis,'chrome',{configurable:true,value:{runtime:{sendMessage:async()=>({ok:true,result:[]})}}});
+  t.after(()=>previous ? Object.defineProperty(globalThis,'chrome',previous) : delete globalThis.chrome);
+  const runner=new CaptureOrchestrator({bridge:{}});
+  const queue=await runner.preflightQueue({events:[]},null,[{...item,rowIndex:0},{...item,rowIndex:2},{trackId:'other',trackName:'Other',rowIndex:3}]);
+  assert.deepEqual(queue.map(t=>[t.trackId,t.rowIndex]),[['actual-track',0],['other',3]]);
+});

@@ -1,7 +1,10 @@
+import type { Collection, SavedCollection } from '../features/local/savedCollections';
 import type { PerformanceRecording } from '../features/local/recording';
 import type { ListeningLease } from './listeningLease';
 
 type State = {
+  collections: SavedCollection[];
+  captureContexts: Record<string, Collection>;
   pendingReplay: { tabId: number; recording: PerformanceRecording };
   listeningLease: ListeningLease;
 };

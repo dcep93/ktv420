@@ -135,3 +135,25 @@ test('close notification reaches only the ready hosted player from the trusted S
   await send(); assert.deepEqual(messages,[closed]);
   await bridge.dispose();
 });
+
+test('URL view changes are sanitized, revisioned and restricted to the ready trusted player', async () => {
+  const sent: Record<string,unknown>[] = [], received: Record<string,unknown>[] = [];
+  const parent = {postMessage:(v:Record<string,unknown>)=>sent.push(v)} as unknown as Window;
+  const player = {postMessage:(v:Record<string,unknown>)=>received.push(v)} as unknown as Window;
+  const bridge = createBrokerBridge({parent,player,parentOrigin:'https://open.spotify.com',playerOrigin:'https://ktv420.web.app',showError(){},
+    createSession:()=>({dispose:async()=>{},handle:async()=>({})}) as unknown as ReturnType<typeof createLibraryBrokerSession>});
+  const command = {source:'ktv420-overlay',version:2,type:'view',trackIndex:3,revision:7,replace:true,evil:'discard'};
+  const send = (data:unknown,source=player,origin='https://ktv420.web.app')=>bridge.receive({source,origin,data});
+  await send(command); assert.equal(sent.length,0);
+  await send({...command,type:'ready'});
+  await send(command);
+  assert.deepEqual(sent.at(-1),{source:'ktv420-overlay',version:2,type:'view',trackIndex:3,revision:7,replace:true});
+  const count=sent.length;
+  for (const index of [-1,0,10001,'1',Infinity]) await send({...command,trackIndex:index});
+  await send(command,parent); await send(command,player,'https://evil.example');
+  assert.equal(sent.length,count);
+  await bridge.receive({source:parent,origin:'https://open.spotify.com',data:{source:'ktv420-parent',version:2,type:'state',tracks:[],active:false,starting:false,supported:true,
+    navigation:{revision:7,open:true,trackIndex:3,evil:'discard'}}});
+  assert.deepEqual(received.at(-1)?.navigation,{revision:7,open:true,trackIndex:3});
+  await bridge.dispose();
+});

@@ -173,7 +173,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
   const timer = setInterval(() => void tick(), 200);
   void tick();
   return {
-    setEnabled(value) {
+    setEnabled(value, { paused = false } = {}) {
       // Serialize fast open/close actions. Disable new ticks immediately, then
       // let an in-flight tick finish before releasing the page's audio routing.
       enabled = false;
@@ -187,7 +187,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
         volume = replayPreparation ? 0 : lastVolumeDom ?? 0;
         volumeSettlesAt = 0; latestState = null;
         output = 'muted'; armed = false; stemClock.reset(); silentGeneration = -1; generation++;
-        halted = false; customPlayback = false;
+        halted = paused; customPlayback = false;
         enabled = value && !disposed;
         if (enabled) void tick();
       });

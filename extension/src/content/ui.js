@@ -1,4 +1,5 @@
 import { collectTrackRows, isSupportedRoute } from './dom.js';
+import { readOverlayUrl, writeOverlayUrl } from './overlayUrl.js';
 import { SELECTORS } from './constants.js';
 
 const PARENT = 'ktv420-parent';
@@ -21,6 +22,30 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
   let iframe; let tracks = []; let notice = ''; let error = ''; let starting = false; let route = ''; let refreshing = false;
   let frameReady = false, lastTrackRefresh = 0;
   let replay = null;
+  let urlKey = null;
+  let navigation = { revision: 0, open: false, trackIndex: null };
+  let collection = null, captureCollection = null;
+  function registerCollection(value = collection) {
+    if (!value) return;
+    chrome.runtime.sendMessage({ type: 'ktv420:register-collection', collection: value }, response => {
+      if (chrome.runtime.lastError || !response?.ok) return;
+    });
+  }
+  function writeView(open, trackIndex = null, replace = false) {
+    const href = writeOverlayUrl(location.href, open, trackIndex);
+    if (href !== location.href) history[replace ? 'replaceState' : 'pushState'](history.state, '', href);
+    urlKey = readOverlayUrl(href).key;
+    navigation = { ...navigation, open, trackIndex };
+  }
+  function readView() {
+    const view = readOverlayUrl(location.href);
+    if (view.key === urlKey) return;
+    urlKey = view.key;
+    navigation = { revision: navigation.revision + 1, open: view.open, trackIndex: view.trackIndex };
+    if (view.open) void show(false).catch(reason => { error = reason?.message || String(reason); post(); });
+    else close(false);
+    post();
+  }
   function hasBrokerDocument() {
     // WindowProxy survives navigation. A previous ready message does not mean
     // it still contains our broker (e.g. srcdoc or extension reload).
@@ -51,16 +76,24 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
     const trackData = tracks.map(({ trackId, trackName, trackArtist, trackArtworkSrc, rowIndex }) => ({
       trackId, trackName, trackArtist, trackArtworkSrc, rowIndex,
     }));
-    sendToFrame({ source: PARENT, version: 2, type: 'state', spotifyPath: location.pathname.slice(1), tracks: trackData,
+    sendToFrame({ source: PARENT, version: 2, type: 'state', spotifyPath: location.pathname.slice(1), navigation, tracks: route === location.pathname ? trackData : [],
       active: isRunActive() || !!listening?.capturing, starting, notice, error, captureProgress: captureProgress || listening?.captureProgress || null, listening, supported: isSupportedRoute() });
   }
   async function updateTracks() {
     if (refreshing || isRunActive()) return;
     refreshing = true;
     try {
+      const path = location.pathname;
       const found = await loadSpotifyTracks();
+      if (path !== location.pathname) return;
       tracks = found.length ? found : collectTrackRows();
       route = location.pathname;
+      const header = document.querySelector('[data-testid="entity-header"]');
+      const title = header?.querySelector?.('h1')?.textContent?.trim();
+      collection = { path: route.slice(1).replace(/\/$/, ''), title: title || '',
+        artwork: header?.querySelector?.('img')?.currentSrc || header?.querySelector?.('img')?.src || '',
+        trackIds: tracks.map(track => track.trackId) };
+      registerCollection();
       error = '';
     } catch (reason) { error = reason?.message || String(reason); }
     finally { refreshing = false; lastTrackRefresh = Date.now(); post(); }
@@ -85,14 +118,20 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
       overlay.append(iframe);
     }
   }
-  async function show() {
+  async function show(fromButton = true) {
+    if (fromButton) { writeView(true); navigation = { ...navigation, revision: navigation.revision + 1 }; }
     prepare();
     const wasOpen = overlay.dataset.open === 'true';
     overlay.dataset.open = 'true'; overlay.setAttribute('aria-hidden', 'false');
-    if (!wasOpen) await onOpenChange?.(true);
+    if (!wasOpen) {
+      const paused = navigation.trackIndex !== null;
+      await onOpenChange?.(true, { paused });
+      if (paused) await onTransport?.({ action: 'pause', bestEffort: true });
+    }
     await updateTracks(); post();
   }
-  function close() {
+  function close(updateUrl = true) {
+    if (updateUrl) writeView(false);
     if (overlay.dataset.open !== 'true') return;
     overlay.dataset.open = 'false'; overlay.setAttribute('aria-hidden', 'true');
     // Stop Spotify even when the hosted player has not finished loading.
@@ -109,6 +148,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
   };
   button.onclick = () => { void show(); };
   function refresh() {
+    readView();
     if (isRunActive()) starting = false;
     const parent = document.querySelector(SELECTORS.spotifyLogo)?.closest('a')?.parentElement;
     // Wait for Spotify's logo instead of briefly rendering in a fallback position.
@@ -120,12 +160,24 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
     button.disabled = !isSupportedRoute() && !isRunActive() && !listening;
     button.title = isRunActive() ? 'ktv420 capture active' : 'Open ktv420';
     if (iframe && overlay.dataset.open === 'true') prepare();
+    if (collection && route === location.pathname && !collection.title) {
+      const header = document.querySelector('[data-testid="entity-header"]');
+      const title = header?.querySelector?.('h1')?.textContent?.trim();
+      if (title) { collection = { ...collection, title, artwork: header?.querySelector?.('img')?.currentSrc || collection.artwork }; registerCollection(); }
+    }
     post();
-    if (iframe && !isRunActive() && (route !== location.pathname || (replay && (!tracks.length || replay.tracks.some(item => !tracks.some(t => t.trackId === item.id))) && Date.now() - lastTrackRefresh > 3000))) void updateTracks();
+    const missingTracks = !tracks.length || (navigation.trackIndex !== null && !tracks.some(track => track.rowIndex + 1 === navigation.trackIndex)) || replay?.tracks.some(item => !tracks.some(t => t.trackId === item.id));
+    if (iframe && !isRunActive() && (route !== location.pathname || (navigation.open && missingTracks && Date.now() - lastTrackRefresh > 3000))) void updateTracks();
   }
   const handleMessage = async event => {
     if (!hasBrokerDocument() || event.source !== iframe.contentWindow || event.origin !== origin || event.data?.source !== FRAME) return;
     if (hostedBridge && event.data.version !== 2) return;
+    if (event.data.type === 'view') {
+      const { trackIndex, revision, replace } = event.data;
+      if (revision !== navigation.revision || !navigation.open ||
+        !(trackIndex === null || Number.isSafeInteger(trackIndex) && tracks.some(track => track.rowIndex + 1 === trackIndex))) return;
+      writeView(true, trackIndex, replace === true); post(); return;
+    }
     if (event.data.type === 'close') { close(); return; }
     if (event.data.type === 'dismiss-replay') {
       replay = null; onReplay?.(false);
@@ -145,6 +197,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
         if (missing.length) throw new Error(`Find the required songs in this Spotify page first: ${missing.map(t => t.title).join(', ')}`);
         await onTransport?.({action:'volume',volume:0});
       }
+      if (!isRunActive()) captureCollection = collection;
       const run = onToggleRun({ trackSnapshot: tracks, trackIds: replay ? replay.tracks.map(t => t.id) : null });
       post();
       await run;
@@ -160,15 +213,17 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
   };
   chrome.runtime.onMessage.addListener(toolbar);
   const timer = setInterval(refresh, 1000);
-  refresh();
+  queueMicrotask(refresh);
+  window.addEventListener('popstate', readView);
   window.addEventListener('pagehide', () => {
+    window.removeEventListener('popstate', readView);
     clearInterval(timer); window.removeEventListener('message', handleMessage); window.removeEventListener('keydown', keydown, true); chrome.runtime.onMessage.removeListener(toolbar);
   }, { once: true });
   return { refresh, prepare, getTrackIds: () => tracks.map(track => track.trackId),
     getTrackMetadata: id => tracks.find(track => track.trackId === id),
-    notifyListening(state) { listening = state; post(); },
+    notifyListening(state) { if (listening?.capturing && !state?.capturing) registerCollection(); listening = state; post(); },
     notifyCaptureProgress(progress) { captureProgress = progress; post(); },
-    async notifyTrackCaptured(_id, metadata) { notice = `${metadata?.trackName || 'Track'} captured. Local separation is queued automatically.`; post(); },
+    async notifyTrackCaptured(_id, metadata) { registerCollection(captureCollection || collection); notice = `${metadata?.trackName || 'Track'} captured. Local separation is queued automatically.`; post(); },
     async notifyCaptureComplete(trackIds) { notice = `${trackIds?.length || 0} tracks captured. Separation continues here automatically.`; refresh(); },
   };
 }

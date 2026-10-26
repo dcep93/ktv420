@@ -29,6 +29,7 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
     return element;
   };
   const parent = makeElement('nav');
+  const pageLocation = new URL('https://open.spotify.com/playlist/1111111111111111111111?ktv420=1');
   const globals = {
     document: {
       getElementById: () => null,
@@ -38,10 +39,11 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
         ? { closest: () => ({ parentElement: parent }) }
         : { querySelectorAll: () => [row] },
     },
-    window: { location: { pathname: '/playlist/example' },
+    window: { location: pageLocation,
       addEventListener(name, listener) { listeners[name] = listener; }, removeEventListener() {} },
-    location: { pathname: '/playlist/example' },
-    chrome: { runtime: { id: 'test', sendMessage(_message, respond) { pendingReply=respond;respond({ok:true,result:null}); }, getManifest: () => ({ version: '0.5.0' }), getURL: path => `chrome-extension://test/${path}`, onMessage: { addListener() {}, removeListener() {} } } },
+    location: pageLocation,
+    history: { state: { spotify: true }, pushState(state, _title, href) { assert.deepEqual(state, {spotify:true}); pageLocation.href = href; }, replaceState(state, title, href) { this.pushState(state, title, href); } },
+    chrome: { runtime: { id: 'test', sendMessage(message, respond) { if (message.type === 'ktv420:pending-replay') pendingReply=respond; respond({ok:true,result:null}); }, getManifest: () => ({ version: '0.5.0' }), getURL: path => `chrome-extension://test/${path}`, onMessage: { addListener() {}, removeListener() {} } } },
     setInterval: callback => { timers.push(callback); return 1; },
   };
   for (const [key, value] of Object.entries(globals)) {
@@ -50,6 +52,9 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
     t.after(() => descriptor ? Object.defineProperty(globalThis, key, descriptor) : delete globalThis[key]);
   }
   const ui = mountButton({ isRunActive: () => false, onToggleRun: async options => {captureRequests.push(options);}, loadSpotifyTracks: async () => [], onTransport: async command => {transportRequests.push(command);}, onReplay: enabled => replayModes.push(enabled) });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(elements.find(element => element.id === 'ktv420-prepared-iframe').dataset.open, 'true', 'initial URL opens without a button click');
+  assert.deepEqual(transportRequests.at(-1), {action:'pause', bestEffort:true});
   elements.find(element => element.id === 'ktv420-spotify-capture-button').onclick();
   await new Promise(resolve => setImmediate(resolve));
   const frame = elements.find(element => element.tag === 'iframe');
@@ -100,6 +105,25 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
   await listeners.message({...ready,data:{...ready.data,type:'close'}});
   assert.equal(overlay.dataset.open,'false');
   assert.deepEqual(transportRequests.at(-1),{action:'pause'},'close button has the same pause behavior');
+
+  pageLocation.search = '?si=keep&ktv420=1';
+  listeners.popstate();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(overlay.dataset.open, 'true');
+  assert.equal(messages.at(-1).navigation.trackIndex, 1);
+  assert.deepEqual(transportRequests.at(-1), {action:'pause',bestEffort:true}, 'a deep link requests pause before the hosted app loads');
+  const revision = messages.at(-1).navigation.revision;
+  await listeners.message({...ready,data:{...ready.data,type:'view',trackIndex:null,revision,replace:false}});
+  assert.equal(pageLocation.search, '?si=keep&ktv420');
+  await listeners.message({...ready,data:{...ready.data,type:'view',trackIndex:1,revision:revision-1}});
+  assert.equal(pageLocation.search, '?si=keep&ktv420', 'stale navigation must not overwrite Back/Forward');
+  pageLocation.search = '?si=keep'; listeners.popstate();
+  assert.equal(overlay.dataset.open, 'false');
+  pageLocation.search = '?si=keep&ktv420=1'; listeners.popstate();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(overlay.dataset.open, 'true');
+  await listeners.message({...ready,data:{...ready.data,type:'close'}});
+  assert.equal(pageLocation.search, '?si=keep');
 
   for (const invalidate of [
     () => { frame.srcdoc = '<p>replaced frame</p>'; },

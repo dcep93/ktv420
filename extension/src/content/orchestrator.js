@@ -263,7 +263,12 @@ export class CaptureOrchestrator extends EventTarget {
     }
 
     const queue = [];
-    const candidateRows = rows.filter((row) => !shouldFilterTracks || requestedTrackIds.has(row.trackId));
+    // The player keeps repeated playlist positions; capture each audio file once.
+    const seen = new Set();
+    const candidateRows = rows.filter(row => {
+      if (seen.has(row.trackId) || (shouldFilterTracks && !requestedTrackIds.has(row.trackId))) return false;
+      seen.add(row.trackId); return true;
+    });
     const candidateTrackIds = candidateRows.map((row) => row.trackId);
 
     markTiming(debug.timingTrace, "preflight_local_cache_scan_start", {

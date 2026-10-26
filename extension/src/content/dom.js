@@ -57,9 +57,10 @@ export function collectTrackRows() {
         .filter(Boolean);
       const trackArtworkSrc = albumArtwork || getLargestRowArtworkSrc(row);
 
+      const gridIndex = Number(row.getAttribute?.('aria-rowindex'));
       return {
         row,
-        rowIndex,
+        rowIndex: Number.isSafeInteger(gridIndex) && gridIndex >= 2 ? gridIndex - 2 : rowIndex,
         trackId,
         trackName,
         trackArtist: Array.from(new Set(artists)).join(", "),

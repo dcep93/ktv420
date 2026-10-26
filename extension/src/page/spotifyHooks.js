@@ -861,23 +861,25 @@
         return {
           ok: false,
           reason: `Spotify playlist contents request failed with ${response.status}.`,
-          tracks: dedupePlaylistTracks(tracks)
+          tracks
         };
       }
 
       const json = await response.json();
-      const pageTracks = extractPlaylistTracks(json);
+      const items = json?.data?.playlistV2?.content?.items;
+      const itemCount = Array.isArray(items) ? items.length : 0;
+      const pageTracks = extractPlaylistTracks(json).map(track => ({ ...track, rowIndex: offset + track.rowIndex }));
       const total = extractPlaylistTotal(json);
       if (Number.isFinite(total)) {
         expectedTotal = total;
       }
 
-      if (pageTracks.length === 0) {
+      if (itemCount === 0) {
         break;
       }
 
       tracks.push(...pageTracks);
-      offset += pageTracks.length;
+      offset += itemCount;
 
       if (Number.isFinite(expectedTotal) && offset >= expectedTotal) {
         break;
@@ -888,7 +890,7 @@
       ok: tracks.length > 0,
       playlistUri: uri,
       total: Number.isFinite(expectedTotal) ? expectedTotal : null,
-      tracks: dedupePlaylistTracks(tracks)
+      tracks
     };
   }
 
@@ -1006,21 +1008,6 @@
         height: Number.isFinite(source?.height) ? source.height : null
       }))
       .filter((source) => source.url);
-  }
-
-  function dedupePlaylistTracks(tracks) {
-    const byId = new Map();
-
-    for (const track of tracks) {
-      if (!byId.has(track.trackId)) {
-        byId.set(track.trackId, {
-          ...track,
-          rowIndex: byId.size
-        });
-      }
-    }
-
-    return Array.from(byId.values());
   }
 
   function extractTrackCandidates(json) {

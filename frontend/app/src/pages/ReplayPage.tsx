@@ -1,21 +1,7 @@
 import { loadPerformance, savePerformance } from '../features/local/performanceFiles';
 import { useEffect, useState } from 'react';
 import { MAX_RECORDING_BYTES, parseRecordingText, type PerformanceRecording } from '../features/local/recording';
-const STORE_ID = 'kmkbecinmhkfihahalgclomhcicmoiia';
-// Optional explicit ID supports an unpacked development install; shared links use the store ID.
-const requestedId = new URLSearchParams(location.search).get('extension');
-const extensionId = requestedId && /^[a-p]{32}$/.test(requestedId) ? requestedId : STORE_ID;
-function extensionMessage(message: unknown): Promise<{ ok: boolean; error?: string; version?: string }> {
-  return new Promise((resolve,reject) => {
-    if (!globalThis.chrome?.runtime?.sendMessage) { reject(new Error('Install the extension, then refresh this page.')); return; }
-    chrome.runtime.sendMessage(extensionId, message, response => {
-      const error = chrome.runtime.lastError;
-      if (error || !response) reject(new Error('Install or update the extension, then refresh this page.'));
-      else if (!response.ok) reject(new Error(response.error || 'Update the extension, then refresh.'));
-      else resolve(response);
-    });
-  });
-}
+import { extensionMessage, STORE_ID } from '../features/local/extensionConnection';
 export default function ReplayPage() {
   const [recording,setRecording] = useState<PerformanceRecording | null>(null);
   const [error,setError] = useState('');

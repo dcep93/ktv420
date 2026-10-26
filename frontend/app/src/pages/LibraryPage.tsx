@@ -28,6 +28,7 @@ export default function LibraryPage() {
   const exportController = mp3Export.controller;
   const [storedTracks, setTracks] = useState<LocalTrack[]>([]);
   const [selected, setSelected] = useState('');
+  const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
   const [record, setRecord] = useState<PlaybackRecord | null>(null);
   const [viewMode, setViewMode] = useState<'tracks' | 'settings' | 'player'>('tracks');
   const page = useRef<HTMLElement>(null);
@@ -55,6 +56,14 @@ export default function LibraryPage() {
   }, [remoteVolume]);
   const transportCommand = spotify.transport;
   const selectionGuard = useRef(0);
+  const [entryPaused, setEntryPaused] = useState(false);
+  const entryPausedAt = useRef<number | null>(null);
+  const entryRevision = useRef(-1), appliedNavigation = useRef(-1);
+  const setUrlView = spotify.setView, urlNavigation = spotify.navigation, spotifyRows = spotify.tracks;
+  const syncTrackUrl = useCallback((id: string, replace = false, rowIndex?: number) => {
+    const row = spotifyRows.find(item => `spotify-${item.trackId}` === id && (rowIndex === undefined || item.rowIndex === rowIndex));
+    if (row && urlNavigation) setUrlView(row.rowIndex + 1, urlNavigation.revision, replace);
+  }, [spotifyRows, urlNavigation, setUrlView]);
   const observedTrack = useRef('');
   const mirrorTransport = useCallback((command: import('../features/local/listeningProtocol').TransportCommand) => {
     selectionGuard.current = Date.now() + 3000;
@@ -90,7 +99,7 @@ export default function LibraryPage() {
   const rememberMixerSettings = useCallback((settings: MixerSnapshot) => { mixerSettings.current = settings; }, []);
   const [savedMix,setSavedMix] = useState<PerformanceRecording | null>(null);
   const replay = useReplay({recording:spotify.replay,listening,transport:transportCommand,
-    select:id => { if(selected!==`spotify-${id}`) { loadedRevision.current='';setSelected(`spotify-${id}`);setRecord(null); } setViewMode('player'); },
+    select:id => { if(selected!==`spotify-${id}`) { loadedRevision.current='';setSelected(`spotify-${id}`);setRecord(null); } setSelectedRowIndex(null); syncTrackUrl(`spotify-${id}`, true); setViewMode('player'); },
     control:() => mixer.current,offset:id => captureStartSeconds(tracks.find(t => t.id===`spotify-${id}`)?.metadata),
   });
   const required = spotify.replay?.tracks || [];
@@ -111,10 +120,10 @@ export default function LibraryPage() {
     return () => clearInterval(timer);
   },[recording]);
   const savedSpotifyTracks = spotify.embedded
-    ? spotify.tracks.flatMap(item => tracks.filter(track => track.id === `spotify-${item.trackId}`))
-    : tracks.filter(track => track.source === 'spotify').slice().reverse();
+    ? spotify.tracks.flatMap(item => tracks.filter(track => track.id === `spotify-${item.trackId}`).map(track => ({ ...track, rowIndex: item.rowIndex })))
+    : tracks.filter(track => track.source === 'spotify').slice().reverse().map((track, rowIndex) => ({...track, rowIndex}));
   const playbackTracks = savedSpotifyTracks.filter(track => track.status === 'ready');
-  const selectedIndex = playbackTracks.findIndex(track => track.id === selected);
+  const selectedIndex = playbackTracks.findIndex(track => track.id === selected && (selectedRowIndex === null || track.rowIndex === selectedRowIndex));
   const activeTrack = tracks.find(track => track.id === selected);
   const captureOffset = captureStartSeconds(activeTrack?.metadata);
   const observedProcessingPreference = useRef<boolean | null>(null);
@@ -139,13 +148,13 @@ export default function LibraryPage() {
   const loadedRevision = useRef('');
   useEffect(() => {
     let disposed = false;
-    const revision = `${selected}/${selectedCreatedAt}/${selectedReady ? 'stems' : 'input'}`;
+    const revision = `${selected}/${selectedRowIndex}/${selectedCreatedAt}/${selectedReady ? 'stems' : 'input'}`;
     if (loadedRevision.current === revision) return;
     if (selected) void getPlaybackRecord(selected).then(next => {
       if (!disposed) { loadedRevision.current = revision; setRecord({ ...next, files: next.files.filter(file => file.name !== 'source') }); }
     }).catch(reason => { if (!disposed) { setError(errorText(reason)); transportCommand({ action: 'stems-failed', trackId: selected.replace(/^spotify-/, '') }); } });
     return () => { disposed = true; };
-  }, [selected, selectedReady, selectedCreatedAt, recording, transportCommand]);
+  }, [selected, selectedRowIndex, selectedReady, selectedCreatedAt, recording, transportCommand]);
   const processTracks = useCallback(async (ids: string[], automatic = false) => {
     if (running.current || deleting.current || modelBusy.current || exportController.current) return;
     running.current = true; cancelled.current = false; setError('');
@@ -286,10 +295,43 @@ export default function LibraryPage() {
     current.events.push({type:'stop',at:recordingClock.current.seconds,trackId:previous.trackId,position:event.trackTimeSeconds+captureOffset});
     try { saveMix(); } catch(reason) { setError(errorText(reason)); }
   }, [captureOffset,saveMix]);
+  const pauseForEntry = useCallback(() => {
+    entryPausedAt.current = Date.now(); setEntryPaused(true);
+    mixer.current?.pause(); setAutoPlay(false);
+    mirrorTransport({ action: 'pause' });
+  }, [mirrorTransport]);
+  useEffect(() => {
+    // A stale Spotify 'playing' snapshot must not undo a paused entry. Explicit
+    // Play also releases this gate when Spotify's best-effort pause is unavailable.
+    if (entryPausedAt.current !== null && listening?.local && !listening.playing &&
+      !listening.syncing && listening.observedAt >= entryPausedAt.current) {
+      entryPausedAt.current = null; setEntryPaused(false);
+    }
+  }, [listening]);
+  useEffect(() => {
+    const navigation = spotify.navigation;
+    if (!navigation || spotify.replay || appliedNavigation.current === navigation.revision) return;
+    if (entryRevision.current !== navigation.revision) {
+      entryRevision.current = navigation.revision;
+      if (mix.current) void stopRecording({ type: 'record_stop', trackTimeSeconds: mixer.current?.position() || 0 });
+      pauseForEntry(); setViewMode('tracks');
+    }
+    if (!navigation.open || navigation.trackIndex === null) {
+      appliedNavigation.current = navigation.revision; return;
+    }
+    const row = spotify.tracks.find(track => track.rowIndex + 1 === navigation.trackIndex);
+    const id = row && `spotify-${row.trackId}`;
+    if (spotify.active || spotify.starting || !id || !tracks.some(track => track.id === id && track.status === 'ready')) return;
+    appliedNavigation.current = navigation.revision;
+    pauseForEntry();
+    if (selected !== id || selectedRowIndex !== row.rowIndex) { loadedRevision.current = ''; setRecord(null); setSelected(id); setSelectedRowIndex(row.rowIndex); viewScroll.current.player = 0; }
+    setViewMode('player');
+  }, [spotify.navigation, spotify.tracks, spotify.replay, spotify.active, spotify.starting, tracks, selected, selectedRowIndex, pauseForEntry, stopRecording]);
   useEffect(() => {
     if (!listening || listening.error || !listening.local || Date.now() - listening.observedAt > 1800) return;
     const changed = observedTrack.current !== listening.trackId;
     observedTrack.current = listening.trackId;
+    if (entryPausedAt.current !== null || (spotify.navigation && appliedNavigation.current !== spotify.navigation.revision)) return;
     if (listening.syncing || Date.now() < selectionGuard.current || replay.active || spotify.replay) return;
     const desired = `spotify-${listening.trackId}`;
     if ((!changed && selected) || !listening.playing || listening.output !== 'stems' || selected === desired ||
@@ -298,11 +340,16 @@ export default function LibraryPage() {
       const previous=mix.current.events.at(-1)!;
       mix.current.events.push({type:'pause',at:recordingClock.current.seconds,trackId:previous.trackId,position:mixer.current.position()+captureOffset});
     }
-    loadedRevision.current = ''; setRecord(null); setSelected(desired); setAutoPlay(true);
+    loadedRevision.current = ''; setRecord(null); setSelected(desired); setSelectedRowIndex(null); setAutoPlay(true); syncTrackUrl(desired, true);
     setViewMode('player');
-  }, [listening, tracks, selected, recording, replay.active, spotify.replay, captureOffset]);
+  }, [listening, tracks, selected, recording, replay.active, spotify.replay, spotify.navigation, captureOffset, syncTrackUrl]);
   const onPlayerCommand = useCallback((command: { action: 'play' | 'pause' | 'seek' | 'rate'; position?: number; rate?: number }) => {
-    if (command.action === 'seek') mirrorTransport({ action: 'seek', position: (command.position || 0) + captureOffset, trackId: selected.replace(/^spotify-/, '') });
+    if (command.action === 'play') {
+      entryPausedAt.current = null; setEntryPaused(false);
+      mirrorTransport({ action: 'select', trackId: selected.replace(/^spotify-/, '') });
+      mirrorTransport({ action: 'seek', trackId: selected.replace(/^spotify-/, ''), position: (mixer.current?.position() || 0) + captureOffset });
+    }
+    else if (command.action === 'seek') mirrorTransport({ action: 'seek', position: (command.position || 0) + captureOffset, trackId: selected.replace(/^spotify-/, '') });
     else if (command.action === 'rate') return;
     else mirrorTransport({ action: command.action });
   }, [selected, mirrorTransport, captureOffset]);
@@ -312,7 +359,8 @@ export default function LibraryPage() {
   const navigateTrack = (offset: number) => {
     const next = playbackTracks[selectedIndex + offset];
     if (!next || recording) return;
-    loadedRevision.current = ''; setRecord(null); setSelected(next.id); setAutoPlay(true);
+    entryPausedAt.current = null; setEntryPaused(false);
+    loadedRevision.current = ''; setRecord(null); setSelected(next.id); setSelectedRowIndex(next.rowIndex); setAutoPlay(true); syncTrackUrl(next.id, true, next.rowIndex);
     mirrorTransport({action:'select',trackId:next.id.replace(/^spotify-/, '')});
   };
   const allDisplayTracks: (Omit<LocalTrack, 'status'> & { status: LocalTrack['status'] | 'missing' })[] = spotify.embedded
@@ -325,7 +373,7 @@ export default function LibraryPage() {
   closeRef.current = () => {
     mp3Export.cancel(); replay.stop();
     if (mix.current) void stopRecording({type:'record_stop',trackTimeSeconds:mixer.current?.position() || 0});
-    setAutoPlay(false); setViewMode('tracks');
+    mixer.current?.pause(); setAutoPlay(false); setViewMode('tracks');
   };
   const close = useCallback(() => { closeRef.current(); spotify.close(); }, [spotify]);
   const canCapture = !mp3Export.busy && !replay.active && !recording && spotify.embedded && !spotify.starting && !deletingAudio && (spotify.active || (spotify.supported && spotify.tracks.length > 0));
@@ -340,11 +388,10 @@ export default function LibraryPage() {
     window.addEventListener('keydown', keydown);
     return () => window.removeEventListener('keydown', keydown);
   }, [close, spotify, viewMode, canCapture]);
-  const openTrack = (id: string) => {
+  const openTrack = (id: string, rowIndex?: number) => {
     if (tracks.find(track => track.id === id)?.status !== 'ready' || deleting.current || (recording && selected !== id)) return;
-    if (selected !== id) { loadedRevision.current = ''; setRecord(null); setSelected(id); setAutoPlay(true); viewScroll.current.player = 0; }
-    mirrorTransport({action:'select',trackId:id.replace(/^spotify-/, '')});
-    if (selected === id) void mixer.current?.play();
+    if (selected !== id || selectedRowIndex !== rowIndex) { loadedRevision.current = ''; setRecord(null); setSelected(id); setSelectedRowIndex(rowIndex ?? null); viewScroll.current.player = 0; }
+    pauseForEntry(); syncTrackUrl(id, false, rowIndex);
     setViewMode('player');
   };
   const startExport = (value: PerformanceRecording) => {
@@ -455,7 +502,7 @@ export default function LibraryPage() {
         return <li key={`${track.id}-${index}`}><button type="button" className="iframe-track-row" data-state={track.status} data-progress={progressKind}
           aria-label={`${track.title} — ${label}`} disabled={!available}
           title={track.error || (active === track.id ? progress?.message : available ? 'Open stem mixer' : label)}
-          onClick={() => openTrack(track.id)}>
+          onClick={() => openTrack(track.id, spotify.replay ? undefined : spotify.tracks[index]?.rowIndex)}>
           {progressKind && <span className="iframe-track-fill" data-indeterminate={fraction === null} style={{ width: fraction === null ? '35%' : `${fraction * 100}%` }} aria-hidden="true" />}
           <span className="iframe-track-state"><OverlayIcon name={icon} /></span>
           {artwork ? <img className="iframe-track-artwork" alt="" src={artwork} crossOrigin="anonymous" /> : <span className="iframe-track-artwork iframe-artwork-placeholder"><OverlayIcon name="music" /></span>}
@@ -464,14 +511,14 @@ export default function LibraryPage() {
         </button></li>;
       })}
     </ol>}
-    <PlayerViewport contentKey={activeTrack && record && record.md5 === selected ? record.md5 : null} hidden={viewMode !== 'player'}>
+    <PlayerViewport contentKey={activeTrack && record && record.md5 === selected ? `${record.md5}/${selectedRowIndex}` : null} hidden={viewMode !== 'player'}>
     {activeTrack && record && record.md5 === selected && <>
-      <div className={replay.active ? "replay-mixer" : undefined} inert={!!spotify.replay || mp3Export.busy}><Player key={record.md5} record={record} title={activeTrack.title} replaying={replay.active || mp3Export.busy} onControls={onControls}
+      <div className={replay.active ? "replay-mixer" : undefined} inert={!!spotify.replay || mp3Export.busy}><Player key={`${record.md5}/${selectedRowIndex}`} record={record} title={activeTrack.title} replaying={replay.active || mp3Export.busy} onControls={onControls}
         combinedVisualizerExpanded={combinedVisualizerExpanded} onCombinedVisualizerExpandedChange={setCombinedVisualizerExpanded}
         initialSettings={spotify.replay ? undefined : mixerSettings.current} onSettingsChange={spotify.replay ? undefined : rememberMixerSettings}
         masterVolume={listening?.capturing ? 0 : masterVolume}
         tempoSupported
-        transport={!spotify.replay && listening ? { ...listening, position: Math.max(0, listening.position - captureOffset) } : undefined}
+        transport={!spotify.replay && !entryPaused && listening ? { ...listening, position: Math.max(0, listening.position - captureOffset) } : undefined}
         onTransportCommand={!spotify.replay && listening ? onPlayerCommand : undefined} onPlaybackError={onPlaybackError}
         hasPreviousTrack={!recording && selectedIndex > 0} hasNextTrack={!recording && selectedIndex >= 0 && selectedIndex < playbackTracks.length - 1}
         onPreviousTrack={() => navigateTrack(-1)} onNextTrack={() => navigateTrack(1)} onTrackEnd={() => navigateTrack(1)}

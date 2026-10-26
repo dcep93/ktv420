@@ -6,7 +6,7 @@ The rejected upload was 6.0.1 (Purple Potassium: unused `storage` permission). V
 
 - `https://open.spotify.com/*` is the only host permission. It supports the Spotify content scripts, finding an existing Spotify tab from the toolbar button, and communicating with that tab for capture and playback controls. No broad `tabs` permission is requested.
 - Content scripts and web-accessible resources are restricted to Spotify.
-- External messaging is restricted to `https://ktv420.web.app/*`; the background handler further requires the top-level `/replay` page and validates the recording. It accepts a replay handoff, not requests to read audio.
+- External messaging is restricted to `https://ktv420.web.app/*`; the background handler further requires a top-level `/replay` or `/saved` page. `/replay` validates recording handoffs; `/saved` can only read saved collection names, Spotify paths, artwork URLs and counts. Neither can read audio or write arbitrary extension data.
 - Audio remains in the existing extension IndexedDB library. Small replay and playback-ownership records live in a separate IndexedDB database. Neither uses `chrome.storage`.
 
 Chrome documents the permission requirement for [chrome.storage](https://developer.chrome.com/docs/extensions/reference/api/storage) separately from [web storage available in extensions](https://developer.chrome.com/docs/extensions/develop/concepts/storage-and-cookies).

@@ -20,6 +20,8 @@ test('album rows share the header cover, playlists keep individual covers, and e
     t.after(() => previous ? Object.defineProperty(globalThis, key, previous) : delete globalThis[key]);
   }
   assert.deepEqual(collectTrackRows().map(track => track.trackArtworkSrc), [large, large, large]);
+  rows[0].getAttribute = name => name === 'aria-rowindex' ? '52' : null;
+  assert.equal(collectTrackRows()[0].rowIndex, 50, 'virtualized rows retain the absolute song index');
   window.location.pathname = '/playlist/example';
   assert.deepEqual(collectTrackRows().map(track => track.trackArtworkSrc), ['', '', rowCover]);
 });

@@ -7,7 +7,7 @@ const hookSource = readFileSync(new URL('../src/page/spotifyHooks.js', import.me
 
 // Run the shipped page script through its real command bridge. Browser audio
 // primitives are mocked, but source selection and capture lifecycle are not.
-function harness(definitions, onWait = () => {}, timeline = null, activate = true) {
+function harness(definitions, onWait = () => {}, timeline = null, activate = true, fetch = () => {}) {
   class Media {
     listeners = new Map();
     constructor(values) { Object.assign(this, { src: 'song', currentSrc: '', currentTime: 0, duration: 180,
@@ -53,18 +53,18 @@ function harness(definitions, onWait = () => {}, timeline = null, activate = tru
   class XHR { open() {} send() {} }
   let now = 0, commandListener, reply;
   const window = { location: { origin: 'https://open.spotify.com' }, AudioContext,
-    fetch() {}, setInterval() {},
+    fetch, setInterval() {},
     setTimeout(callback, delay) { now += delay; onWait(elements, now); callback(); },
     addEventListener(type, listener) { if (type === 'message') commandListener = listener; },
     postMessage(message) { if (message.event === 'command-result') reply = message.payload; },
   };
   const context = vm.createContext({ window, document: new Document(), Document, HTMLMediaElement: Media,
     XMLHttpRequest: XHR, navigator: {}, performance: { now: () => now }, setInterval() {},
-    AudioWorkletNode: class { port = {}; constructor() { ports.push(this.port); this.port.postMessage = message => this.port.onmessage({data:{type:'flushed',id:message.id}}); } }, console, Uint8Array, ArrayBuffer });
+    AudioWorkletNode: class { port = {}; constructor() { ports.push(this.port); this.port.postMessage = message => this.port.onmessage({data:{type:'flushed',id:message.id}}); } }, console, Uint8Array, ArrayBuffer, Headers });
   vm.runInContext(hookSource, context);
   if (activate) commandListener({ source: window, data: { source: 'ktv420_content', commandId: 0,
     command: 'listening-enable', payload: { enabled: true } } });
-  return { elements, graphs, gains, ports, contexts, async command(command, payload = {}) {
+  return { fetch: (...args) => window.fetch(...args), elements, graphs, gains, ports, contexts, async command(command, payload = {}) {
     reply = null;
     await commandListener({ source: window, data: { source: 'ktv420_content', commandId: 1, command, payload } });
     assert.ok(reply, 'bridge must reply');
@@ -316,4 +316,21 @@ test('verified finalization trims block padding only at the known tail and rejec
     const result=(await h.command('capture-finish')).result;
     assert.equal(result.invalid,count<4);assert.equal(result.byteLength,Math.min(count,4)*8);
   }
+});
+
+
+test('playlist pagination retains absolute indices, unavailable gaps and repeated tracks', async () => {
+  const id='1111111111111111111111', other='2222222222222222222222';
+  const item=trackId=>({track:{id:trackId,name:'Song'}});
+  const offsets=[];
+  const h=harness([],undefined,null,false,async (_url,init)=>{
+    const {offset}=JSON.parse(init.body).variables; offsets.push(offset);
+    return new Response(JSON.stringify({data:{playlistV2:{content:{totalCount:4,items:offset===0 ? [item(id),{}] : [item(id),item(other)]}}}}));
+  });
+  await h.fetch('https://api-partner.spotify.com/pathfinder/v1/query',{method:'POST',body:JSON.stringify({operationName:'fetchPlaylistContents',variables:{uri:`spotify:playlist:${id}`,offset:0,limit:2}})});
+  await new Promise(resolve=>setImmediate(resolve));
+  const result=await h.command('playlist-tracks',{playlistUri:`spotify:playlist:${id}`});
+  assert.equal(result.ok,true);
+  assert.deepEqual(Array.from(result.result.tracks,t=>[t.trackId,t.rowIndex]),[[id,0],[id,2],[other,3]]);
+  assert.deepEqual(offsets,[0,0,2]);
 });

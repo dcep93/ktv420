@@ -1,3 +1,4 @@
+import { savedCollections, setCaptureContext } from './collectionRegistry';
 import { parseRecording } from '../features/local/recording';
 import { claimListeningLease } from './listeningLease';
 import { readState, updateState } from './state';
@@ -18,7 +19,7 @@ chrome.action.onClicked.addListener(tab => {
 chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
   if (sender.id !== chrome.runtime.id || typeof sender.tab?.id !== 'number' || !sender.url?.startsWith('https://open.spotify.com/') ||
     !message || typeof message !== 'object' || !('type' in message)) return false;
-  const request = message as { type: string; metadata: Record<string, unknown>; bytes: number; id: string; index: number; base64: string };
+  const request = message as { type: string; collection: unknown; metadata: Record<string, unknown>; bytes: number; id: string; index: number; base64: string };
   const tabId = sender.tab.id;
   const handle = async () => {
     switch (request.type) {
@@ -34,9 +35,14 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
         const lease = await updateState('listeningLease', previous => claimListeningLease(previous, tabId, Date.now()));
         return lease?.tabId === tabId;
       }
+      case 'ktv420:register-collection': await setCaptureContext(tabId, request.collection, sender.url!); return null;
       case 'ktv420:library-status': return (await listTracks()).filter(track => track.source === 'spotify').map(track => ({ trackId: track.metadata?.trackId, status: track.status }));
       case 'ktv420:cached': return (await listTracks()).filter(track => track.source === 'spotify').map(track => track.metadata);
-      case 'ktv420:capture-begin': return beginCapture(tabId, request.metadata, request.bytes);
+      case 'ktv420:capture-begin': {
+        const context = (await readState('captureContexts'))?.[tabId];
+        const collection = context && new URL(sender.url!).pathname.replace(/\/$/, '') === `/${context.path}` ? context : undefined;
+        return beginCapture(tabId, { ...request.metadata, collection }, request.bytes);
+      }
       case 'ktv420:capture-chunk': await appendCapture(tabId, request.id, request.index, request.base64); return null;
       case 'ktv420:capture-finish': await finishCapture(tabId, request.id); return null;
       default: throw new Error('Unknown ktv420 command.');
@@ -46,12 +52,17 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
   return true;
 });
 
-// The website can only hand off validated instructions; it cannot read local audio.
+// Top-level website pages can hand off recordings or read collection metadata, never audio.
 chrome.runtime.onMessageExternal.addListener((message: unknown, sender, respond) => {
   let url: URL;
   try { url = new URL(sender.url || ''); } catch { return false; }
-  if (url.origin !== 'https://ktv420.web.app' || url.pathname.replace(/\/$/,'') !== '/replay' || (sender.frameId !== undefined && sender.frameId !== 0) ||
+  if (url.origin !== 'https://ktv420.web.app' || !['/replay', '/saved'].includes(url.pathname.replace(/\/$/,'')) || (sender.frameId !== undefined && sender.frameId !== 0) ||
     !message || typeof message !== 'object' || !('type' in message)) return false;
+  if (url.pathname.replace(/\/$/,'') === '/saved') {
+    if (message.type !== 'ktv420:saved-collections') return false;
+    void savedCollections().then(collections => respond({ ok: true, collections }), error => respond({ ok: false, error: String(error) }));
+    return true;
+  }
   if (message.type === 'ktv420:replay-ping') { respond({ok:true,version:chrome.runtime.getManifest().version}); return false; }
   if (message.type !== 'ktv420:open-replay' || !('recording' in message)) return false;
   void (async () => {

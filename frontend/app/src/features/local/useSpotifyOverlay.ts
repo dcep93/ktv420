@@ -1,11 +1,12 @@
+import { parseOverlayNavigation, type OverlayNavigation } from './overlayNavigation';
 import { parseRecording, spotifyContext, type PerformanceRecording } from './recording';
 import { parseListeningState, type ListeningState, type TransportCommand } from './listeningProtocol';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { brokerOrigin } from './libraryClient';
 
 export type SpotifyTrack = { trackId: string; trackName: string; trackArtist: string; trackArtworkSrc: string; rowIndex: number };
-type SpotifyState = { spotifyPath: string; listening: ListeningState | null; tracks: SpotifyTrack[]; active: boolean; starting: boolean; supported: boolean; notice: string; error: string; captureProgress: { trackId: string; fraction: number | null } | null };
-const initial: SpotifyState = { spotifyPath: '', listening: null, tracks: [], active: false, starting: false, supported: false, notice: '', error: '', captureProgress: null };
+type SpotifyState = { navigation: OverlayNavigation | null; spotifyPath: string; listening: ListeningState | null; tracks: SpotifyTrack[]; active: boolean; starting: boolean; supported: boolean; notice: string; error: string; captureProgress: { trackId: string; fraction: number | null } | null };
+const initial: SpotifyState = { navigation: null, spotifyPath: '', listening: null, tracks: [], active: false, starting: false, supported: false, notice: '', error: '', captureProgress: null };
 const embedded = window.parent !== window;
 // The extension broker authenticates Spotify and relays only overlay controls.
 const parentOrigin = embedded ? brokerOrigin() : '';
@@ -40,12 +41,12 @@ export function useSpotifyOverlay(onClose?: () => void) {
         .filter((track: SpotifyTrack) => typeof track?.trackId === 'string' && /^[A-Za-z0-9]{1,100}$/.test(track.trackId) && typeof track.trackName === 'string')
         .map((track: SpotifyTrack, rowIndex: number) => ({ trackId: track.trackId, trackName: track.trackName.slice(0, 500),
           trackArtist: typeof track.trackArtist === 'string' ? track.trackArtist.slice(0, 500) : '',
-          trackArtworkSrc: typeof track.trackArtworkSrc === 'string' && /^https:\/\/(?:i|mosaic)\.scdn\.co\//.test(track.trackArtworkSrc) ? track.trackArtworkSrc : '', rowIndex })) : [];
+          trackArtworkSrc: typeof track.trackArtworkSrc === 'string' && /^https:\/\/(?:i|mosaic)\.scdn\.co\//.test(track.trackArtworkSrc) ? track.trackArtworkSrc : '', rowIndex: Number.isSafeInteger(track.rowIndex) && track.rowIndex >= 0 ? track.rowIndex : rowIndex })) : [];
       const capture = data.captureProgress;
       const captureProgress = data.active === true && capture && typeof capture.trackId === 'string' && /^[A-Za-z0-9]{1,100}$/.test(capture.trackId) &&
         (capture.fraction === null || (typeof capture.fraction === 'number' && Number.isFinite(capture.fraction) && capture.fraction >= 0 && capture.fraction <= 1))
         ? { trackId: capture.trackId, fraction: capture.fraction } : null;
-      setState({ spotifyPath: spotifyContext(data.spotifyPath) ? data.spotifyPath : '', listening: parseListeningState(data.listening), tracks, active: data.active === true, starting: data.starting === true, supported: data.supported === true, captureProgress,
+      setState({ navigation: parseOverlayNavigation(data.navigation), spotifyPath: spotifyContext(data.spotifyPath) ? data.spotifyPath : '', listening: parseListeningState(data.listening), tracks, active: data.active === true, starting: data.starting === true, supported: data.supported === true, captureProgress,
         notice: typeof data.notice === 'string' ? data.notice : '', error: typeof data.error === 'string' ? data.error : '' });
     };
     window.addEventListener('message', receive); send('ready');
@@ -53,7 +54,11 @@ export function useSpotifyOverlay(onClose?: () => void) {
     send('listening-heartbeat');
     return () => { clearInterval(heartbeat); window.removeEventListener('message', receive); };
   }, []);
-  return { ...state, replay, embedded, transport: sendTransport, dismissReplay: () => send('dismiss-replay'), toggleCapture: () => send('toggle-capture'), close: () => send('close') };
+  return { ...state, replay, embedded, setView: sendView, transport: sendTransport, dismissReplay: () => send('dismiss-replay'), toggleCapture: () => send('toggle-capture'), close: () => send('close') };
 }
 
 const sendTransport = (command: TransportCommand) => send('transport', command);
+
+function sendView(trackIndex: number | null, revision: number, replace = false) {
+  if (embedded) window.parent.postMessage({ source: 'ktv420-overlay', version: 2, type: 'view', trackIndex, revision, replace }, parentOrigin);
+}

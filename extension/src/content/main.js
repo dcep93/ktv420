@@ -43,10 +43,10 @@ async function getOrchestrator() {
 
 const ui = mountButton({
   onReplay: enabled => listening?.prepareReplay(enabled),
-  onOpenChange: async open => {
+  onOpenChange: async (open, options) => {
     captureTitle.setOpen(open);
     if (!open && orchestrator?.isActive()) await orchestrator.requestStop();
-    await listening?.setEnabled(open);
+    await listening?.setEnabled(open, options);
   },
   isRunActive: () => Boolean(orchestrator?.isActive()),
   loadSpotifyTracks: () => loadSpotifyPlaylistTracks(),

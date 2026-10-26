@@ -73,6 +73,10 @@ test('Stop silences and pauses, and stale playing state cannot restart capture',
     } }, emit: state => updates.push(state), ensurePlayer() {}, getRunner: () => null,
   });
   const settle = () => new Promise(resolve => setImmediate(resolve));
+  controller.heartbeat(); await controller.setEnabled(true, { paused: true }); await settle();
+  ticks[0](); await settle();
+  assert.equal(calls.filter(c => c.command === 'capture-begin').length, 0, 'deep-link activation cannot capture already-playing Spotify audio');
+  await controller.setEnabled(false); await settle();
   controller.heartbeat(); await controller.setEnabled(true); await settle();
   assert.equal(calls.filter(c => c.command === 'capture-begin').length, 1);
   ticks[0](); await settle();
