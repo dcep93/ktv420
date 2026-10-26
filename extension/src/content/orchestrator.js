@@ -1,3 +1,4 @@
+import { readTransportDom } from './transport.js';
 import { startPreciseCapture, captureTiming } from './preciseCapture.js';
 import { CaptureRunProgress } from "./captureTitle.js";
 import { STORAGE_VERSION } from "./constants.js";
@@ -178,6 +179,7 @@ export class CaptureOrchestrator extends EventTarget {
         if (pendingCapture) {
           // Save this complete track before preparing another, so a failed next
           // seek cannot discard good audio. Pause the new song while transferring.
+          this.markSaving(pendingCapture.item.trackId);
           pausePlaybackCleanly();
           pendingCapture.capture = await this.finishPageCapture();
           const metadata = await this.storeCapturedTrack(pendingCapture.item, pendingCapture.capture, pendingCapture.captureEnd);
@@ -195,7 +197,7 @@ export class CaptureOrchestrator extends EventTarget {
           this.dispatchTrackStored(pendingCapture.item.trackId, metadata);
         }
         if (nextItem) {
-          if (item.cached) clickSkipForward();
+          this.selectQueuedItem(nextItem);
           startInfo = await this.beginAndAcceptItem(nextItem, debug, {
             logFirstStartTiming: !hasLoggedFirstStartTiming
           });
@@ -313,6 +315,23 @@ export class CaptureOrchestrator extends EventTarget {
       console.warn("[ktv420] Failed to load Spotify playlist tracks from page API", error);
       return [];
     }
+  }
+
+  selectQueuedItem(item) {
+    this.throwIfStopped();
+    // Saving pauses Spotify and may interrupt its own auto-advance. Select the
+    // queued song explicitly, but do not skip again if it already advanced.
+    if (readTransportDom().trackId === item.trackId) return;
+    const row = resolveTrackRow(item);
+    if (row) dispatchSyntheticDoubleClick(row);
+    else clickSkipForward();
+    // beginAndAcceptItem verifies the requested identity before recording.
+  }
+
+  markSaving(trackId) {
+    if (this.stopRequested) return;
+    this.captureProgress = { trackId, fraction: .99, phase: 'saving' };
+    this.dispatchEvent(new CustomEvent('captureprogress', { detail: this.captureProgress }));
   }
 
   dispatchTrackStored(trackId, metadata) {

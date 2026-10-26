@@ -1,12 +1,13 @@
+import { pendingCaptureSaves, acknowledgeCaptureSaves, type CaptureProgress } from './captureProgress';
 import { parseOverlayNavigation, type OverlayNavigation } from './overlayNavigation';
 import { parseRecording, spotifyContext, type PerformanceRecording } from './recording';
 import { parseListeningState, type ListeningState, type TransportCommand } from './listeningProtocol';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { brokerOrigin } from './libraryClient';
 
 export type SpotifyTrack = { trackId: string; trackName: string; trackArtist: string; trackArtworkSrc: string; rowIndex: number };
-type SpotifyState = { navigation: OverlayNavigation | null; spotifyPath: string; listening: ListeningState | null; tracks: SpotifyTrack[]; active: boolean; starting: boolean; supported: boolean; notice: string; error: string; captureProgress: { trackId: string; fraction: number | null } | null };
-const initial: SpotifyState = { navigation: null, spotifyPath: '', listening: null, tracks: [], active: false, starting: false, supported: false, notice: '', error: '', captureProgress: null };
+type SpotifyState = { navigation: OverlayNavigation | null; spotifyPath: string; listening: ListeningState | null; tracks: SpotifyTrack[]; active: boolean; starting: boolean; supported: boolean; notice: string; error: string; captureProgress: CaptureProgress | null; savingTrackIds: string[] };
+const initial: SpotifyState = { navigation: null, spotifyPath: '', listening: null, tracks: [], active: false, starting: false, supported: false, notice: '', error: '', captureProgress: null, savingTrackIds: [] };
 const embedded = window.parent !== window;
 // The extension broker authenticates Spotify and relays only overlay controls.
 const parentOrigin = embedded ? brokerOrigin() : '';
@@ -43,11 +44,13 @@ export function useSpotifyOverlay(onClose?: () => void) {
           trackArtist: typeof track.trackArtist === 'string' ? track.trackArtist.slice(0, 500) : '',
           trackArtworkSrc: typeof track.trackArtworkSrc === 'string' && /^https:\/\/(?:i|mosaic)\.scdn\.co\//.test(track.trackArtworkSrc) ? track.trackArtworkSrc : '', rowIndex: Number.isSafeInteger(track.rowIndex) && track.rowIndex >= 0 ? track.rowIndex : rowIndex })) : [];
       const capture = data.captureProgress;
-      const captureProgress = data.active === true && capture && typeof capture.trackId === 'string' && /^[A-Za-z0-9]{1,100}$/.test(capture.trackId) &&
+      const captureProgress: CaptureProgress | null = data.active === true && capture && typeof capture.trackId === 'string' && /^[A-Za-z0-9]{1,100}$/.test(capture.trackId) &&
         (capture.fraction === null || (typeof capture.fraction === 'number' && Number.isFinite(capture.fraction) && capture.fraction >= 0 && capture.fraction <= 1))
-        ? { trackId: capture.trackId, fraction: capture.fraction } : null;
-      setState({ navigation: parseOverlayNavigation(data.navigation), spotifyPath: spotifyContext(data.spotifyPath) ? data.spotifyPath : '', listening: parseListeningState(data.listening), tracks, active: data.active === true, starting: data.starting === true, supported: data.supported === true, captureProgress,
-        notice: typeof data.notice === 'string' ? data.notice : '', error: typeof data.error === 'string' ? data.error : '' });
+        ? { trackId: capture.trackId, fraction: capture.fraction, ...(capture.phase === 'saving' ? { phase: 'saving' as const } : {}) } : null;
+      setState(previous => ({ navigation: parseOverlayNavigation(data.navigation), spotifyPath: spotifyContext(data.spotifyPath) ? data.spotifyPath : '', listening: parseListeningState(data.listening), tracks, active: data.active === true, starting: data.starting === true, supported: data.supported === true, captureProgress,
+        notice: typeof data.notice === 'string' ? data.notice : '', error: typeof data.error === 'string' ? data.error : '',
+        savingTrackIds: pendingCaptureSaves(previous.savingTrackIds, captureProgress, data.error),
+      }));
     };
     window.addEventListener('message', receive); send('ready');
     const heartbeat = setInterval(() => send('listening-heartbeat'), 500);
@@ -61,7 +64,13 @@ export function useSpotifyOverlay(onClose?: () => void) {
     window.parent.postMessage({ source: 'ktv420-overlay', version: 2, type: 'view-ready',
       spotifyPath: state.spotifyPath, revision: state.navigation.revision }, parentOrigin);
   }, [state]);
-  return { ...state, replay, embedded, setView: sendView, transport: sendTransport, dismissReplay: () => send('dismiss-replay'), toggleCapture: () => send('toggle-capture'), close: () => send('close') };
+  const acknowledgeSaved = useCallback((ids: string[]) => {
+    setState(previous => {
+      const savingTrackIds = acknowledgeCaptureSaves(previous.savingTrackIds, ids);
+      return savingTrackIds === previous.savingTrackIds ? previous : { ...previous, savingTrackIds };
+    });
+  }, []);
+  return { ...state, acknowledgeSaved, replay, embedded, setView: sendView, transport: sendTransport, dismissReplay: () => send('dismiss-replay'), toggleCapture: () => send('toggle-capture'), close: () => send('close') };
 }
 
 const sendTransport = (command: TransportCommand) => send('transport', command);

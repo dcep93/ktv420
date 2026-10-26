@@ -60,10 +60,12 @@ test('bridge validates optional capture progress and forwards only its sanitized
     await send({ trackId: 'actual-track', fraction, privateData: { secret: 'stripped' } });
     assert.deepEqual(messages.at(-1)!.captureProgress, { trackId: 'actual-track', fraction });
   }
+  await send({ trackId: 'actual-track', fraction: .99, phase: 'saving', extra: true });
+  assert.deepEqual(messages.at(-1)!.captureProgress, { trackId: 'actual-track', fraction: .99, phase: 'saving' });
   await send(null);
   assert.equal(messages.at(-1)!.captureProgress, null);
   const count = messages.length;
-  for (const invalid of [[], '0.5', {}, { trackId: '', fraction: 0 }, { trackId: 1, fraction: 0 },
+  for (const invalid of [{ trackId: 'track', fraction: .99, phase: 'invented' }, [], '0.5', {}, { trackId: '', fraction: 0 }, { trackId: 1, fraction: 0 },
     { trackId: 'x'.repeat(4097), fraction: 0 }, { trackId: 'track' }, { trackId: 'track', fraction: '0.5' },
     { trackId: 'track', fraction: NaN }, { trackId: 'track', fraction: Infinity },
     { trackId: 'track', fraction: -0.1 }, { trackId: 'track', fraction: 1.1 }]) await send(invalid);

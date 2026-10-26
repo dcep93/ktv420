@@ -127,12 +127,19 @@ export default function LibraryPage() {
   const activeTrack = tracks.find(track => track.id === selected);
   const captureOffset = captureStartSeconds(activeTrack?.metadata);
   const observedProcessingPreference = useRef<boolean | null>(null);
+  const acknowledgeSaved = spotify.acknowledgeSaved;
+  const refreshRevision = useRef(0);
   const refresh = useCallback(async () => {
+    const revision = ++refreshRevision.current;
     const [savedTracks, cached, enabled] = await Promise.all([listTracks(), getModelCacheStatus(), getProcessingEnabled()]);
+    if (revision !== refreshRevision.current) return;
     setTracks(savedTracks); setModelCached(cached); setAutoProcessing(enabled);
+    acknowledgeSaved(savedTracks.map(track => track.id.replace(/^spotify-/, '')));
     if (observedProcessingPreference.current === true && !enabled) { cancelled.current = true; separator.current?.dispose(); }
     observedProcessingPreference.current = enabled;
-  }, []);
+  }, [acknowledgeSaved]);
+  useEffect(() => { void refresh().catch(reason => setError(errorText(reason))); },
+    [spotify.captureProgress?.trackId, spotify.captureProgress?.phase, refresh]);
   useEffect(() => {
     const update = () => { void refresh().catch(reason => setError(errorText(reason))); };
     update(); const timer = setInterval(update, 2500);
@@ -489,10 +496,11 @@ export default function LibraryPage() {
         const ready = track.status === 'ready';
         const available = ready && !mp3Export.busy && !deletingAudio && (!recording || selected === track.id);
         const capture = spotify.captureProgress?.trackId === track.id.replace(/^spotify-/, '') ? spotify.captureProgress : null;
+        const saving = capture?.phase === 'saving' || track.status === 'missing' && spotify.savingTrackIds.includes(track.id.replace(/^spotify-/, ''));
         const separating = !ready && (active === track.id || track.status === 'processing');
-        const progressKind = !ready && capture ? 'capture' : separating ? 'separation' : undefined;
-        const fraction = progressKind === 'capture' ? capture!.fraction : active === track.id ? separationFraction : null;
-        const label = ready ? 'Ready' : progressKind === 'capture' ? `Capturing${fraction === null ? '' : ` ${Math.floor(fraction * 100)}%`}`
+        const progressKind = !ready && (capture || saving) ? 'capture' : separating ? 'separation' : undefined;
+        const fraction = progressKind === 'capture' ? saving ? .99 : capture!.fraction : active === track.id ? separationFraction : null;
+        const label = ready ? 'Ready' : saving ? 'Saving…' : progressKind === 'capture' ? `Capturing${fraction === null ? '' : ` ${Math.floor(fraction * 100)}%`}`
           : separating ? `${active === track.id && progress?.phase === 'encoding' ? 'Saving MP3' : active === track.id && progress?.phase === 'restoring' ? 'Restoring audio' : active === track.id && progress?.phase === 'resampling' ? 'Preparing audio' : 'Separating'}${fraction === null ? '' : ` ~${(fraction * 100).toFixed(1)}%`}`
           : track.status === 'error' ? 'Failed' : track.status === 'missing' ? 'Not captured' : 'Queued';
         const icon = ready ? 'play' : track.status === 'error' ? 'alert' : progressKind ? 'processing' : 'clock';

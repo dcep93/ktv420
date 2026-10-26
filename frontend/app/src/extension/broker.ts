@@ -15,6 +15,7 @@ function object(value: unknown): value is Record<string, unknown> {
 function validCaptureProgress(value: unknown) {
   return value === undefined || value === null || object(value) &&
     typeof value.trackId === 'string' && value.trackId.length > 0 && value.trackId.length <= 4096 &&
+    (value.phase === undefined || value.phase === 'saving') &&
     (value.fraction === null || typeof value.fraction === 'number' && Number.isFinite(value.fraction) && value.fraction >= 0 && value.fraction <= 1);
 }
 function validState(value: Record<string, unknown>) {
@@ -59,8 +60,8 @@ export function createBrokerBridge(options: BridgeOptions) {
         const navigation = parseOverlayNavigation(data.navigation);
         if (navigation) state.navigation = navigation;
         if (data.captureProgress !== undefined) {
-          const progress = data.captureProgress as { trackId: string; fraction: number | null } | null;
-          state.captureProgress = progress === null ? null : { trackId: progress.trackId, fraction: progress.fraction };
+          const progress = data.captureProgress as { trackId: string; fraction: number | null; phase?: 'saving' } | null;
+          state.captureProgress = progress === null ? null : { trackId: progress.trackId, fraction: progress.fraction, ...(progress.phase === 'saving' ? { phase: 'saving' } : {}) };
         }
         const listening = parseListeningState(data.listening);
         if (listening) state.listening = listening;
