@@ -344,6 +344,9 @@
         const element = await waitForSingleCaptureTarget(mediaTracker, timeoutMs);
         const graph = await getOrCreateAudioGraph(element);
         if (graph.context.state === 'suspended') await graph.context.resume();
+        // The button label can change before the underlying audio pauses.
+        // Preparation must hold the selected media still, not just trust the UI.
+        if (!element.paused) element.pause();
         element.playbackRate = 1; rateElements.delete(element);
         return { target: describeMediaElement(element) };
       },

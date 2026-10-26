@@ -553,3 +553,12 @@ test('exact capture rewind changes only a matching paused source before recordin
   assert.equal((await closed.command('capture-rewind',{expectedSource:'song'})).ok,false);
   assert.equal(closed.elements[0].currentTime,2.824);
 });
+
+test('capture preparation pauses actual audio even when the UI pause has not reached it', async () => {
+  const h=harness([{src:'song',paused:false,currentTime:2.824}]);
+  const result=await h.command('capture-prepare');
+  assert.equal(result.ok,true);assert.equal(result.result.target.paused,true);
+  assert.equal(h.elements[0].paused,true);assert.equal(h.elements[0].currentTime,2.824);
+  assert.equal((await h.command('capture-rewind',{expectedSource:'song'})).ok,true);
+  assert.equal(h.elements[0].currentTime,0);
+});
