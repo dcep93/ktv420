@@ -485,7 +485,6 @@ export default function LibraryPage() {
       </section>
     </section>}
     {viewMode === 'tracks' && <ol className="iframe-track-list" aria-label="Spotify page tracks">
-      {!displayTracks.length && <li className="iframe-playlist-empty">Open a Spotify playlist or album to get started.</li>}
       {displayTracks.map((track, index) => {
         const ready = track.status === 'ready';
         const available = ready && !mp3Export.busy && !deletingAudio && (!recording || selected === track.id);

@@ -54,6 +54,13 @@ export function useSpotifyOverlay(onClose?: () => void) {
     send('listening-heartbeat');
     return () => { clearInterval(heartbeat); window.removeEventListener('message', receive); };
   }, []);
+  // A mounted iframe is not a rendered playlist. Acknowledge only after React
+  // has committed actual rows for the requested Spotify context.
+  useLayoutEffect(() => {
+    if (!embedded || !state.supported || !state.tracks.length || !state.navigation?.open) return;
+    window.parent.postMessage({ source: 'ktv420-overlay', version: 2, type: 'view-ready',
+      spotifyPath: state.spotifyPath, revision: state.navigation.revision }, parentOrigin);
+  }, [state]);
   return { ...state, replay, embedded, setView: sendView, transport: sendTransport, dismissReplay: () => send('dismiss-replay'), toggleCapture: () => send('toggle-capture'), close: () => send('close') };
 }
 

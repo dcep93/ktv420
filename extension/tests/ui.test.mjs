@@ -7,8 +7,10 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
   const messages = [];
   const timers = [];
   const listeners = {};
+  let resolveTracks; const trackLoad = new Promise(resolve => { resolveTracks = resolve; });
   let pendingReply;const captureRequests=[],transportRequests=[],replayModes=[];
   const trackId = '5EGTNEoUpibGgMWf6ECe0X';
+  let rowsAvailable = true;
   const row = {
     querySelector: () => ({ getAttribute: () => `/track/${trackId}`, textContent: 'Common Enemy' }),
     querySelectorAll: () => [],
@@ -37,7 +39,7 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
       documentElement: makeElement('html'), body: makeElement('body'),
       querySelector: selector => selector.includes('logoSpotify')
         ? { closest: () => ({ parentElement: parent }) }
-        : { querySelectorAll: () => [row] },
+        : selector.includes('entity-header') ? null : { querySelectorAll: () => rowsAvailable ? [row] : [] },
     },
     window: { location: pageLocation,
       addEventListener(name, listener) { listeners[name] = listener; }, removeEventListener() {} },
@@ -51,11 +53,12 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
     t.after(() => descriptor ? Object.defineProperty(globalThis, key, descriptor) : delete globalThis[key]);
   }
-  const ui = mountButton({ isRunActive: () => false, onToggleRun: async options => {captureRequests.push(options);}, loadSpotifyTracks: async () => [], onTransport: async command => {transportRequests.push(command);}, onReplay: enabled => replayModes.push(enabled) });
+  const ui = mountButton({ isRunActive: () => false, onToggleRun: async options => {captureRequests.push(options);}, loadSpotifyTracks: () => trackLoad, onTransport: async command => {transportRequests.push(command);}, onReplay: enabled => replayModes.push(enabled) });
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(elements.find(element => element.id === 'ktv420-prepared-iframe').dataset.open, 'true', 'initial URL opens without a button click');
-  assert.deepEqual(transportRequests.at(-1), {action:'pause', bestEffort:true});
-  elements.find(element => element.id === 'ktv420-spotify-capture-button').onclick();
+  assert.notEqual(elements.find(element => element.id === 'ktv420-prepared-iframe').dataset.open, 'true', 'deep link waits while Spotify tracks load');
+  assert.equal(transportRequests.length, 0, 'waiting must not take over playback');
+  assert.equal(elements.some(element => element.tag === 'iframe'), false);
+  resolveTracks([]);
   await new Promise(resolve => setImmediate(resolve));
   const frame = elements.find(element => element.tag === 'iframe');
   frame.listeners.load?.();
@@ -70,6 +73,17 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
   ui.refresh();
   assert.equal(messages.length, 0, 'a different origin or window cannot unlock state delivery');
   await listeners.message(ready);
+  assert.notEqual(elements.find(element => element.id === 'ktv420-prepared-iframe').dataset.open, 'true', 'broker readiness alone must not show an empty player');
+  async function renderView(overrides = {}) {
+    const state = messages.filter(message => message.type === 'state').at(-1);
+    await listeners.message({ ...ready, data: { ...ready.data, type: 'view-ready', spotifyPath: state.spotifyPath, revision: state.navigation.revision, ...overrides } });
+  }
+  await renderView({revision:999});
+  await renderView({spotifyPath:'album/wrong'});
+  assert.equal(transportRequests.length, 0, 'stale or mismatched render cannot activate audio');
+  await renderView();
+  assert.equal(elements.find(element => element.id === 'ktv420-prepared-iframe').dataset.open, 'true', 'matching rendered playlist opens the requested view');
+  assert.deepEqual(transportRequests.at(-1), {action:'pause',bestEffort:true});
   ui.refresh();
   timers[0]();
   assert.ok(messages.length > 0);
@@ -102,6 +116,7 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
   assert.equal(transportRequests.length,count,'Escape outside the overlay does not pause Spotify');
   elements.find(element=>element.id==='ktv420-spotify-capture-button').onclick();
   await new Promise(resolve=>setImmediate(resolve));
+  await renderView();
   await listeners.message({...ready,data:{...ready.data,type:'close'}});
   assert.equal(overlay.dataset.open,'false');
   assert.deepEqual(transportRequests.at(-1),{action:'pause'},'close button has the same pause behavior');
@@ -109,6 +124,7 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
   pageLocation.search = '?si=keep&ktv420=1';
   listeners.popstate();
   await new Promise(resolve=>setImmediate(resolve));
+  await renderView();
   assert.equal(overlay.dataset.open, 'true');
   assert.equal(messages.at(-1).navigation.trackIndex, 1);
   assert.deepEqual(transportRequests.at(-1), {action:'pause',bestEffort:true}, 'a deep link requests pause before the hosted app loads');
@@ -121,9 +137,34 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
   assert.equal(overlay.dataset.open, 'false');
   pageLocation.search = '?si=keep&ktv420=1'; listeners.popstate();
   await new Promise(resolve=>setImmediate(resolve));
+  await renderView();
   assert.equal(overlay.dataset.open, 'true');
   await listeners.message({...ready,data:{...ready.data,type:'close'}});
   assert.equal(pageLocation.search, '?si=keep');
+
+  pageLocation.search = '?ktv420'; listeners.popstate();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(overlay.dataset.open, 'false');
+  listeners.keydown({key:'Escape',preventDefault(){},stopPropagation(){}});
+  await renderView();
+  assert.equal(overlay.dataset.open,'false','Escape cancels pending opening as well as visible overlays');
+  pageLocation.pathname = '/'; pageLocation.search = ''; ui.refresh();
+  elements.find(element=>element.id==='ktv420-spotify-capture-button').onclick();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(overlay.dataset.open,'false','unsupported Spotify pages cannot open the overlay');
+  assert.equal(pageLocation.search,'');
+  pageLocation.pathname = '/playlist/1111111111111111111111'; ui.refresh();
+
+  rowsAvailable = false;
+  pageLocation.pathname = '/album/2222222222222222222222'; pageLocation.search = '?ktv420';
+  listeners.popstate(); await new Promise(resolve=>setImmediate(resolve));
+  await renderView();
+  assert.equal(overlay.dataset.open,'false','empty Spotify rows keep the requested overlay hidden');
+  rowsAvailable = true;
+  elements.find(element=>element.id==='ktv420-spotify-capture-button').onclick();
+  await new Promise(resolve=>setImmediate(resolve)); await renderView();
+  assert.equal(overlay.dataset.open,'true','tracks arriving later allow the overlay to open');
+  await listeners.message({...ready,data:{...ready.data,type:'close'}});
 
   for (const invalidate of [
     () => { frame.srcdoc = '<p>replaced frame</p>'; },

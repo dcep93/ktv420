@@ -20,7 +20,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
   const overlay = document.createElement('section');
   overlay.id = IFRAME_ID; overlay.setAttribute('aria-label', 'ktv420 Spotify overlay'); overlay.setAttribute('aria-hidden', 'true');
   let iframe; let tracks = []; let notice = ''; let error = ''; let starting = false; let route = ''; let refreshing = false;
-  let frameReady = false, lastTrackRefresh = 0;
+  let frameReady = false, lastTrackRefresh = 0, opening = false;
   let replay = null;
   let urlKey = null;
   let navigation = { revision: 0, open: false, trackIndex: null };
@@ -40,6 +40,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
   function readView() {
     const view = readOverlayUrl(location.href);
     if (view.key === urlKey) return;
+    if (route !== location.pathname) close(false);
     urlKey = view.key;
     navigation = { revision: navigation.revision + 1, open: view.open, trackIndex: view.trackIndex };
     if (view.open) void show(false).catch(reason => { error = reason?.message || String(reason); post(); });
@@ -96,7 +97,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
       registerCollection();
       error = '';
     } catch (reason) { error = reason?.message || String(reason); }
-    finally { refreshing = false; lastTrackRefresh = Date.now(); post(); }
+    finally { refreshing = false; lastTrackRefresh = Date.now(); prepareRequestedView(); post(); }
   }
   function prepare() {
     if (!chrome.runtime.id) return;
@@ -118,17 +119,37 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
       overlay.append(iframe);
     }
   }
+  function hasCurrentTracks() {
+    return isSupportedRoute() && route === location.pathname && tracks.length > 0;
+  }
+  function prepareRequestedView() {
+    if (!navigation.open || !hasCurrentTracks()) return;
+    prepare(); post();
+  }
   async function show(fromButton = true) {
+    if (!isSupportedRoute()) return;
     if (fromButton) { writeView(true); navigation = { ...navigation, revision: navigation.revision + 1 }; }
-    prepare();
-    const wasOpen = overlay.dataset.open === 'true';
-    overlay.dataset.open = 'true'; overlay.setAttribute('aria-hidden', 'false');
-    if (!wasOpen) {
+    await updateTracks();
+    prepareRequestedView();
+  }
+  async function reveal() {
+    if (opening || overlay.dataset.open === 'true' || !navigation.open || !hasCurrentTracks()) return;
+    opening = true;
+    const revision = navigation.revision, path = location.pathname;
+    try {
       const paused = navigation.trackIndex !== null;
       await onOpenChange?.(true, { paused });
       if (paused) await onTransport?.({ action: 'pause', bestEffort: true });
-    }
-    await updateTracks(); post();
+      // Back, Escape or Spotify navigation can cancel an opening during activation.
+      if (!navigation.open || navigation.revision !== revision || location.pathname !== path || !hasCurrentTracks()) {
+        await onOpenChange?.(false); return;
+      }
+      overlay.dataset.open = 'true'; overlay.setAttribute('aria-hidden', 'false');
+    } catch (reason) {
+      error = reason?.message || String(reason);
+      await onOpenChange?.(false);
+      button.title = error;
+    } finally { opening = false; }
   }
   function close(updateUrl = true) {
     if (updateUrl) writeView(false);
@@ -143,7 +164,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
     button.focus?.();
   }
   const keydown = event => {
-    if (event.key !== 'Escape' || overlay.dataset.open !== 'true') return;
+    if (event.key !== 'Escape' || (!navigation.open && overlay.dataset.open !== 'true')) return;
     event.preventDefault(); event.stopPropagation(); close();
   };
   button.onclick = () => { void show(); };
@@ -157,8 +178,9 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
     } else button.remove();
     if (document.body && !overlay.isConnected) document.body.append(overlay);
     button.dataset.active = String(isRunActive());
-    button.disabled = !isSupportedRoute() && !isRunActive() && !listening;
-    button.title = isRunActive() ? 'ktv420 capture active' : 'Open ktv420';
+    button.disabled = !isSupportedRoute();
+    button.setAttribute('aria-busy', String(navigation.open && overlay.dataset.open !== 'true'));
+    button.title = error || (isRunActive() ? 'ktv420 capture active' : navigation.open && overlay.dataset.open !== 'true' ? 'Waiting for Spotify and ktv420' : 'Open ktv420');
     if (iframe && overlay.dataset.open === 'true') prepare();
     if (collection && route === location.pathname && !collection.title) {
       const header = document.querySelector('[data-testid="entity-header"]');
@@ -167,11 +189,16 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
     }
     post();
     const missingTracks = !tracks.length || (navigation.trackIndex !== null && !tracks.some(track => track.rowIndex + 1 === navigation.trackIndex)) || replay?.tracks.some(item => !tracks.some(t => t.trackId === item.id));
-    if (iframe && !isRunActive() && (route !== location.pathname || (navigation.open && missingTracks && Date.now() - lastTrackRefresh > 3000))) void updateTracks();
+    if (navigation.open && !isRunActive() && (route !== location.pathname || (missingTracks && Date.now() - lastTrackRefresh > 1000))) void updateTracks();
+    prepareRequestedView();
   }
   const handleMessage = async event => {
     if (!hasBrokerDocument() || event.source !== iframe.contentWindow || event.origin !== origin || event.data?.source !== FRAME) return;
     if (hostedBridge && event.data.version !== 2) return;
+    if (event.data.type === 'view-ready') {
+      if (frameReady && event.data.revision === navigation.revision && event.data.spotifyPath === location.pathname.slice(1)) await reveal();
+      return;
+    }
     if (event.data.type === 'view') {
       const { trackIndex, revision, replace } = event.data;
       if (revision !== navigation.revision || !navigation.open ||

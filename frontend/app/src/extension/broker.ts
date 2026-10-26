@@ -88,6 +88,13 @@ export function createBrokerBridge(options: BridgeOptions) {
       options.parent.postMessage({ source: 'ktv420-overlay', version: LIBRARY_PROTOCOL_VERSION, type: 'ready' }, options.parentOrigin);
       if (state) options.player.postMessage(state, options.playerOrigin);
       if (replay) options.player.postMessage(replay,options.playerOrigin);
+    } else if (ready && data.type === 'view-ready') {
+      const navigation = parseOverlayNavigation(state?.navigation);
+      if (navigation?.open && state?.supported && Array.isArray(state.tracks) && state.tracks.length &&
+          data.spotifyPath === state.spotifyPath && data.revision === navigation.revision) {
+        options.parent.postMessage({ source: 'ktv420-overlay', version: LIBRARY_PROTOCOL_VERSION, type: 'view-ready',
+          spotifyPath: state.spotifyPath, revision: navigation.revision }, options.parentOrigin);
+      }
     } else if (ready && data.type === 'listening-heartbeat') {
       options.parent.postMessage({ source: 'ktv420-overlay', version: LIBRARY_PROTOCOL_VERSION, type: data.type }, options.parentOrigin);
     } else if (ready && data.type === 'view') {

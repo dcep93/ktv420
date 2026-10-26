@@ -157,3 +157,29 @@ test('URL view changes are sanitized, revisioned and restricted to the ready tru
   assert.deepEqual(received.at(-1)?.navigation,{revision:7,open:true,trackIndex:3});
   await bridge.dispose();
 });
+
+
+test('render readiness only relays for the current populated collection and navigation revision', async () => {
+  const sent: Record<string,unknown>[] = [];
+  const parent={postMessage:(v:Record<string,unknown>)=>sent.push(v)} as unknown as Window;
+  const player={postMessage(){}} as unknown as Window;
+  const bridge=createBrokerBridge({parent,player,parentOrigin:'https://open.spotify.com',playerOrigin:'https://ktv420.web.app',showError(){},
+    createSession:()=>({dispose:async()=>{},handle:async()=>({})}) as unknown as ReturnType<typeof createLibraryBrokerSession>});
+  const spotifyPath='album/1111111111111111111111';
+  const rendered={source:'ktv420-overlay',version:2,type:'view-ready',spotifyPath,revision:2};
+  const send=(data:unknown,source=player,origin='https://ktv420.web.app')=>bridge.receive({source,origin,data});
+  await send(rendered);assert.equal(sent.length,0);
+  await send({...rendered,type:'ready'});sent.length=0;
+  const state={source:'ktv420-parent',version:2,type:'state',active:false,starting:false,supported:true,spotifyPath,
+    navigation:{open:true,revision:2,trackIndex:null},tracks:[{trackId:'song',trackName:'Song',rowIndex:0}]};
+  await send({...state,tracks:[]},parent,'https://open.spotify.com');
+  await send(rendered);assert.equal(sent.length,0,'empty collection is not ready');
+  await send(state,parent,'https://open.spotify.com');
+  await send({...rendered,revision:1});await send({...rendered,spotifyPath:'album/2222222222222222222222'});
+  await send(rendered,parent);await send(rendered,player,'https://evil.example');
+  assert.equal(sent.length,0);
+  await send({...rendered,extra:'discard'});assert.deepEqual(sent,[rendered]);
+  await send({...state,navigation:{...state.navigation,open:false}},parent,'https://open.spotify.com');
+  await send(rendered);assert.equal(sent.length,1,'late readiness cannot reopen a closed view');
+  await bridge.dispose();
+});

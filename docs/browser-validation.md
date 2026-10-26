@@ -283,3 +283,20 @@ Automated regressions additionally reject nonzero or NaN tails, long tails
 without an ended event, missing/repeated PCM blocks, and unverified starts. The
 fix does not relax zero-position verification or pad missing audio. No deployment
 or extension installation was performed during this check.
+
+
+## Overlay readiness (2026-10-26)
+
+Extension 6.4.1 leaves Spotify visible until the requested album/playlist has
+tracks and the hosted React player acknowledges its committed state. The broker
+and content script validate the acknowledgment against the current path and
+navigation revision. Unsupported routes never open, and Escape or navigation
+cancels a pending opening. The empty "Open a Spotify playlist or album to get
+started" row has been removed.
+
+Content-script regressions cover deferred track loading, an empty collection,
+late-arriving rows, stale acknowledgments, invalid peers, Escape cancellation and
+unsupported routes. Broker tests verify that empty, closed or stale contexts
+cannot announce readiness. The real hosted-player navigation fixture with
+`?wait=1` kept the iframe hidden during delayed track loading and then displayed
+all four fixture rows after its render acknowledgment, without the old prompt.
