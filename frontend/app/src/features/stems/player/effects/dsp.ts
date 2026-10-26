@@ -1,9 +1,15 @@
 import { effectIds, type AudioEffectType } from './catalog';
 const TAU=Math.PI*2;
 const vowelBands=[[800,1150,2900],[400,1700,2600],[300,2200,3000],[500,800,2800],[350,650,2700]];
-const vowelQ=[5,7,9],phaseRatios=[.5,1,1.8,3],roomLeft=[1,1,-1,-1,1,-1,1,-1],roomRight=[1,-1,1,-1,-1,1,1,-1];
+const vowelQ=[5,7,9],phaseRatios=[.35,.65,1,1.7,2.8,4.5],roomLeft=[1,1,-1,-1,1,-1,1,-1],roomRight=[1,-1,1,-1,-1,1,1,-1];
 const bipolarEffects=new Set<AudioEffectType>(['wah','dj-filter','tone','tilt-eq','bass-boost','bright','band-emphasis','lofi']);
 const clamp=(x:number,a:number,b:number)=>Math.max(a,Math.min(b,x));
+// Smooth unit ceiling for active processed peaks; exact dry/bypass never pass through it.
+const ceiling=(x:number,dry:number)=>{
+  const a=Math.abs(x),knee=Math.max(.85,Math.min(1,Math.abs(dry))),room=1-knee;
+  if(a<=knee)return x;
+  return Math.sign(x)*(room<1e-9?1:knee+room*Math.tanh((a-knee)/room));
+};
 const flush=(x:number)=>Math.abs(x)<1e-20?0:x;
 
 /** Transposed direct-form II, with coefficients updated at control rate. */
@@ -55,8 +61,8 @@ export class StereoEffects {
   private damp=new Float64Array(8);
   private feedback=new Float64Array(8);
   private roomValues=new Float64Array(8);
-  private phaseState=new Float64Array(8);
-  private phaseA=new Float64Array(4);
+  private phaseState=new Float64Array(12);
+  private phaseA=new Float64Array(6);
   private repeatLow=new Float64Array(2);
   private previousInput=new Float64Array(2);
   private saturator=Array.from({length:2},()=>new Filter());
@@ -99,7 +105,8 @@ export class StereoEffects {
     for(let c=0;c<2;c++){
       const f=this.filters[c*3],g=this.filters[c*3+1];
       switch(kind){
-        case 'wah':case 'band-emphasis':f.set('bandpass',220*(3400/220)**v,2+amount*3,this.rate);break;
+        case 'wah':f.set('bandpass',220*(3400/220)**v,2.5+amount*2,this.rate);break;
+        case 'band-emphasis':f.set('bandpass',220*(3400/220)**v,2+amount*3,this.rate);break;
         case 'envelope-filter':f.set('bandpass',250+4300*Math.sqrt(clamp(this.envelope*3,0,1))*v,1.4+v*2.6,this.rate);break;
         case 'telephone':f.set('highpass',350,.707,this.rate);g.set('lowpass',3000,.707,this.rate);break;
         case 'dj-filter':f.set(v<.5?'lowpass':'highpass',v<.5?20000*(120/20000)**amount:25*(6000/25)**amount,.707,this.rate);break;
@@ -116,7 +123,7 @@ export class StereoEffects {
     }
     if(kind==='phaser'){
       const frequency=450*2**(Math.sin(TAU*.16*time)*(1+v));
-      for(let i=0;i<4;i++){const k=Math.tan(Math.PI*Math.min(this.rate*.4,frequency*phaseRatios[i])/this.rate);this.phaseA[i]=(k-1)/(k+1);}
+      for(let i=0;i<phaseRatios.length;i++){const k=Math.tan(Math.PI*Math.min(this.rate*.4,frequency*phaseRatios[i])/this.rate);this.phaseA[i]=(k-1)/(k+1);}
     }
     if(kind==='reverb')for(let i=0;i<8;i++)this.feedback[i]=10**(-3*(this.room[i].data.length-2)/this.rate/(.8+v*3.2));
   }
@@ -144,34 +151,39 @@ export class StereoEffects {
     }else for(let c=0;c<2;c++){
       const x=c?r:l,f=this.filters[c*3],g=this.filters[c*3+1];let y=x;
       switch(kind){
-        case 'wah':case 'band-emphasis':y=x*(1-.85*strength)+f.tick(x)*.85*strength;break;
+        case 'wah':{
+          // Resonance emphasizes the swept band instead of only removing other frequencies.
+          const engage=1-(1-strength)**2;
+          y=x*(1-.35*engage)+f.tick(x)*2*engage;break;
+        }
+        case 'band-emphasis':y=x*(1-.85*strength)+f.tick(x)*.85*strength;break;
         case 'telephone':y=x*(1-v)+g.tick(f.tick(x))*v;break;
         case 'dj-filter':case 'warm':case 'lofi':case 'submerge':y=x*(1-Math.min(1,strength*8))+f.tick(x)*Math.min(1,strength*8);break;
         case 'tone':case 'tilt-eq':y=g.tick(f.tick(x))*10**(-strength*2/20);break;
         case 'bass-boost':case 'bright':y=f.tick(x)*10**(-Math.max(0,v*2-1)*3/20);break;
-        case 'envelope-filter':y=x*(1-v*.85)+f.tick(x)*v*.85;break;
-        case 'formant-filter':{const wet=f.tick(x)*.85+g.tick(x)*.55+this.filters[c*3+2].tick(x)*.35,mix=Math.min(1,v/.15);y=x*(1-.95*mix)+wet*mix;break;}
+        case 'envelope-filter':{const engage=Math.sqrt(v);y=x*(1-engage*.55)+f.tick(x)*engage*2.1;break;}
+        case 'formant-filter':{const wet=f.tick(x)*.85+g.tick(x)*.55+this.filters[c*3+2].tick(x)*.35,mix=Math.min(1,v/.15);y=x*(1-.85*mix)+wet*mix*3;break;}
         case 'delay-pedal':{
           const targetDelay=clamp(60/clamp(control.bpm,40,240)*control.beats/clamp(control.tempo,.5,2),.02,6)*this.rate;
           if(c===0 && Math.abs(targetDelay-this.echoTarget)>.01){this.echoFrom=this.echoDelay || targetDelay;this.echoTarget=targetDelay;this.echoFade=0;}
           const d=this.delay[c],wet=d.read(this.echoFrom)*(1-this.echoFade)+d.read(this.echoTarget)*this.echoFade;
-          const feedback=.12+.58*v;
+          const feedback=.15+.45*v;
           this.repeatLow[c]+=this.repeatCoefficient*(wet-this.repeatLow[c]);d.write(x+this.repeatLow[c]*feedback);
-          // Normalize the repeat train as feedback rises, preserving headroom.
-          y=x*(1-.65*v)+wet*.65*v*(1-feedback);
+          // Keep the source present; feedback controls decay, not first-repeat loudness.
+          y=x*(1-.2*v)+wet*.75*v;
           if(c===1){this.echoFade=Math.min(1,this.echoFade+1/(this.rate*.04));this.echoDelay=this.echoFrom*(1-this.echoFade)+this.echoTarget*this.echoFade;}
           break;
         }
         case 'chorus':case 'flange':{
-          const chorus=kind==='chorus',depth=chorus?(.0003+v*.0028):(.0001+v*.0022);
-          const delay=(chorus?.019:.003)+Math.sin(TAU*(chorus?.32:.12)*time+(chorus?c*Math.PI/2:0))*depth;
-          const wet=this.delay[c].read(delay*this.rate);this.delay[c].write(x+wet*(chorus?.08:.35*v));
-          y=x*(1-v*.45)+wet*v*.45;break;
+          const chorus=kind==='chorus',depth=chorus?(.0005+v*.0055):(.0002+v*.005);
+          const delay=(chorus?.019:.0055)+Math.sin(TAU*(chorus?.32:.12)*time+(chorus?c*Math.PI/2:0))*depth;
+          const wet=this.delay[c].read(delay*this.rate);this.delay[c].write(x+wet*(chorus?.08:.55*v));
+          const mix=.5*Math.sqrt(v);y=x*(1-mix)+wet*mix;break;
         }
         case 'phaser':{
-          let wet=x+this.repeatLow[c]*.22*v;
-          for(let i=0;i<4;i++){const index=c*4+i,a=this.phaseA[i],next=a*wet+this.phaseState[index];this.phaseState[index]=flush(wet-a*next);wet=next;}
-          this.repeatLow[c]=wet;y=x*(1-.5*v)+wet*.5*v;break;
+          let wet=x+this.repeatLow[c]*.4*v;
+          for(let i=0;i<phaseRatios.length;i++){const index=c*phaseRatios.length+i,a=this.phaseA[i],next=a*wet+this.phaseState[index];this.phaseState[index]=flush(wet-a*next);wet=next;}
+          this.repeatLow[c]=wet;const mix=.5*Math.sqrt(v);y=x*(1-mix)+wet*mix;break;
         }
         case 'saturation':{
           const drive=1+v*7,normal=Math.tanh(drive*.25)/.25;
@@ -186,7 +198,7 @@ export class StereoEffects {
     const mix=this.gate*(1-this.bypass);
     // At neutral use the exact dry samples (filters still keep their state warm).
     if(strength<1e-7 || mix<1e-7){this.left=l;this.right=r;return;}
-    this.left=l+(outL-l)*mix;this.right=r+(outR-r)*mix;
+    this.left=l+(ceiling(outL,l)-l)*mix;this.right=r+(ceiling(outR,r)-r)*mix;
     if(!Number.isFinite(this.left)||!Number.isFinite(this.right)){this.reset();this.left=l;this.right=r;}
   }
 }

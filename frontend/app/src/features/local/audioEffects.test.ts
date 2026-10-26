@@ -19,11 +19,14 @@ test('every visible effect is exactly transparent at neutral and bypass',()=>{
   for(let i=0;i<300;i++){const l=Math.sin(i)*.2; bypass.tick(l,-l,c,i/rate);assert.equal(bypass.left,l);assert.equal(bypass.right,-l);}
  }
 });
-test('Wah resonant gain is bounded, including the former 24 dB surge',()=>{
- for(const amount of [.1,.25,.5,.75,.9]){
+test('Wah has a pronounced moving resonance without hollowing out the off-band body',()=>{
+ for(const amount of [0,.1,.25,.75,.9,1]){
   const frequency=220*(3400/220)**amount;
-  const {left}=render('wah',amount,1,frequency);
-  assert.ok(Math.max(...left.map(Math.abs))<.205);
+  const peak=rms(render('wah',amount,1,frequency).left,rate/2)/(.2/Math.SQRT2);
+  const off=rms(render('wah',amount,1,frequency/4).left,rate/2)/(.2/Math.SQRT2);
+  assert.ok(peak>2 && peak<2.8, `Wah ${amount}: resonant gain ${peak}`);
+  assert.ok(off>.6 && off<1.1, `Wah ${amount}: off-band gain ${off}`);
+  assert.ok(peak/off>2, 'sweeping should emphasize a band, not just turn the signal down');
  }
 });
 test('all effect IDs remain finite with controlled test-tone gain',()=>{
@@ -68,8 +71,47 @@ test('recordings accept legacy snapshots and validate optional effect settings',
  assert.equal(validEffectSettings({bypass:false,bpm:120,beats:3}),false);
 });
 
-test('maximum Echo feedback does not accumulate a coherent tone above input level',()=>{
+test('maximum Echo feedback remains bounded on a coherent full-level tone',()=>{
  const {left}=render('delay-pedal',1,3,100,.8);
  let peak=0;for(const x of left)peak=Math.max(peak,Math.abs(x));
- assert.ok(peak<=.81,`${peak}`);
+ assert.ok(peak<=1 && peak>.81,`${peak}`);
+});
+
+
+test('Echo keeps the dry attack and makes the first repeat audible at medium and full settings',()=>{
+ for(const amount of [.5,1]){
+  const dsp=new StereoEffects(rate),c=control('delay-pedal',amount),delay=rate/4;
+  let dry=0,repeat=0;
+  for(let i=0;i<=delay;i++){dsp.tick(i===0?.2:0,0,c,i/rate);if(i===0)dry=dsp.left;if(i===delay)repeat=dsp.left;}
+  assert.ok(dry>=.159,`source attack ${dry}`);
+  assert.ok(repeat/dry>=(amount===1?.9:.4),`first-repeat ratio ${repeat/dry}`);
+ }
+});
+
+test('production sample rates preserve character, stereo isolation, and active peak headroom',()=>{
+ for(const sampleRate of [44100,48000]) for(const effect of effectIds){
+  const dsp=new StereoEffects(sampleRate),c=control(effect,1);
+  for(let i=0;i<sampleRate/2;i++){
+   const x=.95*Math.sin(2*Math.PI*733*i/sampleRate);dsp.tick(x,0,c,i/sampleRate);
+   assert.ok(Number.isFinite(dsp.left)&&Math.abs(dsp.left)<=1.000001,`${effect} at ${sampleRate}`);
+   // Reverb deliberately diffuses between stereo channels; other effects cannot leak across them.
+   if(effect!=='reverb')assert.equal(dsp.right,0,`${effect} stereo isolation`);
+  }
+ }
+});
+
+test('Wah stays continuous through clean center even for near-full-scale audio',()=>{
+ const dsp=new StereoEffects(48000),c=control('wah',.5);let previous=.98,maxStep=0;
+ for(let i=0;i<4800;i++){
+  c.amount=.5+.01*Math.sin(i/4800*Math.PI*2);dsp.tick(.98,.98,c,i/48000);
+  maxStep=Math.max(maxStep,Math.abs(dsp.left-previous));previous=dsp.left;
+ }
+ assert.ok(maxStep<.001,`near-center step ${maxStep}`);
+});
+
+test('Vowels emphasize their vowel bands instead of reducing every band to a whisper',()=>{
+ for(const [value,frequency] of [[.2,800],[.4,400],[.6,300],[.8,500],[1,350]]){
+  const gain=rms(render('formant-filter',value,1,frequency,.1).left,rate/2)/(.1/Math.SQRT2);
+  assert.ok(gain>2 && gain<4,`vowel ${value}: gain ${gain}`);
+ }
 });
