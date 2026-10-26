@@ -321,3 +321,57 @@ test('a rejected native seek is nonfatal for custom audio, while strict seeks st
   assert.match(updates.at(-1).error,/did not apply the requested seek/);
   await controller.setEnabled(false);controller.dispose();
 });
+
+
+test('song identification warning waits for metadata to settle and clears on recovery', async t => {
+  let now = 10000, identified = false, playing = true, bridgeError = '';
+  const ticks = [], updates = [];
+  const id = '5EGTNEoUpibGgMWf6ECe0X';
+  t.mock.method(Date, 'now', () => now);
+  for (const [key, value] of Object.entries({
+    document: {
+      querySelector: selector => selector.includes('control-button-playpause')
+        ? { disabled: false, getAttribute: () => playing ? 'Pause' : 'Play' }
+        : selector.includes('now-playing-widget') ? { contains: () => true, querySelector: () => null } : null,
+      querySelectorAll: selector => selector.includes('input[type="range"]') ? []
+        : identified ? [{ getAttribute: () => `/track/${id}` }] : [],
+    },
+    location: { origin: 'https://open.spotify.com' },
+    chrome: { runtime: { async sendMessage() { return { ok: true, result: [] }; } } },
+    setInterval(callback) { ticks.push(callback); return 0; }, clearInterval() {},
+  })) {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, key);
+    Object.defineProperty(globalThis, key, { value, writable: true, configurable: true });
+    t.after(() => previous ? Object.defineProperty(globalThis, key, previous) : delete globalThis[key]);
+  }
+  const controller = createListeningController({
+    bridge: { async command(command) {
+      if (command === 'listening-state' && bridgeError) throw new Error(bridgeError);
+      return { media: null };
+    } }, emit: state => updates.push(state), ensurePlayer() {}, getRunner: () => null,
+  });
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  const tick = async ms => { now += ms; ticks[0](); await settle(); };
+  await controller.setEnabled(true); await settle();
+  assert.equal(updates.at(-1).error, '', 'initial missing metadata is not an error');
+  await tick(1800);
+  assert.equal(updates.at(-1).error, '');
+  identified = true; await tick(200);
+  assert.ok(updates.every(state => !state.error), 'normal startup never flashes a warning');
+  identified = false; await tick(200); await tick(2000);
+  assert.match(updates.at(-1).error, /Now Playing/, 'persistent identification failure remains actionable');
+  identified = true; await tick(200);
+  assert.equal(updates.at(-1).error, '', 'warning disappears immediately when metadata arrives');
+  identified = false; await tick(200); await tick(2000);
+  playing = false; await tick(200);
+  assert.equal(updates.at(-1).error, '', 'pausing clears the identification warning');
+  playing = true; await tick(200);
+  assert.equal(updates.at(-1).error, '', 'new playback gets its own grace period');
+  bridgeError = 'Connection lost'; await tick(200);
+  assert.equal(updates.at(-1).error, bridgeError, 'real errors appear immediately');
+  bridgeError = ''; await tick(2200);
+  assert.equal(updates.at(-1).error, 'Connection lost', 'identification hint cannot overwrite a real error');
+  await controller.setEnabled(false); await controller.setEnabled(true); await settle();
+  assert.equal(updates.at(-1).error, '', 'reopening resets identification timing');
+  await controller.setEnabled(false); controller.dispose();
+});

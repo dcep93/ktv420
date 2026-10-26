@@ -16,6 +16,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
   let batchPending = false, silentGeneration = -1, replayPreparation = false;
   let frameHeartbeat = 0, failedTrack = '', ignoreUntil = 0, commands = Promise.resolve();
   let lastVolumeDom = null;
+  let unidentifiedSince = null;
   let storageQueue = Promise.resolve();
   const storing = new Set();
   const policy = gain => bridge.command('listening-output', { gain: halted ? 0 : gain });
@@ -60,6 +61,10 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
     const observedVolumeEdit = volumeEdit;
     try {
       const dom = readTransportDom();
+      // Spotify renders its controls before its song metadata, including during
+      // track changes. Keep this transient state out of the error banner.
+      if (dom.playing && !dom.trackId) unidentifiedSince ??= Date.now();
+      else unidentifiedSince = null;
       if (!dom.trackId && dom.playing && dom.available) {
         const opener = document.querySelector('[data-testid="cover-art-button"][aria-label="Now playing view"]');
         if (opener && !document.querySelector('#Desktop_PanelContainer_Id a[href*="uri="]')) opener.click();
@@ -111,8 +116,8 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       const ready = catalog.get(dom.trackId) === 'ready' && failedTrack !== dom.trackId;
       if (ready && recording && !batch) await finish(false);
       if (changed) failedTrack = '';
-      if (dom.playing && !dom.trackId) error = 'Open Spotify’s Now Playing view to identify this song.';
-      else if (error === 'Open Spotify’s Now Playing view to identify this song.') error = '';
+      const identificationNotice = unidentifiedSince !== null && now - unidentifiedSince >= 2000
+        ? 'Open Spotify’s Now Playing view to identify this song.' : '';
       if (changed || batch || !ready || !owner || now - frameHeartbeat >= 2000) stemClock.reset();
       if (media && media.playbackRate !== 1) {
         error = 'Spotify must play at normal speed. Tempo belongs to the ktv420 player.';
@@ -159,7 +164,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       const partial = recording?.complete && !catalog.has(dom.trackId) && dom.duration > 0 ? Math.min(.99, dom.position / dom.duration) : 0;
       const overallCaptureFraction = recording && scope.length ? (captured + saving + partial) / scope.length : null;
       publish({ ...dom, overallCaptureFraction, generation, position: stemClock.active ? Math.min(dom.duration, stemClock.position) : local ? media.currentTime : dom.position, observedAt: Date.now(),
-        playing: playing && connected, local: owner && local, output, volume, error,
+        playing: playing && connected, local: owner && local, output, volume, error: error || identificationNotice,
         syncing: syncPending > 0 || now < syncSettlesAt,
         capability: 1, tempoSupported: true, playbackRate: stemClock.active ? stemClock.rate : 1, capturing: !!recording || !!batch,
         captureProgress: recording ? { trackId: recording.trackId, fraction: dom.duration > 0 ? Math.min(.99, dom.position / dom.duration) : null } : null,
@@ -183,6 +188,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
         try { if (!value) await finish(false); }
         finally { await bridge.command('listening-enable', { enabled: value }); }
         owner = false; lastLease = 0; last = null; lastSource = ''; error = '';
+        unidentifiedSince = null;
         lastVolumeDom = readTransportDom().volume;
         volume = replayPreparation ? 0 : lastVolumeDom ?? 0;
         volumeSettlesAt = 0; latestState = null;
