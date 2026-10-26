@@ -30,6 +30,7 @@ document.querySelector('#run')!.addEventListener('click',async()=>{
   await new Promise(resolve=>audio.addEventListener('canplaythrough',resolve,{once:true}));
   audio.currentTime=1;await new Promise(resolve=>audio.addEventListener('seeked',resolve,{once:true}));
   const bridge={command};
+  let playbackAttempts=0;
   const start=await startPreciseCapture({bridge,trackId:'test',readTransport:()=>({trackId:'test'}),transport:async c=>{
    if(c.action==='pause')audio.pause();
    if(c.action==='seek'){if(document.querySelector<HTMLInputElement>('#missed-seek-test')!.checked)return;audio.currentTime=0;await new Promise(resolve=>audio.addEventListener('seeked',resolve,{once:true}));}
@@ -39,6 +40,8 @@ document.querySelector('#run')!.addEventListener('click',async()=>{
      audio.currentTime=0;await settled;
     }
     await audio.play();
+    playbackAttempts++;
+    if(playbackAttempts===1&&document.querySelector<HTMLInputElement>('#delayed-zero-test')!.checked)setTimeout(()=>{audio.currentTime=0;},240);
    }
   }});
   if(document.querySelector<HTMLInputElement>('#busy-test')!.checked)setTimeout(()=>{const until=performance.now()+200;while(performance.now()<until){ /* simulate main-thread contention */ }},1800);
@@ -49,6 +52,6 @@ document.querySelector('#run')!.addEventListener('click',async()=>{
   const first=pcm.findIndex(value=>Math.abs(value)>.001);let last=pcm.length-1;while(last>=0&&Math.abs(pcm[last])<.001)last--;
   let maxError=0;for(let i=0;i<Math.min(reference.length,pcm.length/2);i++){maxError=Math.max(maxError,Math.abs(referenceLeft[i]-pcm[i*2]),Math.abs(referenceRight[i]-pcm[i*2+1]));}
   let audit;try{audit=captureTiming(capture,audio.duration);}catch(e){audit=String(e);}
-  result.textContent=JSON.stringify({start:start.target,rate:capture.sampleRate,frames:pcm.length/2,duration:pcm.length/2/capture.sampleRate,firstSignalFrame:first/2,lastSignalFrame:Math.floor(last/2),firstLeft:pcm[first],lastLeft:pcm[last-1],invalid:capture.invalid,invalidReason:capture.invalidReason,maxError,expectedFrames:reference.length,mediaDuration:audio.duration,referenceDuration:reference.duration,audit},null,2);
+  result.textContent=JSON.stringify({playbackAttempts,start:start.target,rate:capture.sampleRate,frames:pcm.length/2,duration:pcm.length/2/capture.sampleRate,firstSignalFrame:first/2,lastSignalFrame:Math.floor(last/2),firstLeft:pcm[first],lastLeft:pcm[last-1],invalid:capture.invalid,invalidReason:capture.invalidReason,maxError,expectedFrames:reference.length,mediaDuration:audio.duration,referenceDuration:reference.duration,audit},null,2);
  }catch(e){result.textContent=String(e);}
 });

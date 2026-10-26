@@ -6,13 +6,13 @@ function setup(overrides={}) {
  const media=()=>({source:'audio',currentTime:position,paused,seeking,readyState,playbackRate:1,duration:10});
  const options={trackId:'song',readTransport:()=>({trackId:id}),wait:async()=>{},
   transport:async command=>{calls.push(command.action);if(command.action==='pause')paused=true;if(command.action==='seek')position=0;if(command.action==='play')paused=false;},
-  bridge:{command:async(command,payload)=>{calls.push(command);if(command==='capture-prepare')return{target:media()};if(command==='listening-state')return{media:media()};if(command==='capture-begin'){assert.ok(paused&&position===0&&!seeking);assert.equal(payload.requireStart,true);return{startVerified:true,target:media()};}return{};}},...overrides};
+  bridge:{command:async(command,payload)=>{calls.push(command);if(command==='capture-prepare')return{target:media()};if(command==='listening-state')return{media:media()};if(command==='capture-state')return{...media(),invalid:false};if(command==='capture-begin'){assert.ok(paused&&position===0&&!seeking);assert.equal(payload.requireStart,true);return{startVerified:true,target:media()};}return{};}},...overrides};
  return {calls,options,setMedia:values=>{position=values.position??position;paused=values.paused??paused;seeking=values.seeking??seeking;readyState=values.readyState??readyState;id=values.id??id;}};
 }
 test('capture warms, seeks and verifies paused zero twice before arming then playing',async()=>{
  const h=setup();const result=await startPreciseCapture(h.options);
  assert.equal(result.target.currentTime,0);assert.equal(result.startVerified,true);
- assert.deepEqual(h.calls,['capture-abort','pause','capture-prepare','seek','listening-state','listening-state','capture-begin','play']);
+ assert.deepEqual(h.calls,['capture-abort','pause','capture-prepare','seek','listening-state','listening-state','capture-begin','play',...Array(21).fill('capture-state')]);
 });
 test('a rounded zero on Spotify UI cannot authorize a late or unresolved media start',async()=>{
  for(const condition of [{position:.25},{position:.001},{seeking:true},{readyState:1}]){
@@ -88,7 +88,7 @@ test('a UI seek that leaves actual audio at 2.824 seconds is corrected before ca
  assert.equal(result.target.currentTime,0);
  assert.equal(h.calls.filter(name=>name==='capture-rewind').length,1);
  assert.ok(h.calls.indexOf('capture-rewind')<h.calls.indexOf('capture-begin'));
- assert.equal(h.calls.at(-1),'play');
+ assert.equal(h.calls.at(-1),'capture-state');
 });
 
 test('failed UI acknowledgment can recover only through actual verified media zero', async () => {
@@ -112,4 +112,52 @@ test('a failed exact rewind stays bounded and reports actual blocking state', as
  assert.ok(!h.calls.includes('capture-begin'));assert.ok(!h.calls.includes('play'));
  const buffering=setup();buffering.setMedia({readyState:2});
  await assert.rejects(startPreciseCapture(buffering.options),/audio still buffering/);
+});
+
+test('a delayed startup reset discards the attempt and re-arms without another redundant UI seek', async () => {
+ const h=setup();const command=h.options.bridge.command;
+ let begins=0,polls=0;
+ h.options.bridge.command=async(name,payload)=>{
+  if(name==='capture-begin')begins++;
+  if(name==='capture-state'&&begins===1&&++polls===5){
+   h.setMedia({position:0});
+   return{source:'audio',invalid:true,invalidCode:'startup-zero-seek',invalidReason:'reset at 0.240s'};
+  }
+  return command(name,payload);
+ };
+ assert.equal((await startPreciseCapture(h.options)).startVerified,true);
+ assert.equal(begins,2);
+ assert.equal(h.calls.filter(name=>name==='capture-abort').length,2);
+ assert.equal(h.calls.filter(name=>name==='pause').length,2);
+ assert.equal(h.calls.filter(name=>name==='seek').length,1);
+ assert.equal(h.calls.filter(name=>name==='play').length,2);
+});
+
+test('repeated startup resets are bounded; unrelated failures never restart', async () => {
+ for(const failure of [
+  {source:'audio',invalidCode:'startup-zero-seek',expectedBegins:3},
+  {source:'different',invalidCode:'startup-zero-seek',expectedBegins:1},
+  {source:'audio',invalidCode:'seek',expectedBegins:1},
+  {source:'audio',invalidCode:'',expectedBegins:1},
+ ]){
+  const h=setup();const command=h.options.bridge.command;
+  h.options.bridge.command=async(name,payload)=>name==='capture-state'?{...failure,invalid:true,invalidReason:'test interruption'}:command(name,payload);
+  await assert.rejects(startPreciseCapture(h.options),/test interruption/);
+  assert.equal(h.calls.filter(name=>name==='capture-begin').length,failure.expectedBegins);
+  assert.equal(h.calls.at(-1),'capture-abort');
+ }
+});
+
+test('startup observation honors stop, track changes and very short natural completion', async () => {
+ for(const change of ['stop','track']){
+  const h=setup();let stopped=false;
+  h.options.checkCancelled=()=>{if(stopped)throw Error('stopped');};
+  h.options.wait=async()=>{if(h.calls.includes('play')){if(change==='stop')stopped=true;else h.setMedia({id:'different'});}};
+  await assert.rejects(startPreciseCapture(h.options),change==='stop'?/stopped/:/changed songs/);
+  assert.equal(h.calls.filter(name=>name==='play').length,1);
+  assert.equal(h.calls.at(-1),'capture-abort');
+ }
+ const h=setup();const command=h.options.bridge.command;
+ h.options.bridge.command=async(name,payload)=>name==='capture-state'?{ended:true,invalid:false}:command(name,payload);
+ assert.equal((await startPreciseCapture(h.options)).startVerified,true);
 });

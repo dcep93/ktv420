@@ -562,3 +562,28 @@ test('capture preparation pauses actual audio even when the UI pause has not rea
   assert.equal((await h.command('capture-rewind',{expectedSource:'song'})).ok,true);
   assert.equal(h.elements[0].currentTime,0);
 });
+
+test('only a first-failure same-source reset at startup is eligible for a fresh capture', async () => {
+ for(const scenario of [
+  {elapsed:.240,position:0,code:'startup-zero-seek'},
+  {elapsed:1.001,position:0,code:'seek'},
+  {elapsed:.240,position:.001,code:'seek'},
+  {elapsed:.240,position:0,source:'different',code:'seek'},
+  {elapsed:.240,position:0,priorFailure:true,code:''},
+ ]){
+  const h=harness([{src:'song',paused:true}]);const song=h.elements[0];
+  assert.equal((await h.command('capture-begin',{requireStart:true,expectedSource:'song'})).ok,true);
+  await song.play();
+  if(scenario.priorFailure){song.playbackRate=2;song.dispatch('ratechange');song.playbackRate=1;}
+  h.contexts[0].currentTime=scenario.elapsed;
+  song.currentTime=scenario.position;
+  if(scenario.source)song.src=scenario.source;
+  song.dispatch('seeking');
+  const state=(await h.command('capture-state')).result;
+  assert.equal(state.invalid,true);
+  assert.equal(state.invalidCode,scenario.code);
+  assert.match(state.invalidReason,scenario.priorFailure?/changed speed/:/changed position/);
+  const capture=(await h.command('capture-finish')).result;
+  assert.equal(capture.invalid,true,'a recoverable attempt itself must never become valid');
+ }
+});

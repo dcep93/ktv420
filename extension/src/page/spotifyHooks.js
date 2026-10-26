@@ -409,7 +409,8 @@
       state() {
         assertCapture(currentCapture);
         return { ...(currentCapture.endState || describeMediaElement(currentCapture.element)),
-          invalid: currentCapture.invalid, invalidReason: currentCapture.invalidReason || '' };
+          invalid: currentCapture.invalid, invalidReason: currentCapture.invalidReason || '',
+          invalidCode: currentCapture.invalidCode || '' };
       },
       async finish() {
         assertCapture(currentCapture);
@@ -455,7 +456,13 @@
         // audio: playback has never started. Recheck zero before first play.
         if (this.startVerified && !this.playbackStarted && element.paused &&
             element.currentTime === 0 && getMediaSource(element) === this.sourceAtStart) return;
-        this.invalidate(`Spotify changed position during recording (song position ${safeMediaTime(element).toFixed(3)}s; ${(this.context.currentTime - this.armedAt).toFixed(3)}s after capture began).`);
+        const elapsed = this.context.currentTime - this.armedAt;
+        const startupReset = this.startVerified && this.playbackStarted && elapsed >= 0 && elapsed <= 1 &&
+          element.currentTime === 0 && getMediaSource(element) === this.sourceAtStart;
+        // Still invalidate every sample in this attempt. The content script may
+        // discard it and re-arm; it must never accept a recording containing a seek.
+        this.invalidate(`Spotify changed position during recording (song position ${safeMediaTime(element).toFixed(3)}s; ${elapsed.toFixed(3)}s after capture began).`,
+          startupReset ? 'startup-zero-seek' : 'seek');
       };
       this.ended = false;
       this.endState = null;
@@ -518,9 +525,11 @@
       if (interval?.end === Infinity) interval.end = Math.round(this.context.currentTime * this.sampleRate);
     }
 
-    invalidate(reason) {
+    invalidate(reason, code = '') {
+      if (this.invalid) return;
       this.invalid = true;
-      this.invalidReason ||= reason;
+      this.invalidReason = reason;
+      this.invalidCode = code;
     }
 
     markAcceptedStart() {

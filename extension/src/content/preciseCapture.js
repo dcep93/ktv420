@@ -11,48 +11,67 @@ export async function startPreciseCapture({ bridge, trackId, checkCancelled = ()
     if (readTransport().trackId !== trackId) throw new Error('Spotify changed songs while preparing capture. Retry this song.');
   };
   try {
-    check();
-    await bridge.command('capture-abort');
-    await transport({ action: 'pause' }); check();
-    // Load/resume the audio graph before seeking and before any wanted audio plays.
-    const prepared = await bridge.command('capture-prepare', { timeoutMs: 3000 }, 4000); check();
-    let seekError = '';
-    try { await transport({ action: 'seek', trackId, position: 0 }); }
-    catch (reason) { seekError = reason?.message || String(reason); }
-    check();
-    let settled = 0, corrected = false, lastMedia = null;
-    // Allow buffering to finish without relaxing the verified-zero requirement.
-    for (let attempt = 0; attempt < 200; attempt++) {
+    attempts: for (let restart = 0; restart <= 2; restart++) {
       check();
-      const { media } = await bridge.command('listening-state');
-      lastMedia = media;
-      if (!corrected && attempt >= 10 && media?.source === prepared.target.source && media.paused &&
-          !media.seeking && Number.isFinite(media.currentTime) && media.currentTime !== 0) {
-        check();
-        await bridge.command('capture-rewind', { expectedSource: prepared.target.source });
-        corrected = true; settled = 0;
-        await wait(50); continue;
+      await bridge.command('capture-abort');
+      await transport({ action: 'pause' }); check();
+      // Load/resume the audio graph before seeking and before any wanted audio plays.
+      const prepared = await bridge.command('capture-prepare', { timeoutMs: 3000 }, 4000); check();
+      let seekError = '';
+      // Do not queue another Spotify seek if the actual media is already at zero.
+      if (prepared.target.currentTime !== 0) {
+        try { await transport({ action: 'seek', trackId, position: 0 }); }
+        catch (reason) { seekError = reason?.message || String(reason); }
       }
-      if (media?.source === prepared.target.source && media.paused && !media.seeking &&
-          media.readyState >= 3 && Number.isFinite(media.currentTime) && media.currentTime === 0 && media.playbackRate === 1) settled++;
-      else settled = 0;
-      if (settled >= 2) {
-        const result = await bridge.command('capture-begin', { requireStart: true, expectedSource: prepared.target.source });
+      check();
+      let settled = 0, corrected = false, lastMedia = null;
+      // Allow buffering to finish without relaxing the verified-zero requirement.
+      for (let attempt = 0; attempt < 200; attempt++) {
         check();
-        if (!result.startVerified) throw new Error('Update and reload the ktv420 extension before capturing.');
-        await transport({ action: 'play' }); check();
-        return result;
+        const { media } = await bridge.command('listening-state');
+        lastMedia = media;
+        if (!corrected && attempt >= 10 && media?.source === prepared.target.source && media.paused &&
+            !media.seeking && Number.isFinite(media.currentTime) && media.currentTime !== 0) {
+          check();
+          await bridge.command('capture-rewind', { expectedSource: prepared.target.source });
+          corrected = true; settled = 0;
+          await wait(50); continue;
+        }
+        if (media?.source === prepared.target.source && media.paused && !media.seeking &&
+            media.readyState >= 3 && Number.isFinite(media.currentTime) && media.currentTime === 0 && media.playbackRate === 1) settled++;
+        else settled = 0;
+        if (settled >= 2) {
+          const result = await bridge.command('capture-begin', { requireStart: true, expectedSource: prepared.target.source });
+          check();
+          if (!result.startVerified) throw new Error('Update and reload the ktv420 extension before capturing.');
+          await transport({ action: 'play' }); check();
+          // Spotify can apply a queued reset shortly after play. Observe startup
+          // before handing capture to the normal song-boundary monitor.
+          for (let sample = 0; sample <= 20; sample++) {
+            check();
+            const state = await bridge.command('capture-state');
+            check();
+            if (state.invalid) {
+              if (state.invalidCode === 'startup-zero-seek' && restart < 2 &&
+                  state.source === prepared.target.source) continue attempts;
+              throw new Error(`Capture timing could not be verified: ${state.invalidReason || 'Audio was interrupted during startup.'} Nothing was saved.`);
+            }
+            if (state.ended) return result;
+            if (sample < 20) await wait(50);
+          }
+          return result;
+        }
+        await wait(50);
       }
-      await wait(50);
+      const blockers = !lastMedia ? ['current audio unavailable'] : [
+        lastMedia.source !== prepared.target.source && 'audio source changed',
+        !lastMedia.paused && 'audio still playing', lastMedia.seeking && 'seek still pending',
+        lastMedia.readyState < 3 && 'audio still buffering',
+        lastMedia.currentTime !== 0 && `audio position ${Number(lastMedia.currentTime).toFixed(3)}s`,
+        lastMedia.playbackRate !== 1 && 'audio speed is not 1×',
+      ].filter(Boolean);
+      throw new Error(`Spotify did not settle at the beginning: ${blockers.join(', ') || seekError || 'start did not stay stable'}. Nothing was saved.`);
     }
-    const blockers = !lastMedia ? ['current audio unavailable'] : [
-      lastMedia.source !== prepared.target.source && 'audio source changed',
-      !lastMedia.paused && 'audio still playing', lastMedia.seeking && 'seek still pending',
-      lastMedia.readyState < 3 && 'audio still buffering',
-      lastMedia.currentTime !== 0 && `audio position ${Number(lastMedia.currentTime).toFixed(3)}s`,
-      lastMedia.playbackRate !== 1 && 'audio speed is not 1×',
-    ].filter(Boolean);
-    throw new Error(`Spotify did not settle at the beginning: ${blockers.join(', ') || seekError || 'start did not stay stable'}. Nothing was saved.`);
   } catch (error) {
     await bridge.command('capture-abort').catch(() => {});
     throw error;
