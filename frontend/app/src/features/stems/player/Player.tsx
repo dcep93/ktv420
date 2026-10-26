@@ -1792,7 +1792,7 @@ export default function Player({
             ))}
           </div>
           {isCombinedVisualizer(visualizerType) && <CombinedVisualizerPanel type={visualizerType} canvasRef={combinedCanvas}
-            expanded={combinedVisualizerExpanded} onExpandedChange={onCombinedVisualizerExpandedChange} ready={areTracksReady} />}
+            expanded={combinedVisualizerExpanded} onExpandedChange={onCombinedVisualizerExpandedChange} />}
           <VisualizerPicker value={visualizerType} onChange={selectVisualizerType} hidden={!shouldShowVisualizerPicker} />
         </>
       ) : null}

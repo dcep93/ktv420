@@ -7,6 +7,7 @@ import { useReplay } from '../features/local/useReplay';
 import { captureStartSeconds } from '../features/local/listeningProtocol';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Player from '../features/stems/player/Player';
+import PlayerViewport from './PlayerViewport';
 import OverlayIcon from './OverlayIcon';
 import type { PlaybackRecord, RecordingEvent, RecordingStartRequest } from '../features/stems/player/types';
 import { deleteTrack, getPlaybackRecord, listTracks, getProcessingEnabled, setProcessingEnabled as saveProcessingEnabled, withProcessingLock, type LocalTrack } from '../features/local/libraryClient';
@@ -298,7 +299,7 @@ export default function LibraryPage() {
       mix.current.events.push({type:'pause',at:recordingClock.current.seconds,trackId:previous.trackId,position:mixer.current.position()+captureOffset});
     }
     loadedRevision.current = ''; setRecord(null); setSelected(desired); setAutoPlay(true);
-    viewScroll.current.player = 0; setViewMode('player');
+    setViewMode('player');
   }, [listening, tracks, selected, recording, replay.active, spotify.replay, captureOffset]);
   const onPlayerCommand = useCallback((command: { action: 'play' | 'pause' | 'seek' | 'rate'; position?: number; rate?: number }) => {
     if (command.action === 'seek') mirrorTransport({ action: 'seek', position: (command.position || 0) + captureOffset, trackId: selected.replace(/^spotify-/, '') });
@@ -463,7 +464,8 @@ export default function LibraryPage() {
         </button></li>;
       })}
     </ol>}
-    {activeTrack && record && record.md5 === selected && <section className="iframe-player-view" hidden={viewMode !== 'player'} aria-label="Player">
+    <PlayerViewport contentKey={activeTrack && record && record.md5 === selected ? record.md5 : null} hidden={viewMode !== 'player'}>
+    {activeTrack && record && record.md5 === selected && <>
       <button className="iframe-player-back" aria-label="Back to tracks" onClick={() => setViewMode('tracks')}><OverlayIcon name="back" /></button>
       <div className={replay.active ? "replay-mixer" : undefined} inert={!!spotify.replay || mp3Export.busy}><Player key={record.md5} record={record} title={activeTrack.title} replaying={replay.active || mp3Export.busy} onControls={onControls}
         combinedVisualizerExpanded={combinedVisualizerExpanded} onCombinedVisualizerExpandedChange={setCombinedVisualizerExpanded}
@@ -478,7 +480,8 @@ export default function LibraryPage() {
         onStartRecording={startRecording} onStopRecording={stopRecording} onRecordingEvent={recordEvent} onRegisterRecordingFlush={callback => { flush.current = callback; }} /></div>
       <details className="iframe-player-exports"><summary>Export audio</summary>{record.files.map(file => <button key={file.path}
         onClick={() => downloadBlob(file.blob, `${activeTrack.title}-${file.name}`)}>{file.name.replace(/\.(wav|mp3)$/i, '')}</button>)}</details>
-    </section>}
+    </>}
+    </PlayerViewport>
     </div>
   </main>;
 }
