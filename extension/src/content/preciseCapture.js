@@ -44,12 +44,18 @@ export function captureTiming(capture, duration) {
   const frames = capture.byteLength / (capture.channelCount * 4);
   const seconds = frames / capture.sampleRate;
   const difference = seconds - duration;
-  if (capture.invalid || !capture.startVerified || !Number.isFinite(capture.startMediaTime) ||
-      capture.startMediaTime !== 0 || !Number.isInteger(frames) ||
-      !Number.isFinite(duration) || duration <= 0 || !Number.isFinite(seconds) || seconds <= 0 ||
-      frames !== Math.round(duration * capture.sampleRate)) {
-    throw new Error('Capture timing could not be verified. Nothing was saved; capture this song again from the beginning.');
+  let reason = '';
+  if (!capture.startVerified || !Number.isFinite(capture.startMediaTime) || capture.startMediaTime !== 0) {
+    reason = 'The start of the song was not verified.';
+  } else if (capture.invalid) {
+    reason = capture.invalidReason || 'The audio changed or its timing was interrupted during recording.';
+  } else if (![1, 2].includes(capture.channelCount) || !Number.isFinite(capture.sampleRate) || capture.sampleRate <= 0 ||
+      !Number.isSafeInteger(frames) || !Number.isFinite(duration) || duration <= 0 || !Number.isFinite(seconds) || seconds <= 0) {
+    reason = 'The recorded audio or song duration is invalid.';
+  } else if (frames !== Math.round(duration * capture.sampleRate)) {
+    reason = `Recording is ${Math.abs(difference).toFixed(3)} seconds ${difference < 0 ? 'short' : 'long'}.`;
   }
+  if (reason) throw new Error(`Capture timing could not be verified: ${reason} Nothing was saved.`);
   return { captureTimingVersion: CAPTURE_TIMING_VERSION, captureStartVerified: true,
     capturedFrames: frames, rawCapturedFrames: capture.rawCapturedFrames ?? frames, expectedDurationSeconds: duration, captureDurationErrorSeconds: difference };
 }

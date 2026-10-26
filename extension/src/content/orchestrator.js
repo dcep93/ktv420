@@ -559,7 +559,8 @@ export class CaptureOrchestrator extends EventTarget {
       startMediaTime: capture.startMediaTime,
       startVerified: capture.startVerified,
       rawCapturedFrames: capture.rawCapturedFrames,
-      invalid: capture.invalid
+      invalid: capture.invalid,
+      invalidReason: capture.invalidReason
     };
   }
 

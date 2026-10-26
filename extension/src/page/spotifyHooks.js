@@ -429,7 +429,7 @@
       this.duration = element.duration;
       this.invalid = false;
       this.intervals = [];
-      this.onSeek = () => { if (this.capturing && !this.ended) this.invalid = true; };
+      this.onSeek = () => { if (this.capturing && !this.ended) this.invalidate('Spotify changed position during recording.'); };
       this.ended = false;
       this.endState = null;
       this.onEnded = () => {
@@ -440,7 +440,7 @@
         this.pauseAt();
         this.ended = true;
       };
-      this.onRate = () => { if (this.capturing && !this.ended && element.playbackRate !== 1) this.invalid = true; };
+      this.onRate = () => { if (this.capturing && !this.ended && element.playbackRate !== 1) this.invalidate('Spotify changed speed during recording.'); };
       element.addEventListener('ratechange', this.onRate);
       element.addEventListener('seeking', this.onSeek);
       element.addEventListener('ended', this.onEnded);
@@ -477,9 +477,14 @@
       if (interval?.end === Infinity) interval.end = Math.round(this.context.currentTime * this.sampleRate);
     }
 
+    invalidate(reason) {
+      this.invalid = true;
+      this.invalidReason ||= reason;
+    }
+
     markAcceptedStart() {
       // Track metadata arriving late must never throw away already-recorded audio.
-      if (this.element.playbackRate !== 1) this.invalid = true;
+      if (this.element.playbackRate !== 1) this.invalidate('Spotify changed speed during recording.');
     }
 
     abort() {
@@ -502,12 +507,21 @@
       this.element.removeEventListener('ended', this.onEnded);
       const rawCapturedFrames = this.byteLength / (this.channelCount * 4);
       const expectedFrames = Math.round(this.duration * this.sampleRate);
-      // Worklet blocks can contain padding after the media ends. Trim only the
-      // known tail boundary, never silence at the opening. Never pad missing PCM.
+      // The ended event runs on the main thread: a busy tab can keep receiving
+      // silent worklet blocks long after the last sample. Length alone cannot
+      // distinguish that harmless tail from extra/misaligned music. Check every
+      // extra sample, and require an actual ended event for more than 50 ms.
+      // Never remove opening silence or manufacture missing frames.
       if (this.startVerified) {
         const excess = rawCapturedFrames - expectedFrames;
-        if (!Number.isInteger(expectedFrames) || expectedFrames <= 0 || excess < 0 || excess > this.sampleRate * .05) this.invalid = true;
-        else this.byteLength = expectedFrames * this.channelCount * 4;
+        if (!Number.isSafeInteger(expectedFrames) || expectedFrames <= 0) {
+          this.invalidate('Spotify did not provide a valid song duration.');
+        } else if (excess < 0) {
+          this.invalidate(`Recording is ${(-excess / this.sampleRate).toFixed(3)} seconds short.`);
+        } else if (excess > 0 && (!this.tailIsSilent(expectedFrames) ||
+            (excess > this.sampleRate * .05 && !this.ended))) {
+          this.invalidate(`Recording has ${(excess / this.sampleRate).toFixed(3)} seconds of unverified extra audio.`);
+        } else this.byteLength = expectedFrames * this.channelCount * 4;
       }
       const bytes = new Uint8Array(this.byteLength);
       let offset = 0;
@@ -527,17 +541,32 @@
         startMediaTime: this.startMediaTime,
         startVerified: this.startVerified,
         rawCapturedFrames,
-        invalid: this.invalid
+        invalid: this.invalid,
+        invalidReason: this.invalidReason || ''
       };
     }
 
+    tailIsSilent(expectedFrames) {
+      let skip = expectedFrames * this.channelCount * 4;
+      for (const chunk of this.chunks) {
+        if (skip >= chunk.byteLength) { skip -= chunk.byteLength; continue; }
+        const view = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+        // Exact digital silence only: do not erase quiet music or NaNs.
+        for (let offset = skip; offset < chunk.byteLength; offset += 4) {
+          if (view.getFloat32(offset, true) !== 0) return false;
+        }
+        skip = 0;
+      }
+      return true;
+    }
+
     handleAudioChunk(message) {
-      if (this.capturing && !this.ended && this.element.playbackRate !== 1) this.invalid = true;
+      if (this.capturing && !this.ended && this.element.playbackRate !== 1) this.invalidate('Spotify changed speed during recording.');
       if (!this.capturing || this.invalid) return;
-      if (!Number.isSafeInteger(message.frame)) { this.invalid = true; return; }
+      if (!Number.isSafeInteger(message.frame) || message.frame < 0) { this.invalidate('The audio clock was unavailable.'); return; }
       const bytes = new Uint8Array(message.bytesBuffer || new ArrayBuffer(0));
       const channels = Number(message.channelCount), stride = channels * 4;
-      if (![1,2].includes(channels) || bytes.byteLength % stride) { this.invalid = true; return; }
+      if (![1,2].includes(channels) || bytes.byteLength % stride || (this.byteLength && channels !== this.channelCount)) { this.invalidate('The audio format changed during recording.'); return; }
       this.channelCount = channels;
       const end = message.frame + bytes.length / stride;
       // Message delivery can lag behind pause/resume/ended. Use the audio clock
@@ -545,8 +574,12 @@
       for (const interval of this.intervals) {
         const from = Math.max(message.frame, interval.start), to = Math.min(end, interval.end);
         if (to <= from) continue;
+        if (interval.lastFrame !== undefined && from !== interval.lastFrame) {
+          this.invalidate('Audio samples were missed or repeated during recording.'); return;
+        }
+        interval.lastFrame = to;
         const part = bytes.subarray((from-message.frame)*stride,(to-message.frame)*stride);
-        if (this.byteLength + part.byteLength > 1024*1024*1024) { this.invalid = true; return; }
+        if (this.byteLength + part.byteLength > 1024*1024*1024) { this.invalidate('Recording exceeded the local size limit.'); return; }
         this.chunks.push(part); this.byteLength += part.byteLength;
       }
       while (this.intervals.length && this.intervals[0].end <= end) this.intervals.shift();

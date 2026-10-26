@@ -334,3 +334,47 @@ test('playlist pagination retains absolute indices, unavailable gaps and repeate
   assert.deepEqual(Array.from(result.result.tracks,t=>[t.trackId,t.rowIndex]),[[id,0],[id,2],[other,3]]);
   assert.deepEqual(offsets,[0,0,2]);
 });
+
+
+test('delayed ended event trims only proven digital silence and preserves the complete opening', async () => {
+  const h=harness([{src:'song',paused:true,duration:4/44100}]);
+  await h.command('capture-begin',{requireStart:true,expectedSource:'song'});
+  await h.elements[0].play();
+  // Deliberate opening silence is part of the song, followed by its final samples.
+  const signal=new Float32Array([0,0,0,0,.5,-.5,.25,-.25]);
+  h.ports[0].onmessage({data:{frame:0,channelCount:2,bytesBuffer:signal.buffer}});
+  const silentFrames=44100/2;
+  h.contexts[0].currentTime=(4+silentFrames)/44100;
+  h.elements[0].ended=true;h.elements[0].dispatch('ended');
+  // Delivered after ended, but produced before the delayed event.
+  h.ports[0].onmessage({data:{frame:4,channelCount:2,bytesBuffer:new Float32Array(silentFrames*2).buffer}});
+  const result=(await h.command('capture-finish')).result;
+  assert.equal(result.invalid,false);assert.equal(result.rawCapturedFrames,4+silentFrames);
+  assert.deepEqual([...new Float32Array(result.bytesBuffer)],[...signal]);
+});
+
+test('extra quiet music, invalid samples, or an unconfirmed long tail cannot be silently trimmed', async () => {
+  for (const {tail,ended} of [{tail:1e-20,ended:true},{tail:NaN,ended:true},{tail:0,ended:false}]) {
+    const h=harness([{src:'song',paused:true,duration:4/44100}]);
+    await h.command('capture-begin',{requireStart:true,expectedSource:'song'});
+    await h.elements[0].play();
+    const pcm=new Float32Array(10000);pcm[8]=tail;
+    h.contexts[0].currentTime=5000/44100;
+    if(ended){h.elements[0].ended=true;h.elements[0].dispatch('ended');}
+    h.ports[0].onmessage({data:{frame:0,channelCount:2,bytesBuffer:pcm.buffer}});
+    const result=(await h.command('capture-finish')).result;
+    assert.equal(result.invalid,true);assert.match(result.invalidReason,/unverified extra audio/);
+  }
+});
+
+test('missing or repeated worklet blocks cannot be compensated by silent end padding', async () => {
+  for (const frame of [0,2]) {
+    const h=harness([{src:'song',paused:true,duration:4/44100}]);
+    await h.command('capture-begin',{requireStart:true,expectedSource:'song'});
+    await h.elements[0].play();
+    const block=frame=>h.ports[0].onmessage({data:{frame,channelCount:2,bytesBuffer:new Float32Array(2).buffer}});
+    block(0);block(frame);
+    const result=(await h.command('capture-finish')).result;
+    assert.equal(result.invalid,true);assert.match(result.invalidReason,/missed or repeated/);
+  }
+});

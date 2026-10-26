@@ -262,3 +262,24 @@ Ribbon motion bounds and Highway palette continuity. All 153 tests pass.
 Extension 6.4.0 adds one-based `ktv420` URL navigation and an extension-local saved-collection registry. A local browser fixture exercised the real broker, LibraryPage and Player with synthetic silent audio: initial `?ktv420=2` and playlist clicks stayed paused at zero despite stale playing snapshots; Next started playback and updated the index; song endings advanced automatically; missing captures remained in the collection view; Back restored the previous song paused. Repeated adjacent songs retained distinct indices and restarted correctly. The Saved page rendered the persisted registry and links ending in `?ktv420`.
 
 214 tests passed (50 extension/build-script, 164 TypeScript), plus lint and hosted/extension builds. Regression coverage includes initial automatic opening, close/Back URL state, stale navigation revisions, preserved Spotify history state/query/hash, absolute pagination indices with unavailable entries and duplicates, capture queue deduplication, paused listening activation, registry persistence/readiness/deletion, capture-context registration, and external-message origin/frame/operation isolation. No Chrome API permissions were added. Fixtures use localhost IndexedDB and simulated Spotify transport; live Spotify with the new extension/hosted combination has not been tested. The candidate is staged only; no push, deployment or installed-broker replacement.
+
+
+## Capture timing regression (2026-10-26)
+
+The real-browser `capture-precision-preview.html` fixture reproduced the generic
+"Capture timing could not be verified" failure by blocking the main thread for
+350 ms near the end of a 3.137-second, 48 kHz test signal. The original collector
+received 163,072 frames instead of 150,576 and rejected the recording, even though
+all expected samples matched exactly and every extra sample was zero.
+
+After the fix, the same case returns exactly 150,576 frames with maximum sample
+error 0. The first signal remains at frame 1,024 (intentional opening silence),
+and the final signal remains at frame 150,575. Pause/resume plus delayed message
+and end-event handling also passes with maximum sample error 0. This exercises
+real browser media playback and the shipped capture hook; it does not establish
+that every Spotify stream behaves identically.
+
+Automated regressions additionally reject nonzero or NaN tails, long tails
+without an ended event, missing/repeated PCM blocks, and unverified starts. The
+fix does not relax zero-position verification or pad missing audio. No deployment
+or extension installation was performed during this check.

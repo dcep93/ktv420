@@ -34,3 +34,11 @@ test('capture audit rejects legacy/unverified starts, missing heads, tails and m
  assert.equal(captureTiming(capture,10).captureDurationErrorSeconds,0);
  for(const change of [{startVerified:false},{startMediaTime:.1},{startMediaTime:NaN},{invalid:true},{byteLength:capture.byteLength-48000*8*.1},{byteLength:capture.byteLength+48000*8*.1},{byteLength:17}])assert.throws(()=>captureTiming({...capture,...change},10),/timing could not/);
 });
+
+test('capture errors distinguish unverified starts, interrupted audio and incorrect duration',()=>{
+ const capture={startVerified:true,startMediaTime:0,sampleRate:48000,channelCount:2,byteLength:48000*10*8};
+ assert.throws(()=>captureTiming({...capture,startVerified:false},10),/start of the song/);
+ assert.throws(()=>captureTiming({...capture,invalid:true,invalidReason:'Spotify changed position during recording.'},10),/changed position/);
+ assert.throws(()=>captureTiming({...capture,byteLength:48000*9*8},10),/1.000 seconds short/);
+ assert.throws(()=>captureTiming({...capture,byteLength:48000*11*8},10),/1.000 seconds long/);
+});
