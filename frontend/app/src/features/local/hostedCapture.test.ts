@@ -22,3 +22,15 @@ test('concurrent runs cannot capture twice',async()=>{
   assert.equal(await q.run(['b'],()=>new Set(),async()=>{throw Error('must not run');},()=>{}),false);
   resolve();assert.equal(await p,true);
 });
+
+test('album capture includes rows that arrive after the run starts', async () => {
+  const queue = new HostedCaptureQueue(), captured:string[] = [];
+  let rows = ['a', 'b'];
+  await queue.run(() => rows, () => new Set(), async id => {
+    captured.push(id);
+    if (id === 'b') rows = ['a', 'b', 'c', 'd'];
+  }, () => {});
+  assert.deepEqual(captured, ['a', 'b', 'c', 'd']);
+  assert.equal(queue.total, 4);
+  assert.equal(queue.completed, 4);
+});

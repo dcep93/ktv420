@@ -4,16 +4,21 @@ export class HostedCaptureQueue {
   active = false;
   total = 0;
   completed = 0;
-  async run(ids: string[], saved: () => Set<string>, capture: (id:string) => Promise<void>, changed: () => void) {
+  async run(ids: string[] | (() => string[]), saved: () => Set<string>, capture: (id:string) => Promise<void>, changed: () => void) {
     if (this.active) return false;
     const generation = ++this.generation;
-    this.total = new Set(ids).size; this.completed = 0;
+    const readIds = () => [...new Set(typeof ids === 'function' ? ids() : ids)];
+    const finished = new Set<string>();
+    this.total = readIds().length; this.completed = 0;
     this.active = true; changed();
     try {
-      for (const id of new Set(ids)) {
-        if (generation !== this.generation) return false;
+      while (generation === this.generation) {
+        const current = readIds();
+        this.total = new Set([...finished, ...current]).size;
+        const id = current.find(candidate => !finished.has(candidate));
+        if (id === undefined) break;
         if (!saved().has(id)) await capture(id);
-        if (generation === this.generation) { this.completed++; changed(); }
+        if (generation === this.generation) { finished.add(id); this.completed = finished.size; changed(); }
       }
       return generation === this.generation;
     } finally { if (generation === this.generation) { this.active = false; changed(); } }

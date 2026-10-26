@@ -20,6 +20,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
   const overlay = document.createElement('section');
   overlay.id = IFRAME_ID; overlay.setAttribute('aria-label', 'ktv420 Spotify overlay'); overlay.setAttribute('aria-hidden', 'true');
   let iframe; let tracks = []; let notice = ''; let error = ''; let starting = false; let route = ''; let refreshing = false;
+  let usingDomTracks = false;
   let frameReady = false, lastTrackRefresh = 0, opening = false;
   let replay = null; let captureRequest = null;
   let urlKey = null;
@@ -87,7 +88,10 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
       const path = location.pathname;
       const found = await loadSpotifyTracks();
       if (path !== location.pathname) return;
-      tracks = found.length ? found : collectTrackRows();
+      const retainRows = usingDomTracks && route === path;
+      usingDomTracks = !found.length;
+      tracks = found.length ? found : retainRows ? tracks : [];
+      if (usingDomTracks) mergeDomRows();
       route = location.pathname;
       const header = document.querySelector('[data-testid="entity-header"]');
       const title = header?.querySelector?.('h1')?.textContent?.trim();
@@ -98,6 +102,26 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
       error = '';
     } catch (reason) { error = reason?.message || String(reason); }
     finally { refreshing = false; lastTrackRefresh = Date.now(); prepareRequestedView(); post(); }
+  }
+  function mergeDomRows() {
+    // Spotify hydrates albums in batches and may unmount off-screen rows.
+    // Retain known positions, then replace only the rows currently observed.
+    const rows = new Map(tracks.map(track => [track.rowIndex, track]));
+    for (const track of collectTrackRows()) rows.set(track.rowIndex, track);
+    const merged = [...rows.values()].sort((a, b) => a.rowIndex - b.rowIndex);
+    const fields = ['trackId', 'trackName', 'trackArtist', 'trackArtworkSrc', 'rowIndex'];
+    const changed = merged.length !== tracks.length || merged.some((track, index) =>
+      fields.some(field => track[field] !== tracks[index]?.[field]));
+    tracks = merged;
+    return changed;
+  }
+  function refreshDomTracks() {
+    if (!usingDomTracks || route !== location.pathname || !mergeDomRows()) return;
+    if (collection) {
+      collection = { ...collection, trackIds: tracks.map(track => track.trackId) };
+      if (captureCollection?.path === collection.path) captureCollection = collection;
+      registerCollection();
+    }
   }
   function prepare() {
     if (!chrome.runtime.id) return;
@@ -174,6 +198,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
   button.onclick = () => { void show(); };
   function refresh(domChanged = false) {
     readView();
+    refreshDomTracks();
     if (isRunActive()) starting = false;
     const parent = document.querySelector(SELECTORS.spotifyLogo)?.closest('a')?.parentElement;
     // Wait for Spotify's logo instead of briefly rendering in a fallback position.

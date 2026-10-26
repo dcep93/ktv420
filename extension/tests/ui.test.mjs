@@ -13,11 +13,13 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
   let resolveTracks; const trackLoad = new Promise(resolve => { resolveTracks = resolve; });
   let pendingReply;const captureRequests=[],transportRequests=[],replayModes=[];
   const trackId = '5EGTNEoUpibGgMWf6ECe0X';
-  let rowsAvailable = true;
+  let rowsAvailable = true, runActive = false;
+  let visibleRows;
   const row = {
     querySelector: () => ({ getAttribute: () => `/track/${trackId}`, textContent: 'Common Enemy' }),
     querySelectorAll: () => [],
   };
+  visibleRows = [row];
   // Like an HTMLDivElement, this row cannot cross postMessage's clone boundary.
   assert.throws(() => structuredClone(row), { name: 'DataCloneError' });
   const makeElement = tag => {
@@ -42,7 +44,7 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
       documentElement: makeElement('html'), body: makeElement('body'),
       querySelector: selector => selector.includes('logoSpotify')
         ? { closest: () => ({ parentElement: parent }) }
-        : selector.includes('entity-header') ? null : { querySelectorAll: () => rowsAvailable ? [row] : [] },
+        : selector.includes('entity-header') ? null : { querySelectorAll: () => rowsAvailable ? visibleRows : [] },
     },
     window: { location: pageLocation,
       addEventListener(name, listener) { listeners[name] = listener; }, removeEventListener() {} },
@@ -64,7 +66,7 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
     t.after(() => descriptor ? Object.defineProperty(globalThis, key, descriptor) : delete globalThis[key]);
   }
-  const ui = mountButton({ isRunActive: () => false, onToggleRun: async options => {captureRequests.push(options);}, loadSpotifyTracks: () => trackLoad, onTransport: async command => {transportRequests.push(command);}, onReplay: enabled => replayModes.push(enabled) });
+  const ui = mountButton({ isRunActive: () => runActive, onToggleRun: async options => {captureRequests.push(options);}, loadSpotifyTracks: () => trackLoad, onTransport: async command => {transportRequests.push(command);}, onReplay: enabled => replayModes.push(enabled) });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(elements.some(element => element.tag === 'iframe'), false, 'ordinary Spotify loads do not load or activate the player');
   pageLocation.search = '?ktv420=1'; listeners.popstate();
@@ -198,6 +200,26 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
   animationFrames.at(-1)();
   await new Promise(resolve=>setImmediate(resolve)); await renderView();
   assert.equal(overlay.dataset.open,'true','arriving rows open the overlay without waiting for the one-second poll');
+  // Spotify initially renders a partial album, then appends the remaining rows.
+  const albumRows = Array.from({length: 11}, (_, index) => ({
+    getAttribute: name => name === 'aria-rowindex' ? String(index + 2) : null,
+    querySelector: () => ({getAttribute: () => `/track/${String(index).padStart(22, '0')}`, textContent: `Song ${index + 1}`}),
+    querySelectorAll: () => [],
+  }));
+  visibleRows = albumRows.slice(0, 9); timers[0]();
+  runActive = true;
+  visibleRows = albumRows; timers[0]();
+  assert.equal(messages.at(-1).tracks.length, 11, 'late rows join an open overlay even during capture');
+  assert.equal(messages.at(-1).tracks.at(-1).trackName, 'Song 11');
+  assert.equal(registrations.at(-1).collection.trackIds.length, 11, 'catalog receives the expanded collection');
+  visibleRows = albumRows.slice(9); timers[0]();
+  assert.equal(messages.at(-1).tracks.length, 11, 'virtualized rows must not erase earlier songs');
+  runActive = false;
+  pageLocation.pathname = '/album/3333333333333333333333';
+  visibleRows = [row]; ui.refresh();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(messages.at(-1).tracks.length, 1, 'a new album must not inherit previous rows');
+
   await listeners.message({...ready,data:{...ready.data,type:'close'}});
 
   for (const invalidate of [

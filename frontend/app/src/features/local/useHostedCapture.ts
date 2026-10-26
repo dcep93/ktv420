@@ -17,11 +17,11 @@ export function useHostedCapture(options:Options) {
   const cancel = useCallback(() => {
     epoch.current++; autoContinue.current = ''; queue.current.cancel(); setActive(false); latest.current.spotify.cancelCapture();
   }, []);
-  const run = useCallback(async (ids:string[], automatic=false) => {
+  const run = useCallback(async (ids:string[], automatic=false, followCollection=false) => {
     const current = latest.current, token = ++epoch.current;
     current.onError('');
     try {
-      const completed = await queue.current.run(ids, () => new Set([...successful.current,...latest.current.tracks.map(t=>t.id.replace(/^spotify-/,''))]), async id => {
+      const completed = await queue.current.run(followCollection ? () => latest.current.spotify.tracks.map(track => track.trackId) : ids, () => new Set([...successful.current,...latest.current.tracks.map(t=>t.id.replace(/^spotify-/,''))]), async id => {
         await latest.current.spotify.captureOne(id); successful.current.add(id);
       }, () => { setActive(queue.current.active); render(n=>n+1); });
       if (token === epoch.current && completed && automatic && latest.current.spotify.navigation?.open) {
@@ -43,7 +43,7 @@ export function useHostedCapture(options:Options) {
     if (spotify.listening?.relayVersion !== 1) { spotify.toggleCapture(); return; }
     if (queue.current.active || spotify.active) { cancel(); return; }
     if (required.length) spotify.transport({action:'volume',volume:0});
-    void run(required.length ? required.map(t=>t.id) : spotify.tracks.map(t=>t.trackId));
+    void run(required.length ? required.map(t=>t.id) : spotify.tracks.map(t=>t.trackId), false, !required.length);
   }, [cancel,run]);
   useEffect(() => {
     const state = options.spotify.listening;
