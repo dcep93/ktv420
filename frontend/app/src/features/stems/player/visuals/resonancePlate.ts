@@ -9,10 +9,11 @@ export function drawPlate({ c, w, h, state }: ArtFrame, artwork: PlateArtwork = 
   // crossfades avoid random-per-frame sparkle, including at palette wraparound.
   const travel = state.time / 14;
   for (let role = 0; role < 4; role++) {
-    const level = Math.max(state.audio.levels[stemRoles[role]], state.audio.levels.original);
+    const level = state.audio.levels[stemRoles[role]];
     if (level < .001) continue;
-    // Squaring before color's power curve also squares the final rendered alpha.
-    c.fillStyle = color(stemRoles[role], (.55 + .45 * level) ** 2); c.beginPath();
+    // Square the already-squared opacity again: quieter averages, unchanged peaks.
+    // color's power curve commutes with this exponent, so final alpha is squared too.
+    c.fillStyle = color(stemRoles[role], (.55 + .45 * level) ** 4); c.beginPath();
     for (let i = 0; i < artwork.grains.length; i += 4) {
       const phase = (artwork.grains[i + 3] + travel) % 4;
       const distance = Math.min(Math.abs(phase - role), 4 - Math.abs(phase - role));

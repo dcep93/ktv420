@@ -65,7 +65,8 @@ test('fully lit artwork remains bounded, pause-stable and uses only four colors'
   const { drawPlate } = await import('../stems/player/visuals/resonancePlate');
   const { createArtState } = await import('../stems/player/visuals/artSceneState');
   const field = analyzePlateArtwork(new Uint8ClampedArray(128 * 128 * 4).fill(255), 128, 128);
-  const state = createArtState(); state.time = 14; state.audio.levels.original = .5;
+  const state = createArtState(); state.time = 14;
+  Object.assign(state.audio.levels, { drums: 1, bass: 1, vocals: 1, other: 1 });
   const marks: number[][] = [], colors: string[] = [];
   const c = { set fillStyle(value: string) { colors.push(value); }, beginPath() {}, fill() {},
     rect(...args: number[]) { args.forEach(value => assert.ok(Number.isFinite(value))); marks.push(args); } } as unknown as CanvasRenderingContext2D;
@@ -73,6 +74,31 @@ test('fully lit artwork remains bounded, pause-stable and uses only four colors'
   assert.equal(colors.length, 4); assert.ok(marks.length <= 128 * 128 * 2);
   const before = structuredClone(marks); marks.length = 0;
   drawPlate({ c, w: 2400, h: 1200, state }, field); assert.deepEqual(marks, before);
-  state.audio.levels.original = 0; marks.length = colors.length = 0;
+  // The original must neither brighten active stems nor resurrect muted colors.
+  state.audio.levels.original = 1; marks.length = 0;
+  const beforeColors = [...colors]; colors.length = 0;
+  drawPlate({ c, w: 2400, h: 1200, state }, field);
+  assert.deepEqual(marks, before); assert.deepEqual(colors, beforeColors.slice(0, 4));
+  Object.assign(state.audio.levels, { drums: 0, bass: 0, vocals: 0, other: 0 }); marks.length = colors.length = 0;
   drawPlate({ c, w: 2400, h: 1200, state }, field); assert.equal(marks.length, 0);
+});
+
+test('plate dims moderate stems again while preserving full-opacity peaks and ignoring Original', async () => {
+  const { drawPlate } = await import('../stems/player/visuals/resonancePlate');
+  const { createArtState } = await import('../stems/player/visuals/artSceneState');
+  const { color } = await import('../stems/player/visuals/stemScene');
+  const state = createArtState();
+  const colors: string[] = [];
+  const c = { set fillStyle(value: string) { colors.push(value); }, beginPath() {}, fill() {}, rect() {} } as unknown as CanvasRenderingContext2D;
+  const alpha = (value: string) => Number(value.slice(value.lastIndexOf(',') + 1, -1));
+  for (const level of [.1, .5, .8, 1]) {
+    state.audio.levels.vocals = level; state.audio.levels.original = 1; colors.length = 0;
+    drawPlate({ c, w: 800, h: 400, state });
+    assert.equal(colors.length, 1, 'Original cannot enable the three silent stems');
+    const before = alpha(color('vocals', (.55 + .45 * level) ** 2));
+    const after = alpha(colors[0]);
+    assert.ok(Math.abs(after - before ** 2) < 1e-12);
+    if (level === 1) assert.equal(after, 1);
+    else assert.ok(after < before);
+  }
 });

@@ -162,7 +162,9 @@ for (const mode of artModes) test(`${mode} is bounded at full height, supports s
     assert.equal(s.read().marks, 1);
     for (const v of voices) {
       v.audible = true; s.reset(); drawArtScene(mode, s.canvas, voices, 2.1, true);
-      assert.ok(s.read().marks > 1, `${mode} should draw ${v.name}`); v.audible = false;
+      if (mode === 'resonance-plate' && v.input) assert.equal(s.read().marks, 1, 'Original must not light Resonance Plate');
+      else assert.ok(s.read().marks > 1, `${mode} should draw ${v.name}`);
+      v.audible = false;
     }
     for (const time of [2.1, 2.1, 1, 4000]) {
       s.reset(); drawArtScene(mode, s.canvas, voices, time, false);
