@@ -182,3 +182,22 @@ playing, paused, seeking fifteen seconds ahead and resuming. No audio output is
 used by this synthetic fixture. Three regression tests cover stable translation,
 bounded hue transitions, silence, seeks, finite coordinates and balanced canvas
 state. All 141 tests, lint and both production builds passed.
+
+## Playlist scrolling (2026-10-26)
+
+Replaced the nested playlist scroller / separate player scroller with one page
+scroll container. A normal sticky header keeps playlist and settings controls
+pinned; the player header remains static. The reserved status row preserves
+control positions. Switching Spotify playlist/album context resets the playlist
+position instead of inheriting the previous context's offset. Scroll anchoring is
+disabled so asynchronous track updates do not pull the viewport past early rows.
+
+A temporary local broker fixture mounted the actual LibraryPage with forty tracks,
+delayed state delivery and synthetic silent playback files. Browser checks found
+the first row at y=187 below the header at y=184, with scrollTop=0 on load and after
+changing context from scrollTop=889. The logo stayed at y=102 while scrolling and
+adding a notice. Settings opened at the top and returning restored the playlist
+position. On the player page, the header scrolled to y=-596; returning to a
+previously unscrolled playlist showed the first row again. Lint and production
+builds passed. This validates the layout locally; it does not establish which
+browser paint/scroll condition caused the user's original intermittent symptom.

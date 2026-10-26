@@ -30,15 +30,18 @@ export default function LibraryPage() {
   const [record, setRecord] = useState<PlaybackRecord | null>(null);
   const [viewMode, setViewMode] = useState<'tracks' | 'settings' | 'player'>('tracks');
   const page = useRef<HTMLElement>(null);
-  const content = useRef<HTMLDivElement>(null);
   const viewScroll = useRef({ tracks: 0, settings: 0, player: 0 });
-  useLayoutEffect(() => {
-    if (page.current) page.current.scrollTop = viewMode === 'player' ? viewScroll.current.player : 0;
-    if (content.current) content.current.scrollTop = viewMode === 'player' ? 0 : viewScroll.current[viewMode];
-  }, [viewMode]);
   const [error, setError] = useState('');
   const closeRef = useRef<() => void>(() => {});
   const spotify = useSpotifyOverlay(() => closeRef.current());
+  const scrollContext = useRef('');
+  useLayoutEffect(() => {
+    if (scrollContext.current !== spotify.spotifyPath) {
+      scrollContext.current = spotify.spotifyPath;
+      viewScroll.current.tracks = 0;
+    }
+    if (page.current) page.current.scrollTop = viewScroll.current[viewMode];
+  }, [viewMode, spotify.spotifyPath]);
   const tracks = useMemo(() => {
     const rows = new Map(spotify.tracks.map(row => [`spotify-${row.trackId}`, row]));
     return storedTracks.map(track => withSpotifyMetadata(track, rows.get(track.id)));
@@ -351,7 +354,8 @@ export default function LibraryPage() {
     (spotify.starting ? 'Starting capture…' : spotify.active ? 'Capturing songs as they play…' :
       spotify.notice.replace(' Local separation is queued automatically.', '').replace(' Separation continues here automatically.', ''));
   return <main className={`iframe-page iframe-page--overlay${viewMode === 'player' ? ' iframe-page--player' : ''}`} aria-label="ktv420 iframe controls"
-    ref={page} onScroll={event => { if (viewMode === 'player' && event.target === event.currentTarget) viewScroll.current.player = event.currentTarget.scrollTop; }}>
+    ref={page} onScroll={event => { if (event.target === event.currentTarget) viewScroll.current[viewMode] = event.currentTarget.scrollTop; }}>
+    <header className="iframe-overlay-header">
     <div className="iframe-status-slot">
       {statusMessage && <p className="iframe-status-message" data-kind={statusError ? 'error' : 'notice'} role={statusError ? 'alert' : 'status'}>
         <OverlayIcon name={statusError ? 'alert' : 'music'} /><span>{statusMessage}</span>
@@ -370,7 +374,8 @@ export default function LibraryPage() {
         onChange={event => { const volume = Number(event.target.value); setMasterVolume(volume); bestEffortSpotify(transportCommand, {action:'volume',volume}); }} />
       <small>{listening?.capturing ? 'Capture' : record ? 'Stems' : 'Muted'}</small>
     </label></div>
-    <div className="iframe-content" ref={content} onScroll={event => { if (viewMode !== 'player') viewScroll.current[viewMode] = event.currentTarget.scrollTop; }}>
+    </header>
+    <div className="iframe-content">
     {spotify.replay && <section className="replay-card" aria-label="Shared recording">
       <div><h2>{spotify.replay.name}</h2><p>{replay.active ? `${Math.floor(replay.seconds)}s · ${replay.status === 'preparing' ? 'Preparing song…' : replay.status === 'paused' ? 'Paused' : 'Replaying'}` : replayReady ? 'Ready to replay.' : 'Capture missing songs, then let separation finish.'}</p></div>
       {replay.active ? <><button disabled={replay.status==='preparing' || replay.busy} onClick={() => void replay.togglePause()}>{replay.status==='paused' ? 'Resume recording' : 'Pause recording'}</button><button onClick={replay.stop}>Stop replay</button></> : <button disabled={!replayReady || spotify.active || !!active || mp3Export.busy} onClick={replay.start}>Play recording</button>}

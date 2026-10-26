@@ -325,18 +325,29 @@
   padding: 24px;
 }
 
+/* One scroll container for every view. The playlist header alone stays pinned. */
 .iframe-page--overlay {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: 44px 64px minmax(0, 1fr);
-  justify-content: stretch;
-  justify-items: center;
-  align-items: stretch;
-  gap: 18px;
+  justify-content: flex-start;
+  gap: 0;
   height: 100dvh;
   min-height: 0;
-  overflow: hidden;
-  padding: clamp(20px, 5vh, 56px) 24px 24px;
+  overflow: auto;
+  overflow-anchor: none;
+  scrollbar-gutter: stable both-edges;
+  padding: 0 0 24px;
+}
+.iframe-overlay-header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  flex-shrink: 0;
+  display: grid;
+  grid-template-rows: 44px 64px;
+  justify-items: center;
+  gap: 18px;
+  width: 100%;
+  padding: clamp(20px, 5vh, 56px) 24px 18px;
+  background: radial-gradient(ellipse at top, rgba(255, 123, 195, 0.09), transparent 70%), var(--ww-bg-top);
 }
 
 .overlay-icon { display: block; width: 20px; height: 20px; flex-shrink: 0; }
@@ -386,15 +397,9 @@
 .iframe-logo-button[aria-pressed="true"] { background: rgba(255, 123, 195, 0.1); border-color: var(--ww-title-pink); box-shadow: 0 0 0 4px rgba(255, 123, 195, 0.08); }
 .iframe-logo-button[aria-pressed="true"]::after { content: ""; position: absolute; right: 2px; bottom: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--ww-title-pink); box-shadow: 0 0 0 3px var(--ww-bg-bottom); }
 .iframe-settings-button[aria-pressed="true"] { color: var(--ww-accent-cyan); border-color: var(--ww-border-strong); background: var(--ww-audio-bg); }
-.iframe-content { min-height: 0; width: min(1600px, 100%); overflow: auto; scrollbar-gutter: stable both-edges; padding: 3px; }
+.iframe-content { flex-shrink: 0; min-height: 0; width: min(1600px, calc(100% - 48px)); padding: 3px; }
 .iframe-content > * { margin-inline: auto; }
-
-.iframe-page--player {
-  grid-template-rows: 44px 64px max-content;
-  align-content: start;
-  overflow: auto;
-}
-.iframe-page--player .iframe-content { overflow: visible; }
+.iframe-page--player .iframe-overlay-header { position: static; }
 .iframe-track-list { display: grid; gap: 9px; list-style: none; margin-block: 0; padding: 0; width: min(760px, 100%); }
 .iframe-playlist-empty { color: var(--ww-text-muted); font-size: 13px; text-align: center; padding: 28px 16px; }
 .iframe-settings-view { display: grid; gap: 14px; width: min(760px, 100%); }
