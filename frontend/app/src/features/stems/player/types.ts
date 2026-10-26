@@ -45,6 +45,10 @@ export type RecordingStartRequest = {
 };
 
 export type VisualizerType =
+  | "beach"
+  | "aquarium"
+  | "rock-show"
+  | "disco-ball"
   | "signal-loom"
   | "ink-tank"
   | "resonance-plate"

@@ -148,7 +148,7 @@ test('Highway palette evolves continuously across minute boundaries and wraparou
   assert.ok(Number.isFinite(highwayHue(NaN)));
 });
 
-const artModes = ['signal-loom', 'ink-tank', 'resonance-plate', 'glassworks'] as const;
+const artModes = ['signal-loom', 'ink-tank', 'resonance-plate', 'glassworks', 'beach', 'aquarium', 'rock-show', 'disco-ball'] as const;
 for (const mode of artModes) test(`${mode} is bounded at full height, supports solos and clears every muted layer`, async () => {
   const { drawArtScene, resetArtScene } = await import('../stems/player/visuals/artScenes');
   for (const [width, height] of [[360, 210], [1600, 360], [2400, 1200]]) {

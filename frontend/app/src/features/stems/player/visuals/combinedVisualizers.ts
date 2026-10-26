@@ -7,6 +7,10 @@ import { drawStemScene, resetStemScene } from './stemScenes';
 import type { StemVoice } from './stemScene';
 
 export const combinedVisualizers = {
+  beach: { label: 'Beach', legend: ['Drums · foam', 'Bass · surf', 'Vocals · sunlight', 'Other · sky'] },
+  aquarium: { label: 'Aquarium', legend: ['Drums · bubbles', 'Bass · plants', 'Vocals · fish', 'Other · jellyfish'] },
+  'rock-show': { label: 'Rock Show', legend: ['Drums · rig lights', 'Bass · stage glow', 'Vocals · beams', 'Other · overhead fans'] },
+  'disco-ball': { label: 'Disco Ball', legend: ['Drums · gold', 'Bass · bronze', 'Vocals · pink', 'Other · teal'] },
   'signal-loom': { label: 'Signal Loom', legend: ['Drums · stitches', 'Bass · warp', 'Vocals · silk', 'Other · weave'] },
   'ink-tank': { label: 'Ink Tank', legend: ['Drums · jets', 'Bass · circulation', 'Vocals · ribbons', 'Other · diffusion'] },
   'resonance-plate': { label: 'Resonance Plate', legend: ['Drums · gold', 'Bass · bronze', 'Vocals · pink', 'Other · teal'] },
@@ -24,7 +28,7 @@ export function isCombinedVisualizer(type: VisualizerType): type is CombinedVisu
 export function drawCombinedVisualizer(type: CombinedVisualizerType, canvas: HTMLCanvasElement, voices: StemVoice[], time: number, playing: boolean, artwork?: PlateArtwork) {
   if (type === 'stem-weather') drawStemWeather(canvas, voices, time, playing);
   else if (type === 'highway') drawHighway(canvas, voices, time, playing);
-  else if (type === 'signal-loom' || type === 'ink-tank' || type === 'resonance-plate' || type === 'glassworks') drawArtScene(type, canvas, voices, time, playing, artwork);
+  else if (type === 'signal-loom' || type === 'ink-tank' || type === 'resonance-plate' || type === 'glassworks' || type === 'beach' || type === 'aquarium' || type === 'rock-show' || type === 'disco-ball') drawArtScene(type, canvas, voices, time, playing, artwork);
   else drawStemScene(type, canvas, voices, time, playing);
 }
 export function resetCombinedVisualizer(canvas: HTMLCanvasElement) { resetArtScene(canvas); resetWeather(canvas); resetStemScene(canvas); resetHighway(canvas); }

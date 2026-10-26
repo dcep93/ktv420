@@ -5,6 +5,10 @@ export const visualizerOptions: Array<{
   label: string;
   hint: string;
 }> = [
+  { value: "beach", label: "Beach", hint: "Sunlit surf and a changing sky" },
+  { value: "aquarium", label: "Aquarium", hint: "A living underwater mix" },
+  { value: "rock-show", label: "Rock Show", hint: "A stage full of light" },
+  { value: "disco-ball", label: "Disco Ball", hint: "Turning mirrors and scattered light" },
   { value: "time-ribbon", label: "Time Ribbon", hint: "Amplitude Timeline" },
   { value: "signal-loom", label: "Signal Loom", hint: "The mix weaves light" },
   { value: "ink-tank", label: "Ink Tank", hint: "Flowing stem pigments" },
