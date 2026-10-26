@@ -6,7 +6,7 @@ function setup(overrides={}) {
  const media=()=>({source:'audio',currentTime:position,paused,seeking,readyState,playbackRate:1,duration:10});
  const options={trackId:'song',readTransport:()=>({trackId:id}),wait:async()=>{},
   transport:async command=>{calls.push(command.action);if(command.action==='pause')paused=true;if(command.action==='seek')position=0;if(command.action==='play')paused=false;},
-  bridge:{command:async(command,payload)=>{calls.push(command);if(command==='capture-prepare')return{target:media()};if(command==='listening-state')return{media:media()};if(command==='capture-state')return{...media(),invalid:false};if(command==='capture-begin'){assert.ok(paused&&position===0&&!seeking);assert.equal(payload.requireStart,true);return{startVerified:true,target:media()};}return{};}},...overrides};
+  bridge:{command:async(command,payload)=>{calls.push(command);if(command==='capture-prepare')return{target:media()};if(command==='listening-state')return{media:media()};if(command==='capture-state'){if(!paused)position+=.05;return{...media(),invalid:false};}if(command==='capture-begin'){assert.ok(paused&&position===0&&!seeking);assert.equal(payload.requireStart,true);return{startVerified:true,target:media()};}return{};}},...overrides};
  return {calls,options,setMedia:values=>{position=values.position??position;paused=values.paused??paused;seeking=values.seeking??seeking;readyState=values.readyState??readyState;id=values.id??id;}};
 }
 test('capture warms, seeks and verifies paused zero twice before arming then playing',async()=>{
@@ -160,4 +160,76 @@ test('startup observation honors stop, track changes and very short natural comp
  const h=setup();const command=h.options.bridge.command;
  h.options.bridge.command=async(name,payload)=>name==='capture-state'?{ended:true,invalid:false}:command(name,payload);
  assert.equal((await startPreciseCapture(h.options)).startVerified,true);
+});
+
+
+test('a missing Spotify pause-button acknowledgment still reaches the actual-media pause and zero verification', async () => {
+ for(const uiAppliedPause of [true,false]){
+  const h=setup();const transport=h.options.transport,command=h.options.bridge.command;
+  h.options.transport=async request=>{
+   if(request.action==='pause'){
+    if(uiAppliedPause)await transport(request);
+    throw Error('Spotify did not change playback state.');
+   }
+   return transport(request);
+  };
+  h.options.bridge.command=async(name,payload)=>{
+   // capture-prepare explicitly pauses the selected media in the page hook.
+   if(name==='capture-prepare')h.setMedia({paused:true});
+   return command(name,payload);
+  };
+  assert.equal((await startPreciseCapture(h.options)).startVerified,true);
+  assert.ok(h.calls.indexOf('capture-prepare')<h.calls.indexOf('capture-begin'));
+  assert.equal(h.calls.filter(name=>name==='capture-begin').length,1);
+ }
+});
+
+test('a failed pause is never ignored if actual audio keeps playing or preparation fails', async () => {
+ for(const prepareFails of [false,true]){
+  const h=setup();const transport=h.options.transport,command=h.options.bridge.command;
+  h.options.transport=async request=>{
+   if(request.action==='pause')throw Error('Spotify did not change playback state.');
+   return transport(request);
+  };
+  h.options.bridge.command=async(name,payload)=>{
+   if(name==='capture-prepare'&&prepareFails)throw Error('Current audio unavailable');
+   return command(name,payload);
+  };
+  await assert.rejects(startPreciseCapture(h.options),prepareFails?/Current audio unavailable/:/audio still playing/);
+  assert.ok(!h.calls.includes('capture-begin'));assert.ok(!h.calls.includes('play'));
+  assert.equal(h.calls.at(-1),'capture-abort');
+ }
+});
+
+test('stop during a failed pause acknowledgment prevents media preparation and playback', async () => {
+ let cancelled=false;
+ const h=setup({checkCancelled:()=>{if(cancelled)throw Error('stopped');}});
+ h.options.transport=async()=>{cancelled=true;throw Error('Spotify did not change playback state.');};
+ await assert.rejects(startPreciseCapture(h.options),/stopped/);
+ assert.ok(!h.calls.includes('capture-prepare'));assert.ok(!h.calls.includes('capture-begin'));
+ assert.equal(h.calls.at(-1),'capture-abort');
+});
+
+test('Play is verified against moving local audio even when its button acknowledgment fails', async () => {
+ const h=setup();const transport=h.options.transport;
+ h.options.transport=async request=>{await transport(request);if(request.action==='play')throw Error('Spotify did not change playback state.');};
+ assert.equal((await startPreciseCapture(h.options)).startVerified,true);
+ assert.ok(!h.calls.includes('capture-play'),'already-playing audio must not be played twice');
+});
+
+test('stale Play acknowledgment uses the armed-media fallback and rejects a frozen clock', async () => {
+ for(const frozen of [false,true]){
+  const h=setup();const transport=h.options.transport,command=h.options.bridge.command;
+  h.options.transport=async request=>{if(request.action!=='play')return transport(request);};
+  h.options.bridge.command=async(name,payload)=>{
+   if(name==='capture-play'){
+    h.calls.push(name);h.setMedia({paused:false});return{paused:false,currentTime:0};
+   }
+   if(name==='capture-state'&&frozen)return{source:'audio',paused:h.calls.includes('capture-play')?false:true,currentTime:0,invalid:false};
+   return command(name,payload);
+  };
+  if(frozen)await assert.rejects(startPreciseCapture(h.options),/local audio did not start playing/);
+  else assert.equal((await startPreciseCapture(h.options)).startVerified,true);
+  assert.equal(h.calls.filter(name=>name==='capture-play').length,1);
+ }
 });

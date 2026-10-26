@@ -587,3 +587,36 @@ test('only a first-failure same-source reset at startup is eligible for a fresh 
   assert.equal(capture.invalid,true,'a recoverable attempt itself must never become valid');
  }
 });
+
+test('capture Play operates only on the verified armed source and never restarts or reselects audio', async () => {
+ const h=harness([{src:'song',paused:true},{src:'',paused:true,readyState:0}]);
+ assert.equal((await h.command('capture-play')).ok,false,'requires a current capture');
+ assert.equal((await h.command('capture-begin',{requireStart:true,expectedSource:'song'})).ok,true);
+ assert.equal((await h.command('capture-play')).ok,true);
+ assert.equal(h.elements[0].paused,false);assert.equal(h.elements[1].paused,true);
+ h.elements[0].currentTime=1;
+ assert.equal((await h.command('capture-play')).ok,true,'already playing is left alone');
+ assert.equal(h.elements[0].currentTime,1);
+ h.elements[0].pause();
+ assert.equal((await h.command('capture-play')).ok,false,'a later pause cannot restart capture');
+ for(const changed of [{src:'different'},{currentTime:.001},{seeking:true},{readyState:2},{playbackRate:2}]){
+  const invalid=harness([{src:'song',paused:true}]);
+  await invalid.command('capture-begin',{requireStart:true,expectedSource:'song'});
+  Object.assign(invalid.elements[0],changed);
+  assert.equal((await invalid.command('capture-play')).ok,false);
+  assert.equal(invalid.elements[0].paused,true);
+ }
+ const unverified=harness([{src:'song',paused:true}]);
+ await unverified.command('capture-begin');
+ assert.equal((await unverified.command('capture-play')).ok,false);
+});
+
+test('startup reset recovery clock starts at playback, not before a delayed Play acknowledgment', async () => {
+ const h=harness([{src:'song',paused:true}]);
+ await h.command('capture-begin',{requireStart:true,expectedSource:'song'});
+ h.contexts[0].currentTime=2.5;
+ await h.command('capture-play');
+ h.contexts[0].currentTime=2.740;
+ h.elements[0].dispatch('seeking');
+ assert.equal((await h.command('capture-state')).result.invalidCode,'startup-zero-seek');
+});

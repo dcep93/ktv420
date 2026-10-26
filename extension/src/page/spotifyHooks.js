@@ -240,6 +240,8 @@
           result = await controller.prepare(payload || {});
         } else if (command === "capture-rewind") {
           result = await controller.rewind(payload || {});
+        } else if (command === "capture-play") {
+          result = await controller.play();
         } else if (command === "capture-begin") {
           if (!listeningEnabled) throw new Error('Open ktv420 before capturing audio.');
           result = await controller.begin(payload || {});
@@ -384,6 +386,23 @@
           timing
         };
       },
+      async play() {
+        if (!listeningEnabled) throw new Error('Open ktv420 before capturing audio.');
+        assertCapture(currentCapture);
+        const capture = currentCapture, element = capture.element;
+        if (!capture.startVerified || capture.invalid || !capture.capturing || capture.ended ||
+            getMediaSource(element) !== capture.sourceAtStart) {
+          throw new Error('The prepared recording is no longer valid. Retry this song.');
+        }
+        if (element.paused) {
+          if (capture.playbackStarted || element.currentTime !== 0 || element.seeking ||
+              element.readyState < 3 || element.playbackRate !== 1) {
+            throw new Error('Spotify moved before recording playback began. Retry this song.');
+          }
+          await element.play();
+        }
+        return this.state();
+      },
       async finishAndBegin({ timeoutMs = 1000 } = {}) {
         assertCapture(currentCapture);
         const finished = await currentCapture.finish();
@@ -457,7 +476,8 @@
         if (this.startVerified && !this.playbackStarted && element.paused &&
             element.currentTime === 0 && getMediaSource(element) === this.sourceAtStart) return;
         const elapsed = this.context.currentTime - this.armedAt;
-        const startupReset = this.startVerified && this.playbackStarted && elapsed >= 0 && elapsed <= 1 &&
+        const sincePlayback = this.context.currentTime - this.firstPlaybackAt;
+        const startupReset = this.startVerified && this.playbackStarted && sincePlayback >= 0 && sincePlayback <= 1 &&
           element.currentTime === 0 && getMediaSource(element) === this.sourceAtStart;
         // Still invalidate every sample in this attempt. The content script may
         // discard it and re-arm; it must never accept a recording containing a seek.
@@ -516,6 +536,7 @@
           getMediaSource(this.element) !== this.sourceAtStart)) {
         this.invalidate('Spotify moved before recording playback began.');
       }
+      if (!this.playbackStarted) this.firstPlaybackAt = this.context.currentTime;
       this.playbackStarted = true;
       this.intervals.push({ start: Math.round(this.context.currentTime * this.sampleRate), end: Infinity });
     }
@@ -648,7 +669,7 @@
         const from = Math.max(message.frame, interval.start), to = Math.min(end, interval.end);
         if (to <= from) continue;
         if (from !== (interval.lastFrame ?? interval.start)) {
-          this.invalidate('Audio samples were missed or repeated during recording.'); return;
+          this.invalidate(`Audio samples were missed or repeated during recording (expected frame ${interval.lastFrame ?? interval.start}, received ${from}; ${this.byteLength / stride} frames captured).`); return;
         }
         interval.lastFrame = to;
         const part = bytes.subarray((from-message.frame)*stride,(to-message.frame)*stride);
