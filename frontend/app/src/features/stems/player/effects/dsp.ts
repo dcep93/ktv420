@@ -114,7 +114,7 @@ export class StereoEffects {
   }
   private configure(v:number,time:number){
     const kind=this.effect,amount=Math.abs(v-.5)*2;
-    if(Math.abs(v-this.coefficientAmount)<.0001 && kind!=='envelope-filter' && kind!=='phaser')return;
+    if(Math.abs(v-this.coefficientAmount)<.0001 && kind!=='envelope-filter' && kind!=='phaser' && kind!=='underwater')return;
     this.coefficientAmount=v;
     for(let c=0;c<2;c++){
       const f=this.filters[c*3],g=this.filters[c*3+1];
@@ -122,6 +122,11 @@ export class StereoEffects {
         case 'wah':f.setWah(v,this.rate);break;
         case 'band-emphasis':f.set('bandpass',220*(3400/220)**v,2+amount*3,this.rate);break;
         case 'envelope-filter':f.set('bandpass',250+4300*Math.sqrt(clamp(this.envelope*3,0,1))*v,1.4+v*2.6,this.rate);break;
+        case 'underwater':{
+          const cutoff=16000*(450/16000)**v*2**(.13*v*Math.sin(TAU*.19*time));
+          f.set('lowpass',cutoff,.707+.45*v,this.rate);
+          g.set('lowpass',cutoff*1.5,.707,this.rate);break;
+        }
         case 'telephone':f.set('highpass',350,.707,this.rate);g.set('lowpass',3000,.707,this.rate);break;
         case 'dj-filter':f.set(v<.5?'lowpass':'highpass',v<.5?20000*(120/20000)**amount:25*(6000/25)**amount,.707,this.rate);break;
         case 'warm':case 'lofi':case 'submerge':f.set('lowpass',18000*(180/18000)**(kind==='lofi'?amount:v),.707,this.rate);break;
@@ -152,7 +157,7 @@ export class StereoEffects {
     this.amount+=(target-this.amount)*this.smoothing;
     this.bypass+=((control.bypass?1:0)-this.bypass)*this.smoothing;
     const level=Math.max(Math.abs(l),Math.abs(r));this.envelope+=(level-this.envelope)*(level>this.envelope?this.attack:this.release);
-    if((this.n++&15)===0 || !Number.isFinite(this.coefficientAmount))this.configure(this.amount,time);
+    if((this.n++&(this.effect==='underwater'?3:15))===0 || !Number.isFinite(this.coefficientAmount))this.configure(this.amount,time);
     const v=this.amount,kind=this.effect,bipolar=bipolarEffects.has(kind);
     const strength=bipolar?Math.abs(v-.5)*2:v;
     let outL=l,outR=r;
@@ -192,6 +197,17 @@ export class StereoEffects {
           y=x*(1-engage)+f.tick(x)*engage;break;
         }
         case 'band-emphasis':y=x*(1-.85*strength)+f.tick(x)*.85*strength;break;
+        case 'underwater':{
+          const filtered=g.tick(f.tick(x)),line=this.delay[c];
+          // Shared phase preserves mono placement. Feed-forward motion adds no
+          // feedback tail; playback time makes replay/export deterministic.
+          const lag=(.012+.0035*v*Math.sin(TAU*.29*time))*this.rate;
+          const delayed=line.read(lag);line.write(filtered);
+          // Fully wet avoids comb cancellation of bass against its delayed copy.
+          const wet=delayed;
+          const fade=Math.min(1,v/.15),engage=fade*fade*(3-2*fade);
+          y=x*(1-engage)+wet*engage;break;
+        }
         case 'telephone':y=x*(1-v)+g.tick(f.tick(x))*v;break;
         case 'dj-filter':case 'warm':case 'lofi':case 'submerge':y=x*(1-Math.min(1,strength*8))+f.tick(x)*Math.min(1,strength*8);break;
         case 'tone':case 'tilt-eq':y=g.tick(f.tick(x))*10**(-strength*2/20);break;

@@ -1,4 +1,4 @@
-export const effectIds = ['wah','bass-boost','bright','warm','telephone','lofi','submerge','delay-pedal','chorus','reverb','envelope-filter','flange','phaser','tilt-eq','band-emphasis','saturation','formant-filter','dj-filter','tone','octave','reverse-echo','shimmer-reverb'] as const;
+export const effectIds = ['wah','bass-boost','bright','warm','telephone','lofi','submerge','delay-pedal','chorus','reverb','envelope-filter','flange','phaser','tilt-eq','band-emphasis','saturation','formant-filter','dj-filter','tone','octave','reverse-echo','shimmer-reverb','underwater'] as const;
 export type AudioEffectType = typeof effectIds[number];
 export type EffectSettings = { bypass: boolean; bpm: number; beats: number };
 export const defaultEffectSettings: EffectSettings = {bypass:false,bpm:120,beats:.5};
@@ -17,6 +17,7 @@ export const audioEffectOptions: AudioEffectOption[] = [
   {value:'formant-filter',label:'Vowels',description:'Move through A, E, I, O and U using three vocal resonances.'},
   {value:'tone',label:'Tone',description:'Balance warmth and brightness.'},
   {value:'telephone',label:'Telephone',description:'Blend in a narrow telephone sound.'},
+  {value:'underwater',label:'Underwater',description:'Sink into muffled depths with a slow watery wobble.'},
   {value:'saturation',label:'Saturation',description:'Soft harmonic drive with level compensation.'},
   {value:'octave',label:'Octave',description:'Blend an octave below on the left or an octave above on the right.'},
   {value:'chorus',label:'Chorus',description:'Stereo doubles from a gentle shimmer to a deep chorus. Amount controls depth and blend.'},

@@ -152,3 +152,53 @@ test('Vowels emphasize their vowel bands instead of reducing every band to a whi
   assert.ok(gain>2 && gain<4,`vowel ${value}: gain ${gain}`);
  }
 });
+
+test('Underwater follows Telephone without changing legacy effect IDs',()=>{
+ const telephone=audioEffectOptions.findIndex(option=>option.value==='telephone');
+ assert.deepEqual(audioEffectOptions.slice(telephone,telephone+3).map(option=>option.value),['telephone','underwater','saturation']);
+ assert.equal(effectIds.indexOf('submerge'),6);
+ assert.equal(effectIds.indexOf('shimmer-reverb'),21);
+ assert.equal(effectIds.indexOf('underwater'),22);
+ assert.ok(validSnapshot({visualizer:'time-ribbon',spotlight:null,stems:[{name:'vocals.mp3',input:false,volume:1,mute:false,deafen:false,effect:'underwater',value:.8}]}));
+});
+
+test('Underwater progressively darkens highs while preserving deep bass',()=>{
+ const gain=(amount:number,frequency:number)=>rms(render('underwater',amount,2,frequency).left,rate)/(.2/Math.SQRT2);
+ const light=gain(.25,4000),medium=gain(.5,4000),deep=gain(1,4000);
+ assert.ok(light>medium*2,`light ${light}, medium ${medium}`);
+ assert.ok(medium>deep*10,`medium ${medium}, deep ${deep}`);
+ assert.ok(deep<.005,`deep high-frequency gain ${deep}`);
+ assert.ok(gain(1,50)>.65,'deep bass remains present');
+});
+
+test('Underwater moves slowly, stays centered, and has no lasting feedback tail',()=>{
+ const {left,right}=render('underwater',1,4,200);
+ assert.deepEqual(left,right,'mono stays centered throughout modulation');
+ let difference=0;
+ for(let i=rate;i<rate*2;i++)difference+=(left[i]-left[i+rate])**2;
+ assert.ok(Math.sqrt(difference/rate)>.015,'steady tone has audible evolving motion');
+ const dsp=new StereoEffects(rate),c=control('underwater',1);let tail=0;
+ for(let i=0;i<rate;i++){
+  dsp.tick(i<rate/4?.2*Math.sin(2*Math.PI*200*i/rate):0,0,c,i/rate);
+  assert.equal(dsp.right,0);
+  if(i>rate/2)tail=Math.max(tail,Math.abs(dsp.left));
+ }
+ assert.ok(tail<1e-8,`feed-forward tail settles: ${tail}`);
+});
+
+test('Underwater depth automation is smooth, deterministic, and returns to exact clean',()=>{
+ for(const sampleRate of [44100,48000]){
+  const a=new StereoEffects(sampleRate),b=new StereoEffects(sampleRate),c=control('underwater',0);
+  let previous=0,maxStep=0;
+  for(let i=0;i<sampleRate*3;i++){
+   c.amount=i<sampleRate/2?0:i<sampleRate?1:i<sampleRate*1.5?.4:0;
+   const input=.2*Math.sin(2*Math.PI*120*i/sampleRate);
+   a.tick(input,input,c,i/sampleRate);b.tick(input,input,c,i/sampleRate);
+   assert.equal(a.left,b.left);assert.equal(a.left,a.right);
+   assert.ok(Number.isFinite(a.left)&&Math.abs(a.left)<=1);
+   maxStep=Math.max(maxStep,Math.abs(a.left-previous));previous=a.left;
+   if(i>sampleRate*2.5)assert.equal(a.left,input);
+  }
+  assert.ok(maxStep<.02,`largest sample step at ${sampleRate}: ${maxStep}`);
+ }
+});
