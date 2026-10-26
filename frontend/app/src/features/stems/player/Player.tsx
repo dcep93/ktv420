@@ -38,7 +38,7 @@ import {
   CHORD_ANALYZER_VERSION,
   type ChordSnapshot,
 } from "./chordAnalyzer";
-import { getVisualizerButtonStyle } from "./playerStyles";
+import { VisualizerPicker } from "./VisualizerPicker";
 import { formatPlaybackTime } from "./time";
 import { TrackRow } from "./TrackRow";
 import {
@@ -1852,50 +1852,7 @@ export default function Player({
           </div>
           {isCombinedVisualizer(visualizerType) && <CombinedVisualizerPanel type={visualizerType} canvasRef={combinedCanvas}
             expanded={combinedVisualizerExpanded} onExpandedChange={onCombinedVisualizerExpandedChange} ready={areTracksReady} />}
-          <div
-            className="player-visualizer-picker"
-            hidden={!shouldShowVisualizerPicker}
-            style={{ marginTop: "0.75rem" }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "baseline",
-                gap: "0.5rem",
-                marginBottom: "0.5rem",
-              }}
-            >
-              <span style={{ fontWeight: 700, color: "var(--ww-text)" }}>
-                Visualizer
-              </span>
-            </div>
-            <div
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                gap: "0.6rem",
-                justifyContent: "flex-start",
-              }}
-            >
-              {visualizerOptions.map((option) => {
-                const isActive = visualizerType === option.value;
-
-                return (
-                  <button
-                    key={option.value}
-                    type="button"
-                    onClick={() => selectVisualizerType(option.value)}
-                    style={getVisualizerButtonStyle(isActive)}
-                    aria-pressed={isActive}
-                    aria-label={`${option.label} ${option.hint}`}
-                    title={option.hint}
-                  >
-                    {option.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          <VisualizerPicker value={visualizerType} onChange={selectVisualizerType} hidden={!shouldShowVisualizerPicker} />
         </>
       ) : null}
     </div>
