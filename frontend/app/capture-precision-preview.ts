@@ -32,7 +32,7 @@ document.querySelector('#run')!.addEventListener('click',async()=>{
   const bridge={command};
   const start=await startPreciseCapture({bridge,trackId:'test',readTransport:()=>({trackId:'test'}),transport:async c=>{
    if(c.action==='pause')audio.pause();
-   if(c.action==='seek'){audio.currentTime=0;await new Promise(resolve=>audio.addEventListener('seeked',resolve,{once:true}));}
+   if(c.action==='seek'){if(document.querySelector<HTMLInputElement>('#missed-seek-test')!.checked)return;audio.currentTime=0;await new Promise(resolve=>audio.addEventListener('seeked',resolve,{once:true}));}
    if(c.action==='play'){
     if(document.querySelector<HTMLInputElement>('#zero-seek-test')!.checked){
      const settled=new Promise(resolve=>audio.addEventListener('seeked',resolve,{once:true}));

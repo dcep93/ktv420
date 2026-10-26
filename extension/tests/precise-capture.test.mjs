@@ -73,3 +73,43 @@ test('storage audit retains verified resampler tail samples after zero-padding r
  for(const change of [{endVerified:false},{rawCapturedFrames:frames-1},{rawCapturedFrames:NaN},{invalid:true},
   {byteLength:(48000*3+2401)*8}])assert.throws(()=>captureTiming({...capture,...change},3),/timing could not/);
 });
+
+test('a UI seek that leaves actual audio at 2.824 seconds is corrected before capture', async () => {
+ const h=setup(); const transport=h.options.transport, command=h.options.bridge.command;
+ h.options.transport=async request=>{await transport(request);if(request.action==='seek')h.setMedia({position:2.824});};
+ h.options.bridge.command=async (name,payload)=>{
+  if(name==='capture-rewind'){
+   h.calls.push(name);assert.equal(payload.expectedSource,'audio');h.setMedia({position:0,seeking:true});return{};
+  }
+  return command(name,payload);
+ };
+ h.options.wait=async()=>{if(h.calls.includes('capture-rewind'))h.setMedia({seeking:false});};
+ const result=await startPreciseCapture(h.options);
+ assert.equal(result.target.currentTime,0);
+ assert.equal(h.calls.filter(name=>name==='capture-rewind').length,1);
+ assert.ok(h.calls.indexOf('capture-rewind')<h.calls.indexOf('capture-begin'));
+ assert.equal(h.calls.at(-1),'play');
+});
+
+test('failed UI acknowledgment can recover only through actual verified media zero', async () => {
+ const h=setup();const transport=h.options.transport;
+ h.options.transport=async request=>{await transport(request);if(request.action==='seek')throw new Error('UI did not acknowledge');};
+ assert.equal((await startPreciseCapture(h.options)).startVerified,true);
+});
+
+test('buffering can take longer than three seconds without allowing a late start', async () => {
+ const h=setup();h.setMedia({readyState:2});let waits=0;
+ h.options.wait=async()=>{if(++waits===80)h.setMedia({readyState:4});};
+ assert.equal((await startPreciseCapture(h.options)).startVerified,true);
+ assert.ok(waits>=80);assert.ok(!h.calls.includes('capture-rewind'));
+});
+
+test('a failed exact rewind stays bounded and reports actual blocking state', async () => {
+ const h=setup();const transport=h.options.transport;
+ h.options.transport=async request=>{await transport(request);if(request.action==='seek')h.setMedia({position:2.824});};
+ await assert.rejects(startPreciseCapture(h.options),/audio position 2\.824s/);
+ assert.equal(h.calls.filter(name=>name==='capture-rewind').length,1);
+ assert.ok(!h.calls.includes('capture-begin'));assert.ok(!h.calls.includes('play'));
+ const buffering=setup();buffering.setMedia({readyState:2});
+ await assert.rejects(startPreciseCapture(buffering.options),/audio still buffering/);
+});

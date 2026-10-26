@@ -16,11 +16,23 @@ export async function startPreciseCapture({ bridge, trackId, checkCancelled = ()
     await transport({ action: 'pause' }); check();
     // Load/resume the audio graph before seeking and before any wanted audio plays.
     const prepared = await bridge.command('capture-prepare', { timeoutMs: 3000 }, 4000); check();
-    await transport({ action: 'seek', trackId, position: 0 }); check();
-    let settled = 0;
-    for (let attempt = 0; attempt < 60; attempt++) {
+    let seekError = '';
+    try { await transport({ action: 'seek', trackId, position: 0 }); }
+    catch (reason) { seekError = reason?.message || String(reason); }
+    check();
+    let settled = 0, corrected = false, lastMedia = null;
+    // Allow buffering to finish without relaxing the verified-zero requirement.
+    for (let attempt = 0; attempt < 200; attempt++) {
       check();
       const { media } = await bridge.command('listening-state');
+      lastMedia = media;
+      if (!corrected && attempt >= 10 && media?.source === prepared.target.source && media.paused &&
+          !media.seeking && Number.isFinite(media.currentTime) && media.currentTime !== 0) {
+        check();
+        await bridge.command('capture-rewind', { expectedSource: prepared.target.source });
+        corrected = true; settled = 0;
+        await wait(50); continue;
+      }
       if (media?.source === prepared.target.source && media.paused && !media.seeking &&
           media.readyState >= 3 && Number.isFinite(media.currentTime) && media.currentTime === 0 && media.playbackRate === 1) settled++;
       else settled = 0;
@@ -33,7 +45,14 @@ export async function startPreciseCapture({ bridge, trackId, checkCancelled = ()
       }
       await wait(50);
     }
-    throw new Error('Spotify did not settle at the beginning. Nothing was saved; retry this song.');
+    const blockers = !lastMedia ? ['current audio unavailable'] : [
+      lastMedia.source !== prepared.target.source && 'audio source changed',
+      !lastMedia.paused && 'audio still playing', lastMedia.seeking && 'seek still pending',
+      lastMedia.readyState < 3 && 'audio still buffering',
+      lastMedia.currentTime !== 0 && `audio position ${Number(lastMedia.currentTime).toFixed(3)}s`,
+      lastMedia.playbackRate !== 1 && 'audio speed is not 1×',
+    ].filter(Boolean);
+    throw new Error(`Spotify did not settle at the beginning: ${blockers.join(', ') || seekError || 'start did not stay stable'}. Nothing was saved.`);
   } catch (error) {
     await bridge.command('capture-abort').catch(() => {});
     throw error;

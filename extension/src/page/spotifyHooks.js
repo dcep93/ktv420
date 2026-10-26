@@ -238,6 +238,8 @@
           updateMonitor(); result = { ok: true };
         } else if (command === "capture-prepare") {
           result = await controller.prepare(payload || {});
+        } else if (command === "capture-rewind") {
+          result = await controller.rewind(payload || {});
         } else if (command === "capture-begin") {
           if (!listeningEnabled) throw new Error('Open ktv420 before capturing audio.');
           result = await controller.begin(payload || {});
@@ -343,6 +345,19 @@
         const graph = await getOrCreateAudioGraph(element);
         if (graph.context.state === 'suspended') await graph.context.resume();
         element.playbackRate = 1; rateElements.delete(element);
+        return { target: describeMediaElement(element) };
+      },
+      async rewind({ expectedSource } = {}) {
+        if (!listeningEnabled) throw new Error('Open ktv420 before preparing capture.');
+        if (currentCapture) throw new Error('Cannot rewind an active recording.');
+        const element = await waitForSingleCaptureTarget(mediaTracker, 1000);
+        if (!expectedSource || getMediaSource(element) !== expectedSource || !element.paused || element.seeking) {
+          throw new Error('Spotify changed while preparing its exact start.');
+        }
+        // Spotify's range can acknowledge zero before its actual media seeks.
+        // Correct only this verified, paused source; the caller still waits for
+        // seeking to finish and re-verifies zero before arming the recorder.
+        if (element.currentTime !== 0) element.currentTime = 0;
         return { target: describeMediaElement(element) };
       },
       async begin({ timeoutMs = 1000, requireStart = false, expectedSource } = {}) {

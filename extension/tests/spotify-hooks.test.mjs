@@ -537,3 +537,19 @@ test('actual seeks, unresolved startup seeks and later returns to zero remain in
     assert.equal(result.invalid, true, scenario);
   }
 });
+
+test('exact capture rewind changes only a matching paused source before recording', async () => {
+  const h=harness([{src:'song',paused:true,currentTime:2.824}]);
+  const result=await h.command('capture-rewind',{expectedSource:'song'});
+  assert.equal(result.ok,true);assert.equal(h.elements[0].currentTime,0);assert.equal(h.elements[0].paused,true);
+  await h.command('capture-begin',{requireStart:true,expectedSource:'song'});
+  assert.equal((await h.command('capture-rewind',{expectedSource:'song'})).ok,false,'never seek an active recording');
+  for(const values of [{paused:false},{seeking:true},{src:'other'}]){
+    const other=harness([{src:'song',paused:true,currentTime:2.824,...values}]);
+    assert.equal((await other.command('capture-rewind',{expectedSource:'song'})).ok,false);
+    assert.equal(other.elements[0].currentTime,2.824);
+  }
+  const closed=harness([{src:'song',paused:true,currentTime:2.824}],undefined,null,false);
+  assert.equal((await closed.command('capture-rewind',{expectedSource:'song'})).ok,false);
+  assert.equal(closed.elements[0].currentTime,2.824);
+});
