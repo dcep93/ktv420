@@ -1,7 +1,8 @@
+import { createHighwayAtmosphere, updateHighwayAtmosphere, highwayDesert } from './highwayAtmosphere';
 import { beginVisualizer } from './canvas';
 import { createStemSceneState, seed, updateStemScene, type StemVoice } from './stemScene';
 
-const states = new WeakMap<HTMLCanvasElement, { audio: ReturnType<typeof createStemSceneState>; travel: number; time: number }>();
+const states = new WeakMap<HTMLCanvasElement, { audio: ReturnType<typeof createStemSceneState>; travel: number; time: number; sky: ReturnType<typeof createHighwayAtmosphere> }>();
 const TAU = Math.PI * 2;
 export function resetHighway(canvas: HTMLCanvasElement) { states.delete(canvas); }
 
@@ -27,7 +28,7 @@ export function drawHighway(canvas: HTMLCanvasElement, voices: StemVoice[], time
   const surface = beginVisualizer(canvas); if (!surface) return;
   const { context: c, width: w, height: h } = surface;
   let state = states.get(canvas);
-  if (!state) { state = { audio:createStemSceneState(), travel:time * .19, time }; states.set(canvas,state); }
+  if (!state) { state = { audio:createStemSceneState(), travel:time * .19, time, sky:createHighwayAtmosphere() }; states.set(canvas,state); }
   const delta = time - state.time;
   if (delta < 0 || delta > .5) state.travel = time * .19;
   else if (playing) state.travel += delta * (.17 + state.audio.levels.bass * .08);
@@ -36,21 +37,43 @@ export function drawHighway(canvas: HTMLCanvasElement, voices: StemVoice[], time
   const bass = Math.min(1, levels.bass + levels.original * .6);
   const drums = Math.min(1, levels.drums + levels.original * .35);
   const vocals = Math.min(1, levels.vocals + levels.original * .5);
-  const other = Math.min(1, levels.other + levels.original * .6);
+  const other = Math.min(1, state.audio.targets.other + state.audio.targets.original * .6);
+  const { daylight, density } = updateHighwayAtmosphere(state.sky, other, time, playing);
+  const desert = highwayDesert(time);
   const hue = highwayHue(time);
   const color = (offset: number, saturation: number, lightness: number, alpha = 1) =>
     `hsla(${(hue + offset + 360) % 360},${saturation}%,${lightness}%,${alpha})`;
   const horizon = highwayPoint(0,0,w,h,time), hy = horizon.y;
   const sky = c.createLinearGradient(0,0,0,h);
-  sky.addColorStop(0,color(35,32,7)); sky.addColorStop(.43,color(0,38,17));
-  sky.addColorStop(.435,color(15,25,12)); sky.addColorStop(1,color(30,25,5));
+  sky.addColorStop(0,`hsl(${220 + Math.sin(hue * Math.PI / 180) * 12},${35 + daylight * 30}%,${7 + daylight * 48}%)`);
+  sky.addColorStop(.43,color(0,38 + daylight * 20,17 + daylight * 58));
+  sky.addColorStop(.435,color(15,25 + daylight * 12,12 + daylight * 25)); sky.addColorStop(1,color(30,25,5 + daylight * 14));
   c.fillStyle=sky;c.fillRect(0,0,w,h);
 
-  // Fixed stars keep the sky quiet while the road moves toward the listener.
-  for(let i=0;i<56;i++) {
-    c.fillStyle=color(20,25,85,.12+seed(i+50)*.25+.045*Math.sin(time*.22+i*2.4));
-    const radius=.5+seed(i+80)*.7;
-    c.fillRect(seed(i)*w,seed(i+130)*hy*.79,radius,radius);
+  // Seeded positions and soft admission avoid popping when rhythmic density changes.
+  const visibility = (index: number, base: number, extra: number) => Math.max(0,Math.min(1,(base+density*extra-index)*.25));
+  for(let i=0;i<120;i++) {
+    const alpha=visibility(i,24,96)*(1-daylight)**2*(.22+seed(i+50)*.48+.04*Math.sin(time*.22+i*2.4));
+    if(alpha<.001)continue;
+    c.fillStyle=color(20,25,85,alpha);
+    const radius=.6+seed(i+80)*1.1;
+    c.fillRect(seed(i)*w,seed(i+130)*hy*.86,radius,radius);
+  }
+  // Cloud groups drift slowly; faster passages fill the sky, not speed up the camera.
+  for(let i=0;i<16;i++) {
+    const alpha=visibility(i,2,14)*daylight*.44;
+    if(alpha<.001)continue;
+    const size=w*(.055+seed(i+610)*.065), span=w+size*4;
+    const x=((seed(i+630)*span+time*(1+seed(i+640))*w*.00065)%span)-size*2;
+    const y=hy*(.12+seed(i+660)*.52), tall=h*(.012+seed(i+680)*.016);
+    const mist=c.createLinearGradient(0,y-tall*2,0,y+tall*1.5);
+    mist.addColorStop(0,`rgba(255,246,232,${alpha})`);mist.addColorStop(1,`rgba(235,220,218,${alpha*.12})`);
+    c.fillStyle=mist;c.beginPath();
+    for(let puff=0;puff<4;puff++){
+      const px=x+(puff-1.5)*size*.42,py=y-Math.sin(puff*Math.PI/3)*tall*.6;
+      c.moveTo(px+size*.44,py);c.ellipse(px,py,size*.44,tall*(.7+seed(i*4+puff+700)*.6),0,0,TAU);
+    }
+    c.fill();
   }
   if (vocals > .001) {
     const radius=Math.min(w*.14,h*.215), cy=hy-radius*.61;
@@ -79,16 +102,16 @@ export function drawHighway(canvas: HTMLCanvasElement, voices: StemVoice[], time
   }
 
   // Distant mountains: slow parallax, without jumping camera or hue changes.
-  if(other>.001) for(let layer=0;layer<3;layer++){
+  for(let layer=0;layer<3;layer++){
     c.beginPath();c.moveTo(0,hy+h*.09);
     for(let i=0;i<=64;i++){
       const x=i/64*w, u=i/64*9+time*.007*(layer+1);
       const peak=Math.abs(Math.sin(u*1.1+layer)*Math.cos(u*2.3+layer*4));
-      const y=hy+h*.045-layer*h*.008-peak*h*(.075+layer*.018);
+      const y=hy+h*.045-layer*h*.008-peak*h*(.045+desert*.03+layer*.018);
       c.lineTo(x,y);
     }
     c.lineTo(w,hy+h*.09);c.closePath();
-    c.fillStyle=color(layer*15,28,38-layer*11,other*(.4+layer*.25));c.fill();
+    c.fillStyle=color(layer*15,28,30+daylight*17-layer*9,.65+layer*.15);c.fill();
   }
 
   const path = (side: number, from=0, to=1) => {
@@ -104,7 +127,7 @@ export function drawHighway(canvas: HTMLCanvasElement, voices: StemVoice[], time
     const p=side===-1?i/48:1-i/48, point=highwayPoint(p,side,w,h,time);
     if(side===-1&&i===0)c.moveTo(point.x,point.y);else c.lineTo(point.x,point.y);
   }
-  c.closePath();c.fillStyle=color(30,22,5);c.fill();
+  c.closePath();c.fillStyle=color(30,22,5+daylight*6);c.fill();
   for(const side of [-1,1]){
     path(side);
     if(bass>.001){c.strokeStyle=color(0,85,70,bass*.08);c.lineWidth=12+bass*9;c.stroke();}
@@ -128,11 +151,11 @@ export function drawHighway(canvas: HTMLCanvasElement, voices: StemVoice[], time
     c.fillRect(point.x-2-p*3,point.y-height-1-p*2,4+p*6,2+p*4);
   }
   // Bounded, deterministic roadside objects; no ever-growing spawn queue.
-  if(other>.001) for(let i=0;i<22;i++){
+  for(let i=0;i<22;i++){
     const q=(seed(i+400)+state.travel)%1,p=q*q;
     const side=i%2?-1:1,point=highwayPoint(p,side*(1.45+seed(i+330)*2.2),w,h,time);
     const height=h*(.012+p*.25)*( .55+seed(i+220)*.6), arm=height*.29;
-    c.strokeStyle=color(150,42,62,Math.min(1,other*(.25+p*.9)));c.lineWidth=Math.max(.8,height*.065);c.lineCap='round';
+    c.strokeStyle=color(150,35,28+daylight*19,Math.min(1,desert*(.25+p*.9)));c.lineWidth=Math.max(.8,height*.065);c.lineCap='round';
     c.beginPath();c.moveTo(point.x,point.y);c.lineTo(point.x,point.y-height);
     c.moveTo(point.x,point.y-height*.45);c.lineTo(point.x-arm,point.y-height*.45);c.lineTo(point.x-arm,point.y-height*.76);
     c.moveTo(point.x,point.y-height*.64);c.lineTo(point.x+arm*.8,point.y-height*.64);c.lineTo(point.x+arm*.8,point.y-height*.9);c.stroke();

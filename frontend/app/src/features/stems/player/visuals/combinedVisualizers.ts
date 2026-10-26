@@ -10,7 +10,7 @@ export const combinedVisualizers = {
   'ink-tank': { label: 'Ink Tank', legend: ['Drums · jets', 'Bass · circulation', 'Vocals · ribbons', 'Other · diffusion'] },
   'resonance-plate': { label: 'Resonance Plate', legend: ['Drums · grains', 'Bass · nodes', 'Vocals · harmonics', 'Other · interference'] },
   glassworks: { label: 'Glassworks', legend: ['Drums · seams', 'Bass · amber', 'Vocals · rose', 'Other · teal'] },
-  highway: { label: 'Highway', legend: ['Drums · roadside lights', 'Bass · road glow', 'Vocals · sun', 'Other · desert'] },
+  highway: { label: 'Highway', legend: ['Drums · roadside lights', 'Bass · road glow', 'Vocals · sun', 'Other · sky'] },
   'stem-weather': { label: 'Stem Weather', legend: ['Drums · rain', 'Bass · waves', 'Vocals · thread', 'Other · atmosphere'] },
   'night-city': { label: 'Night City', legend: ['Drums · windows', 'Bass · skyline', 'Vocals · neon', 'Other · haze'] },
   'stem-garden': { label: 'Stem Garden', legend: ['Drums · seeds', 'Bass · roots', 'Vocals · vine', 'Other · leaves'] },

@@ -116,9 +116,15 @@ test('Highway is a bounded combined scene with independent stem contributions an
       s.reset();drawHighway(s.canvas,voices,i/60,true);
       assert.equal(s.read().depth,0);assert.ok(s.read().operations<3000);
     }
+    // Sustain Other long enough to exercise the daytime/cloud rendering branch.
+    for(let frame=120;frame<60*70;frame++){
+      s.reset();drawHighway(s.canvas,voices,frame/60,true);
+      assert.equal(s.read().depth,0);assert.ok(s.read().operations<3000);
+    }
+    resetHighway(s.canvas);
     voices.forEach(v=>{v.audible=false;});
     s.reset();drawHighway(s.canvas,voices,2,true);const silent=s.read().marks;
-    for(const role of ['drums','vocals','other','original']) {
+    for(const role of ['drums','vocals','original']) {
       const v=voices.find(v=>v.name===role)!;v.audible=true;
       s.reset();drawHighway(s.canvas,voices,2.1,true);
       assert.ok(s.read().marks>silent,role);v.audible=false;

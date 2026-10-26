@@ -72,3 +72,7 @@ All four should start as combined scenes with mute/solo/fader fidelity, the shar
 ### Super Time Ribbon follow-up
 
 165 tests pass, including bounded drawing, finite coordinates at compact/large/tiny sizes, balanced canvas state, pause determinism, and seek boundaries. Browser inspection confirmed compact and expanded rendering and pixel-identical paused frames. Two synthetic preview canvases measured approximately 0.41 ms mean / 0.70 ms p95 CPU drawing-command time; this does not measure compositor cost or full-player performance. Lint and production build pass.
+
+### Highway sky follow-up
+
+Other now controls slow daylight and smoothed rhythmic sky density. Seeded stars fade into drifting cloud clusters; the desert cycles independently every sixty seconds. Daylight uses an 18-second smoothing constant plus a 35-second full-range slew limit. The legend now reads “Other · sky.” 169 tests, lint and production builds pass, including signal-rate, pause/seek, periodicity and bounded-rendering checks. Browser inspection compared sparse/busy day/night scenes using the production renderer.
