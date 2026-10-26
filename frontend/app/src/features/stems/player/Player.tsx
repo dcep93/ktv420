@@ -56,6 +56,7 @@ import {
   type VisualizerType,
 } from "./types";
 import { visualizerOptions, supportsVisualizer } from "./visualizerOptions";
+import { pitchWindowSize } from './visuals/pitchAnalysis';
 import { drawVisualizer, resetVisualizerState } from "./visualizers";
 
 type SpotlightIntent =
@@ -897,6 +898,11 @@ export default function Player({
       }
       if (!isPlaying && now > settleUntil) return;
       const canDraw = (canvas: HTMLCanvasElement) => visible.has(canvas) && canvas.checkVisibility();
+      // Pitch needs several periods of low notes; other views keep their normal cost.
+      for (const analyser of Object.values(analyserNodesRef.current)) {
+        const fftSize = visualizerType === 'pitch-ribbon' ? pitchWindowSize(analyser.context.sampleRate) : 2048;
+        if (analyser.fftSize !== fftSize) analyser.fftSize = fftSize;
+      }
       if (isCombinedVisualizer(visualizerType)) {
         const canvas = combinedCanvas.current;
         if (canvas && canDraw(canvas)) drawCombinedVisualizer(visualizerType, canvas, tracks.flatMap(track => {
