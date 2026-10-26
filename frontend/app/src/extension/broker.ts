@@ -51,6 +51,12 @@ export function createBrokerBridge(options: BridgeOptions) {
         if (ready) options.player.postMessage({ source: 'ktv420-parent', version: LIBRARY_PROTOCOL_VERSION, type: 'closed' }, options.playerOrigin);
         return;
       }
+      if (data.source === 'ktv420-parent' && data.version === 2 && data.type === 'capture-result' &&
+          typeof data.id === 'string' && /^[a-zA-Z0-9-]{1,80}$/.test(data.id) && typeof data.ok === 'boolean') {
+        if (ready) options.player.postMessage({ source: 'ktv420-parent', version: 2, type: 'capture-result', id: data.id, ok: data.ok,
+          error: typeof data.error === 'string' ? data.error.slice(0, 4096) : '' }, options.playerOrigin);
+        return;
+      }
       if (validState(data)) {
         state = { source: 'ktv420-parent', version: LIBRARY_PROTOCOL_VERSION, type: 'state', active: data.active, starting: data.starting, supported: data.supported,
           spotifyPath: spotifyContext(data.spotifyPath) ? data.spotifyPath : '', notice: data.notice, error: data.error, tracks: (data.tracks as Record<string, unknown>[]).map(track => ({
@@ -86,9 +92,14 @@ export function createBrokerBridge(options: BridgeOptions) {
     if (data.type === 'ready') {
       ready = true;
       options.onReady?.();
-      options.parent.postMessage({ source: 'ktv420-overlay', version: LIBRARY_PROTOCOL_VERSION, type: 'ready' }, options.parentOrigin);
+      options.parent.postMessage({ source: 'ktv420-overlay', version: LIBRARY_PROTOCOL_VERSION, type: 'ready', controller: data.controller === 'hosted' ? 'hosted' : undefined }, options.parentOrigin);
       if (state) options.player.postMessage(state, options.playerOrigin);
       if (replay) options.player.postMessage(replay,options.playerOrigin);
+    } else if (ready && data.type === 'capture-one' && typeof data.id === 'string' && /^[a-zA-Z0-9-]{1,80}$/.test(data.id) &&
+        typeof data.trackId === 'string' && /^[a-zA-Z0-9]{22}$/.test(data.trackId)) {
+      options.parent.postMessage({ source: 'ktv420-overlay', version: 2, type: 'capture-one', id: data.id, trackId: data.trackId }, options.parentOrigin);
+    } else if (ready && data.type === 'capture-cancel' && typeof data.id === 'string' && /^[a-zA-Z0-9-]{1,80}$/.test(data.id)) {
+      options.parent.postMessage({ source: 'ktv420-overlay', version: 2, type: 'capture-cancel', id: data.id }, options.parentOrigin);
     } else if (ready && data.type === 'view-ready') {
       const navigation = parseOverlayNavigation(state?.navigation);
       if (navigation?.open && state?.supported && Array.isArray(state.tracks) && state.tracks.length &&
@@ -97,7 +108,7 @@ export function createBrokerBridge(options: BridgeOptions) {
           spotifyPath: state.spotifyPath, revision: navigation.revision }, options.parentOrigin);
       }
     } else if (ready && data.type === 'listening-heartbeat') {
-      options.parent.postMessage({ source: 'ktv420-overlay', version: LIBRARY_PROTOCOL_VERSION, type: data.type }, options.parentOrigin);
+      options.parent.postMessage({ source: 'ktv420-overlay', version: LIBRARY_PROTOCOL_VERSION, type: data.type, ...(data.captureFraction === null || typeof data.captureFraction === 'number' && Number.isFinite(data.captureFraction) && data.captureFraction >= 0 && data.captureFraction <= 1 ? {captureFraction:data.captureFraction} : {}) }, options.parentOrigin);
     } else if (ready && data.type === 'view') {
       const view = parseOverlayNavigation({ revision: data.revision, open: true, trackIndex: data.trackIndex });
       if (view) options.parent.postMessage({ source: 'ktv420-overlay', version: LIBRARY_PROTOCOL_VERSION, type: 'view',
@@ -106,7 +117,7 @@ export function createBrokerBridge(options: BridgeOptions) {
       const command = parseTransportCommand(data.command);
       if (command) options.parent.postMessage({ source: 'ktv420-overlay', version: LIBRARY_PROTOCOL_VERSION, type: 'transport', command }, options.parentOrigin);
     } else if (ready && (data.type === 'dismiss-replay' || data.type === 'close' || data.type === 'toggle-capture')) {
-      options.parent.postMessage({ source: 'ktv420-overlay', version: LIBRARY_PROTOCOL_VERSION, type: data.type }, options.parentOrigin);
+      options.parent.postMessage({ source: 'ktv420-overlay', version: LIBRARY_PROTOCOL_VERSION, type: data.type, ...(data.captureFraction === null || typeof data.captureFraction === 'number' && Number.isFinite(data.captureFraction) && data.captureFraction >= 0 && data.captureFraction <= 1 ? {captureFraction:data.captureFraction} : {}) }, options.parentOrigin);
     }
   }
   return {

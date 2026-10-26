@@ -12,12 +12,29 @@ const embedded = window.parent !== window;
 // The extension broker authenticates Spotify and relays only overlay controls.
 const parentOrigin = embedded ? brokerOrigin() : '';
 function send(type: string, command?: TransportCommand) {
-  if (embedded) window.parent.postMessage({ source: 'ktv420-overlay', version: 2, type, command }, parentOrigin);
+  if (embedded) window.parent.postMessage({ source: 'ktv420-overlay', version: 2, type, command, ...(type === 'ready' ? { controller: 'hosted' } : {}) }, parentOrigin);
 }
 export function useSpotifyOverlay(onClose?: () => void) {
   const closeRef = useRef(onClose);
   useLayoutEffect(() => { closeRef.current = onClose; }, [onClose]);
   const [state, setState] = useState(initial);
+  const hostedFraction = useRef<number | null>(null);
+  const reportCaptureFraction = useCallback((fraction:number|null) => {hostedFraction.current=fraction;}, []);
+  const captureRequest = useRef<{id:string;resolve:()=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>} | null>(null);
+  const cancelCapture = useCallback(() => {
+    const pending = captureRequest.current;
+    if (!pending) return;
+    captureRequest.current = null; clearTimeout(pending.timer);
+    window.parent.postMessage({source:'ktv420-overlay',version:2,type:'capture-cancel',id:pending.id},parentOrigin);
+    pending.reject(new Error('Capture stopped.'));
+  }, []);
+  const captureOne = useCallback((trackId:string) => new Promise<void>((resolve,reject) => {
+    if (captureRequest.current) { reject(new Error('Capture is busy.')); return; }
+    const id = crypto.randomUUID();
+    const timer = setTimeout(() => cancelCapture(), 2 * 60 * 60 * 1000);
+    captureRequest.current = {id,resolve,reject,timer};
+    window.parent.postMessage({source:'ktv420-overlay',version:2,type:'capture-one',id,trackId},parentOrigin);
+  }), [cancelCapture]);
   const [replay,setReplay] = useState<PerformanceRecording | null>(null);
   useEffect(() => {
     if (!embedded) return;
@@ -29,11 +46,19 @@ export function useSpotifyOverlay(onClose?: () => void) {
         return;
       }
       if (event.data?.source === 'ktv420-parent' && event.data.version === 2 && event.data.type === 'closed') {
-        closeRef.current?.(); return;
+        cancelCapture(); setState(previous => ({...previous,navigation:previous.navigation ? {...previous.navigation,open:false} : null})); closeRef.current?.(); return;
       }
       if (event.data?.source === 'ktv420-parent' && event.data.version === 2 && event.data.type === 'replay') {
         if(event.data.recording===null) {setReplay(null);return;}
         try { const next = parseRecording(event.data.recording); setReplay(previous => previous?.createdAt === next.createdAt && previous?.name === next.name ? previous : next); } catch { /* broker reports malformed recordings */ }
+        return;
+      }
+      if (event.data?.source === 'ktv420-parent' && event.data.version === 2 && event.data.type === 'capture-result') {
+        const pending = captureRequest.current;
+        if (pending && event.data.id === pending.id) {
+          captureRequest.current = null; clearTimeout(pending.timer);
+          if (event.data.ok === true) pending.resolve(); else pending.reject(new Error(event.data.error || 'Capture failed.'));
+        }
         return;
       }
       if (event.data?.source !== 'ktv420-parent' || event.data.type !== 'state' || event.data.version !== 2) return;
@@ -53,10 +78,10 @@ export function useSpotifyOverlay(onClose?: () => void) {
       }));
     };
     window.addEventListener('message', receive); send('ready');
-    const heartbeat = setInterval(() => send('listening-heartbeat'), 500);
+    const heartbeat = setInterval(() => window.parent.postMessage({source:'ktv420-overlay',version:2,type:'listening-heartbeat',captureFraction:hostedFraction.current},parentOrigin), 500);
     send('listening-heartbeat');
-    return () => { clearInterval(heartbeat); window.removeEventListener('message', receive); };
-  }, []);
+    return () => { cancelCapture(); clearInterval(heartbeat); window.removeEventListener('message', receive); };
+  }, [cancelCapture]);
   // A mounted iframe is not a rendered playlist. Acknowledge only after React
   // has committed actual rows for the requested Spotify context.
   useLayoutEffect(() => {
@@ -70,7 +95,7 @@ export function useSpotifyOverlay(onClose?: () => void) {
       return savingTrackIds === previous.savingTrackIds ? previous : { ...previous, savingTrackIds };
     });
   }, []);
-  return { ...state, acknowledgeSaved, replay, embedded, setView: sendView, transport: sendTransport, dismissReplay: () => send('dismiss-replay'), toggleCapture: () => send('toggle-capture'), close: () => send('close') };
+  return { ...state, reportCaptureFraction, captureOne, cancelCapture, acknowledgeSaved, replay, embedded, setView: sendView, transport: sendTransport, dismissReplay: () => send('dismiss-replay'), toggleCapture: () => send('toggle-capture'), close: () => send('close') };
 }
 
 const sendTransport = (command: TransportCommand) => send('transport', command);

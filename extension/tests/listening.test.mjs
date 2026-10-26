@@ -378,3 +378,34 @@ test('song identification warning waits for metadata to settle and clears on rec
   assert.equal(updates.at(-1).error, '', 'reopening resets identification timing');
   await controller.setEnabled(false); controller.dispose();
 });
+
+test('hosted mode reports native time, never auto-captures, and rejects correction during capture', async t => {
+  const ticks=[],updates=[],calls=[];let starts=0,stops=0,batch=false,now=10000;
+  t.mock.method(Date,'now',()=>now);
+  const id='1111111111111111111111',link={getAttribute:()=>`/track/${id}`};
+  const seek={max:'180000',value:'12000',getAttribute:()=> '0:12'};
+  const button={disabled:false,getAttribute:()=> 'Pause'};
+  for(const [key,value] of Object.entries({
+    document:{querySelector:s=>s.includes('control-button-playpause')?button:s.includes('now-playing-widget')?{contains:()=>true,querySelector:()=>null}:null,
+      querySelectorAll:s=>s.includes('input[type="range"]')?[seek,{max:'1',value:'.5'}]:[link]},
+    location:{origin:'https://open.spotify.com'},
+    chrome:{runtime:{async sendMessage(m){return {ok:true,result:m.type==='ktv420:listening-claim'?true:[]};}}},
+    setInterval(fn){ticks.push(fn);return 0;},clearInterval(){},
+  })) {
+    const previous=Object.getOwnPropertyDescriptor(globalThis,key);
+    Object.defineProperty(globalThis,key,{value,writable:true,configurable:true});
+    t.after(()=>previous?Object.defineProperty(globalThis,key,previous):delete globalThis[key]);
+  }
+  const runner={isActive:()=>batch,requestStop:async()=>{stops++;batch=false;},handoff(){throw Error('A correction must not hand off capture');}};
+  const controller=createListeningController({bridge:{async command(command,payload){calls.push({command,payload});return command==='listening-state'?{media:{currentTime:12,readyState:4,paused:false,playbackRate:1,source:'song'}}:{};}},
+    emit:s=>updates.push(s),ensurePlayer(){},getRunner:()=>runner,startCapture:async()=>{starts++;throw Error('Not hosted policy');}});
+  const settle=()=>new Promise(r=>setImmediate(r));
+  await controller.command({action:'hosted-control'});controller.heartbeat();await controller.setEnabled(true);await settle();
+  assert.equal(starts,0);assert.equal(updates.at(-1).relayVersion,1);assert.equal(updates.at(-1).captureAllowed,true);
+  await controller.command({action:'rate',trackId:id,rate:.5});now+=1000;controller.heartbeat();ticks[0]();await settle();
+  assert.equal(updates.at(-1).position,12);assert.equal(updates.at(-1).playbackRate,1);
+  batch=true;await controller.command({action:'seek',trackId:id,position:3,correction:true,bestEffort:true});
+  assert.equal(seek.value,'12000');
+  now+=5000;ticks[0]();await settle();assert.equal(stops,1,'frame loss stops native capture');
+  await controller.setEnabled(false);controller.dispose();
+});

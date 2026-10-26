@@ -1,3 +1,4 @@
+import { spotifySeekEcho } from './spotifyDrift';
 import type { TransportCommand } from './listeningProtocol';
 
 export type RemotePlayback = {
@@ -12,7 +13,7 @@ export class SpotifyRemoteObserver {
   private ignoreUntil = 0;
   commanded(now = Date.now()) { this.ignoreUntil = now + 3000; this.previous = null; }
   observe(state: RemotePlayback | undefined | null, now = Date.now()): RemoteChange | null {
-    if (!state || state.local === false || state.error || now - state.observedAt > 1800 || state.syncing) {
+    if (!state || state.local === false || state.error || now - state.observedAt > 1800 || (state.syncing && !spotifySeekEcho.active(state, now))) {
       this.previous = null; return null;
     }
     const previous = this.previous;
@@ -20,7 +21,7 @@ export class SpotifyRemoteObserver {
     if (now < this.ignoreUntil || !previous || state.observedAt <= previous.observedAt) return null;
     if (state.trackId !== previous.trackId) return { trackId: state.trackId, playing: state.playing, position: state.position };
     const expected = previous.position + (previous.playing ? (state.observedAt - previous.observedAt) / 1000 * (previous.playbackRate ?? 1) : 0);
-    const seek = Math.abs(state.position - expected) > 1.5;
+    const seek = Math.abs(state.position - expected) > 1.5 && !spotifySeekEcho.matches(state, now);
     if (!seek && state.playing === previous.playing) return null;
     return { ...(seek ? { position: state.position } : {}),
       ...(state.playing !== previous.playing ? { playing: state.playing } : {}) };

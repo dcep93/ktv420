@@ -8,7 +8,7 @@ const BUTTON_ID = 'ktv420-spotify-capture-button';
 const IFRAME_ID = 'ktv420-prepared-iframe';
 const STYLE_ID = 'ktv420-spotify-capture-style';
 
-export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTransport, onHeartbeat, onOpenChange, onReplay }) {
+export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTransport, onHeartbeat, onOpenChange, onReplay, onCancelCapture }) {
   const origin = chrome.runtime.getURL('').replace(/\/$/, '');
   const frameUrl = chrome.runtime.getURL('build/index.html?overlay=1');
   const [major, minor] = chrome.runtime.getManifest().version.split('.').map(Number);
@@ -21,7 +21,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
   overlay.id = IFRAME_ID; overlay.setAttribute('aria-label', 'ktv420 Spotify overlay'); overlay.setAttribute('aria-hidden', 'true');
   let iframe; let tracks = []; let notice = ''; let error = ''; let starting = false; let route = ''; let refreshing = false;
   let frameReady = false, lastTrackRefresh = 0, opening = false;
-  let replay = null;
+  let replay = null; let captureRequest = null;
   let urlKey = null;
   let navigation = { revision: 0, open: false, trackIndex: null };
   let collection = null, captureCollection = null;
@@ -216,9 +216,26 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
       chrome.runtime.sendMessage({type:'ktv420:clear-replay'}, () => { void chrome.runtime.lastError; });
       sendToFrame({source:PARENT,version:2,type:'replay',recording:null});return;
     }
-    if (event.data.type === 'ready') { frameReady = true; post(); postReplay(); return; }
-    if (event.data.type === 'listening-heartbeat') { onHeartbeat?.(); return; }
+    if (event.data.type === 'ready') { if (event.data.controller === 'hosted') await onTransport?.({ action: 'hosted-control' }); frameReady = true; post(); postReplay(); return; }
+    if (event.data.type === 'listening-heartbeat') { onHeartbeat?.(event.data.captureFraction); return; }
     if (event.data.type === 'transport') { await onTransport?.(event.data.command); return; }
+    if (event.data.type === 'capture-cancel') {
+      if (captureRequest === event.data.id) await onCancelCapture?.();
+      return;
+    }
+    if (event.data.type === 'capture-one') {
+      const { id, trackId } = event.data;
+      if (typeof id !== 'string' || !/^[a-zA-Z0-9-]{1,80}$/.test(id)) return;
+      const respond = (ok, error = '') => sendToFrame({source:PARENT,version:2,type:'capture-result',id,ok,error});
+      if (captureRequest || starting || isRunActive() || overlay.dataset.open !== 'true' || !tracks.some(t => t.trackId === trackId)) {
+        respond(false, 'Capture is busy or the requested song is unavailable.'); return;
+      }
+      captureRequest = id; starting = true; error = ''; captureCollection = collection; registerCollection(captureCollection, true); post();
+      try { await onToggleRun({trackSnapshot:tracks,trackIds:[trackId]}); respond(true); }
+      catch (reason) { error = reason?.message || String(reason); respond(false,error); }
+      finally { captureRequest = null; starting = false; refresh(); }
+      return;
+    }
     if (event.data.type !== 'toggle-capture' || starting) return;
     starting = true; error = ''; post();
     try {

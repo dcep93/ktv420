@@ -6,6 +6,7 @@ import { StemClock } from './stemClock.js';
 
 export function createListeningController({ bridge, emit, ensurePlayer, getRunner, getTrackIds = () => [], getTrackMetadata = () => null, startCapture = startPreciseCapture }) {
   let busy = false, disposed = false, owner = false, lastLease = 0, catalogAt = 0;
+  let hosted = false;
   let enabled = false, activation = Promise.resolve();
   let halted = false, customPlayback = false, syncPending = 0, syncSettlesAt = 0;
   let catalog = new Map(), recording = null, last = null, generation = 0, lastSource = '';
@@ -100,6 +101,10 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       if (changed && dom.trackId !== last.trackId && !syncPending && now >= syncSettlesAt) customPlayback = false;
       const runner = getRunner();
       const batch = runner?.isActive();
+      // The hosted controller is gone. Never leave a capture running unattended.
+      if (batch && now - frameHeartbeat >= 4000) {
+        halted = true; armed = false; await policy(0); await runner.requestStop();
+      }
       if (recording && recording.trackId === dom.trackId) {
         recording = withTrackMetadata({ ...recording,
           title: recording.title || dom.title, artist: recording.artist || dom.artist,
@@ -127,7 +132,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       stemClock.observe(local ? media.currentTime : dom.position, playing, seeked);
       if (playing) { armed = true; ensurePlayer(); }
       // Every new capture restarts at verified zero, including remote/automatic song changes.
-      if (playing && armed && !replayPreparation && !customPlayback && !batch && !ready && !batchPending && now > ignoreUntil && !recording) {
+      if (!hosted && playing && armed && !replayPreparation && !customPlayback && !batch && !ready && !batchPending && now > ignoreUntil && !recording) {
         const result = await startCapture({ bridge, trackId: dom.trackId, checkCancelled: () => {
           if (!enabled || disposed || halted || getRunner()?.isActive()) throw new Error('Capture preparation stopped.');
         } });
@@ -149,7 +154,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       if (current.trackId !== dom.trackId || current.playing !== dom.playing) { await policy(0); return; }
       // Playback is acknowledged only after the capture output is silenced.
       await policy(output === 'capture' && silentGeneration === generation ? volume : 0);
-      if (stemClock.active && output === 'stems' && playing && dom.duration > 0) {
+      if (!hosted && stemClock.active && output === 'stems' && playing && dom.duration > 0) {
         if (stemClock.position >= dom.duration) {
           await commandTransport({ action: dom.canNext ? 'next' : 'pause' });
           return;
@@ -163,16 +168,16 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       const saving = scope.filter(id => !catalog.has(id) && storing.has(id)).length * .99;
       const partial = recording?.complete && !catalog.has(dom.trackId) && dom.duration > 0 ? Math.min(.99, dom.position / dom.duration) : 0;
       const overallCaptureFraction = recording && scope.length ? (captured + saving + partial) / scope.length : null;
-      publish({ ...dom, overallCaptureFraction, generation, position: stemClock.active ? Math.min(dom.duration, stemClock.position) : local ? media.currentTime : dom.position, observedAt: Date.now(),
+      publish({ ...dom, overallCaptureFraction, generation, position: !hosted && stemClock.active ? Math.min(dom.duration, stemClock.position) : local ? media.currentTime : dom.position, observedAt: Date.now(),
         playing: playing && connected, local: owner && local, output, volume, error: error || identificationNotice,
         syncing: syncPending > 0 || now < syncSettlesAt,
-        capability: 1, tempoSupported: true, playbackRate: stemClock.active ? stemClock.rate : 1, capturing: !!recording || !!batch,
+        capability: 1, relayVersion: 1, captureAllowed: !halted && !customPlayback && !replayPreparation, tempoSupported: true, playbackRate: !hosted && stemClock.active ? stemClock.rate : 1, capturing: !!recording || !!batch,
         captureProgress: recording ? { trackId: recording.trackId, fraction: dom.duration > 0 ? Math.min(.99, dom.position / dom.duration) : null } : null,
       });
     } catch (reason) {
       error = reason?.message || String(reason); output = 'muted';
       await policy(0).catch(() => {});
-      publish({ capability: 1, trackId: '', generation: ++generation, position: 0, duration: 0, playing: false, local: false, output: 'muted', volume, observedAt: Date.now(), error });
+      publish({ capability: 1, relayVersion: 1, captureAllowed: false, trackId: '', generation: ++generation, position: 0, duration: 0, playing: false, local: false, output: 'muted', volume, observedAt: Date.now(), error });
     } finally { busy = false; }
   }
   const timer = setInterval(() => void tick(), 200);
@@ -203,11 +208,13 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
     isCapturing() { return output === 'capture'; },
     heartbeat() { frameHeartbeat = Date.now(); },
     command(command) {
+      if (command.action === 'hosted-control') { hosted = true; stemClock.reset(); return Promise.resolve(); }
       if (!enabled) return Promise.resolve();
       if (command.action === 'volume') { changeVolume(command.volume); return Promise.resolve(); }
       if (command.action === 'rate') { pendingRate=command; if (rateQueued) return commands; rateQueued=true; }
+      const correction = command.action === 'seek' && command.correction === true;
       const bestEffort = command.bestEffort === true;
-      if (bestEffort) { syncPending++; customPlayback = true; }
+      if (bestEffort && !correction) { syncPending++; customPlayback = true; }
       commands = commands.catch(() => {}).then(async () => {
         if (!enabled) return;
         if (command.action === 'rate') { command=pendingRate; pendingRate=null; rateQueued=false; }
@@ -217,6 +224,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
         if (command.action === 'enable') { armed = true; ensurePlayer(); return; }
         if (command.action === 'play' || command.action === 'select') halted = false;
         if (command.action === 'rate') {
+          if (hosted) return;
           const dom = readTransportDom();
           if (!Number.isFinite(command.rate) || command.rate < .5 || command.rate > 1.5 || dom.trackId !== command.trackId || catalog.get(dom.trackId) !== 'ready' || recording || getRunner()?.isActive()) throw new Error('Tempo changes require prepared stems. Capture stays at 1×.');
           while (busy) await new Promise(resolve => setTimeout(resolve,20));
@@ -231,13 +239,14 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
           finally { busy=false; }
           return;
         }
-        getRunner()?.handoff();
-        if (bestEffort) {
+        if (correction && (recording || getRunner()?.isActive())) return;
+        if (!correction) getRunner()?.handoff();
+        if (bestEffort && !correction) {
           stemClock.reset();
           await policy(0);
           if (recording) await finish(false);
         }
-        if (command.action !== 'pause' && command.action !== 'play') {
+        if (!correction && command.action !== 'pause' && command.action !== 'play') {
           await policy(0); generation++;
           if (recording) await finish(false);
         }
@@ -251,7 +260,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
         if (bestEffort) console.debug('[ktv420] Spotify sync unavailable', reason);
         else error = reason?.message || String(reason);
       }).finally(() => {
-        if (bestEffort) { syncPending--; syncSettlesAt = Date.now() + 1000; }
+        if (bestEffort && !correction) { syncPending--; syncSettlesAt = Date.now() + 1000; }
       });
       return commands;
     },

@@ -1,3 +1,5 @@
+import { useHostedCapture } from '../features/local/useHostedCapture';
+import { SpotifyDriftController } from '../features/local/spotifyDrift';
 import { catalogUrl } from '../features/local/extensionConnection';
 import { bestEffortSpotify } from '../features/local/spotifySync';
 import { useReplayExport } from '../features/local/export/useReplayExport';
@@ -28,6 +30,7 @@ export default function LibraryPage() {
   const mp3Export = useReplayExport();
   const exportController = mp3Export.controller;
   const [storedTracks, setTracks] = useState<LocalTrack[]>([]);
+  const [libraryReady,setLibraryReady] = useState(false);
   const [selected, setSelected] = useState('');
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
   const [record, setRecord] = useState<PlaybackRecord | null>(null);
@@ -104,6 +107,7 @@ export default function LibraryPage() {
     control:() => mixer.current,offset:id => captureStartSeconds(tracks.find(t => t.id===`spotify-${id}`)?.metadata),
   });
   const required = spotify.replay?.tracks || [];
+  const capture = useHostedCapture({spotify,tracks,libraryReady,required,replaying:replay.active,onError:setError});
   const replayReady = required.length>0 && required.every(item => tracks.some(t => t.id===`spotify-${item.id}` && t.status==='ready' && Math.abs(t.frames/t.sampleRate+captureStartSeconds(t.metadata)-item.duration)<1));
   useEffect(() => { if (spotify.replay) setViewMode('tracks'); }, [spotify.replay]);
   useEffect(() => {
@@ -127,6 +131,22 @@ export default function LibraryPage() {
   const selectedIndex = playbackTracks.findIndex(track => track.id === selected && (selectedRowIndex === null || track.rowIndex === selectedRowIndex));
   const activeTrack = tracks.find(track => track.id === selected);
   const captureOffset = captureStartSeconds(activeTrack?.metadata);
+  const drift = useRef(new SpotifyDriftController());
+  const driftInput = useRef({ listening, activeTrack, captureOffset, active: capture.active, entryPaused });
+  driftInput.current = { listening, activeTrack, captureOffset, active: capture.active, entryPaused };
+  useEffect(() => {
+    const controller = drift.current;
+    const timer = setInterval(() => {
+      const input = driftInput.current, control = mixer.current, track = input.activeTrack;
+      const audio = control?.ready && track && control.trackId === track.id && !input.active && !input.entryPaused
+        ? { trackId: track.id.replace(/^spotify-/, ''), position: control.position() + input.captureOffset,
+            duration: track.frames / track.sampleRate + input.captureOffset, playing: control.playing?.() === true } : null;
+      const command = controller.tick(input.listening, audio, Date.now());
+      if (command) transportCommand(command);
+    }, 500);
+    return () => { clearInterval(timer); controller.reset(); };
+  }, [transportCommand]);
+
   const observedProcessingPreference = useRef<boolean | null>(null);
   const acknowledgeSaved = spotify.acknowledgeSaved;
   const refreshRevision = useRef(0);
@@ -134,7 +154,7 @@ export default function LibraryPage() {
     const revision = ++refreshRevision.current;
     const [savedTracks, cached, enabled] = await Promise.all([listTracks(), getModelCacheStatus(), getProcessingEnabled()]);
     if (revision !== refreshRevision.current) return;
-    setTracks(savedTracks); setModelCached(cached); setAutoProcessing(enabled);
+    setTracks(savedTracks); setLibraryReady(true); setModelCached(cached); setAutoProcessing(enabled);
     acknowledgeSaved(savedTracks.map(track => track.id.replace(/^spotify-/, '')));
     if (observedProcessingPreference.current === true && !enabled) { cancelled.current = true; separator.current?.dispose(); }
     observedProcessingPreference.current = enabled;
@@ -227,7 +247,7 @@ export default function LibraryPage() {
     catch (reason) { setError(errorText(reason)); }
   };
   const removeAll = async () => {
-    if (running.current || deleting.current || recording || spotify.active || spotify.starting) return;
+    if (running.current || deleting.current || recording || capture.active || spotify.starting) return;
     deleting.current = true; setDeletingAudio(true); setError('');
     try {
       // Reuse the installed broker's guarded delete operation; no extension update required.
@@ -329,12 +349,12 @@ export default function LibraryPage() {
     }
     const row = spotify.tracks.find(track => track.rowIndex + 1 === navigation.trackIndex);
     const id = row && `spotify-${row.trackId}`;
-    if (spotify.active || spotify.starting || !id || !tracks.some(track => track.id === id && track.status === 'ready')) return;
+    if (capture.active || spotify.starting || !id || !tracks.some(track => track.id === id && track.status === 'ready')) return;
     appliedNavigation.current = navigation.revision;
     pauseForEntry();
     if (selected !== id || selectedRowIndex !== row.rowIndex) { loadedRevision.current = ''; setRecord(null); setSelected(id); setSelectedRowIndex(row.rowIndex); viewScroll.current.player = 0; }
     setViewMode('player');
-  }, [spotify.navigation, spotify.tracks, spotify.replay, spotify.active, spotify.starting, tracks, selected, selectedRowIndex, pauseForEntry, stopRecording]);
+  }, [spotify.navigation, spotify.tracks, spotify.replay, capture.active, spotify.starting, tracks, selected, selectedRowIndex, pauseForEntry, stopRecording]);
   useEffect(() => {
     if (!listening || listening.error || !listening.local || Date.now() - listening.observedAt > 1800) return;
     const changed = observedTrack.current !== listening.trackId;
@@ -384,18 +404,18 @@ export default function LibraryPage() {
     mixer.current?.pause(); setAutoPlay(false); setViewMode('tracks');
   };
   const close = useCallback(() => { closeRef.current(); spotify.close(); }, [spotify]);
-  const canCapture = !mp3Export.busy && !replay.active && !recording && spotify.embedded && !spotify.starting && !deletingAudio && (spotify.active || (spotify.supported && spotify.tracks.length > 0));
-  const audioBusy = mp3Export.busy || replay.active || !!active || recording || spotify.active || spotify.starting || deletingAudio;
+  const canCapture = !mp3Export.busy && !replay.active && !recording && spotify.embedded && !spotify.starting && !deletingAudio && (capture.active || (spotify.supported && spotify.tracks.length > 0));
+  const audioBusy = mp3Export.busy || replay.active || !!active || recording || capture.active || spotify.starting || deletingAudio;
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if (event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
       if (event.key === 'Escape') { event.preventDefault(); close(); return; }
       if (event.target instanceof HTMLElement && event.target.closest('input,textarea,select,button,[contenteditable="true"]')) return;
-      if (event.key === 'Enter' && viewMode === 'tracks' && canCapture) { event.preventDefault(); spotify.toggleCapture(); }
+      if (event.key === 'Enter' && viewMode === 'tracks' && canCapture) { event.preventDefault(); capture.toggle(); }
     };
     window.addEventListener('keydown', keydown);
     return () => window.removeEventListener('keydown', keydown);
-  }, [close, spotify, viewMode, canCapture]);
+  }, [close, spotify, viewMode, canCapture, capture]);
   const openTrack = (id: string, rowIndex?: number) => {
     if (tracks.find(track => track.id === id)?.status !== 'ready' || deleting.current || (recording && selected !== id)) return;
     if (selected !== id || selectedRowIndex !== rowIndex) { loadedRevision.current = ''; setRecord(null); setSelected(id); setSelectedRowIndex(rowIndex ?? null); viewScroll.current.player = 0; }
@@ -403,13 +423,13 @@ export default function LibraryPage() {
     setViewMode('player');
   };
   const startExport = (value: PerformanceRecording) => {
-    if (running.current || deleting.current || modelBusy.current || mix.current || replay.active || spotify.active || spotify.starting) { setError('Wait for capture, separation, or recording to finish before exporting.'); return; }
+    if (running.current || deleting.current || modelBusy.current || mix.current || replay.active || capture.active || spotify.starting) { setError('Wait for capture, separation, or recording to finish before exporting.'); return; }
     void mp3Export.start(value);
   };
   const stoppedByUser = !error && /^Capture run stopped by user\.?$/.test(spotify.error);
   const statusError = !!mp3Export.error || !!replay.error || !!listening?.error || !!error || (!!spotify.error && !stoppedByUser);
   const statusMessage = mp3Export.error || replay.error || error || listening?.error || (stoppedByUser ? 'Capture stopped.' : spotify.error) ||
-    (spotify.starting ? 'Starting capture…' : spotify.active ? 'Capturing songs as they play…' :
+    (spotify.starting ? 'Starting capture…' : capture.active ? 'Capturing songs as they play…' :
       spotify.notice.replace(' Local separation is queued automatically.', '').replace(' Separation continues here automatically.', ''));
   return <main className={`iframe-page iframe-page--overlay${viewMode === 'player' ? ' iframe-page--player' : ''}`} aria-label="ktv420 iframe controls"
     ref={page} onScroll={event => { if (event.target === event.currentTarget) viewScroll.current[viewMode] = event.currentTarget.scrollTop; }}>
@@ -422,8 +442,8 @@ export default function LibraryPage() {
     <div className="iframe-actions-shell"><div className="iframe-actions">
       <button type="button" className="iframe-close-button" aria-label="Close" title="Close" onClick={close}><OverlayIcon name="close" /></button>
       <button type="button" className="iframe-logo-button" aria-label="Start or stop ktv420 capture"
-        title={spotify.active ? 'Stop capture' : 'Start capture'} aria-disabled={!canCapture} disabled={!canCapture}
-        aria-pressed={spotify.active} onClick={spotify.toggleCapture}><img alt="" src="./favicon.svg" /></button>
+        title={capture.active ? 'Stop capture' : 'Start capture'} aria-disabled={!canCapture} disabled={!canCapture}
+        aria-pressed={capture.active} onClick={capture.toggle}><img alt="" src="./favicon.svg" /></button>
       <button type="button" className="iframe-settings-button" aria-label="Toggle settings view" title={viewMode === 'settings' ? 'Back to music' : 'Settings'}
         aria-pressed={viewMode === 'settings'} onClick={toggleSettings}><OverlayIcon name="settings" /></button>
     </div>
@@ -436,7 +456,7 @@ export default function LibraryPage() {
     <div className="iframe-content">
     {spotify.replay && <section className="replay-card" aria-label="Shared recording">
       <div><h2>{spotify.replay.name}</h2><p>{replay.active ? `${Math.floor(replay.seconds)}s · ${replay.status === 'preparing' ? 'Preparing song…' : replay.status === 'paused' ? 'Paused' : 'Replaying'}` : replayReady ? 'Ready to replay.' : 'Capture missing songs, then let separation finish.'}</p></div>
-      {replay.active ? <><button disabled={replay.status==='preparing' || replay.busy} onClick={() => void replay.togglePause()}>{replay.status==='paused' ? 'Resume recording' : 'Pause recording'}</button><button onClick={replay.stop}>Stop replay</button></> : <button disabled={!replayReady || spotify.active || !!active || mp3Export.busy} onClick={replay.start}>Play recording</button>}
+      {replay.active ? <><button disabled={replay.status==='preparing' || replay.busy} onClick={() => void replay.togglePause()}>{replay.status==='paused' ? 'Resume recording' : 'Pause recording'}</button><button onClick={replay.stop}>Stop replay</button></> : <button disabled={!replayReady || capture.active || !!active || mp3Export.busy} onClick={replay.start}>Play recording</button>}
       <ReplayExportButton progress={mp3Export.progress} disabled={audioBusy || !replayReady} onExport={() => startExport(spotify.replay!)} onCancel={mp3Export.cancel}/>
       {!replay.active && <button disabled={mp3Export.busy} onClick={spotify.dismissReplay}>Leave recording</button>}
       {required.some(item => tracks.some(t => t.id===`spotify-${item.id}` && t.status==='ready' && Math.abs(t.frames/t.sampleRate+captureStartSeconds(t.metadata)-item.duration)>=1)) && <p>A saved song has a different duration. Delete that song in Settings, then capture it again.</p>}

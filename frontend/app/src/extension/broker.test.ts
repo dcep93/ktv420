@@ -185,3 +185,23 @@ test('render readiness only relays for the current populated collection and navi
   await send(rendered);assert.equal(sent.length,1,'late readiness cannot reopen a closed view');
   await bridge.dispose();
 });
+
+test('single-song capture RPC is bounded, authenticated and reports sanitized results', async () => {
+  const sent:Record<string,unknown>[]=[], replies:Record<string,unknown>[]=[];
+  const parent={postMessage:(v:Record<string,unknown>)=>sent.push(v)} as unknown as Window;
+  const player={postMessage:(v:Record<string,unknown>)=>replies.push(v)} as unknown as Window;
+  const bridge=createBrokerBridge({parent,player,parentOrigin:'https://open.spotify.com',playerOrigin:'https://ktv420.web.app',showError(){},
+    createSession:()=>({dispose:async()=>{},handle:async()=>({source:'ktv420-library',version:2,id:'x',ok:true})}) as ReturnType<typeof createLibraryBrokerSession>});
+  const request={source:'ktv420-overlay',version:2,type:'capture-one',id:'request-1',trackId:'1111111111111111111111'};
+  const send=(data:unknown,origin='https://ktv420.web.app')=>bridge.receive({data,origin,source:player});
+  await send(request);assert.equal(sent.length,0);
+  await send({source:'ktv420-overlay',version:2,type:'ready',controller:'hosted'});
+  assert.equal(sent.at(-1)?.controller,'hosted');
+  for(const data of [{...request,trackId:'bad'}, {...request,id:'x'.repeat(81)}, {...request,version:1}])await send(data);
+  await send(request,'https://evil.example');assert.equal(sent.length,1);
+  await send({...request,script:'discard'});assert.deepEqual(sent.at(-1),request);
+  await send({...request,type:'capture-cancel'});assert.equal(sent.at(-1)?.type,'capture-cancel');
+  await bridge.receive({source:parent,origin:'https://open.spotify.com',data:{source:'ktv420-parent',version:2,type:'capture-result',id:request.id,ok:false,error:'Stopped',extra:'discard'}});
+  assert.deepEqual(replies.at(-1),{source:'ktv420-parent',version:2,type:'capture-result',id:request.id,ok:false,error:'Stopped'});
+  await bridge.dispose();
+});

@@ -1424,7 +1424,7 @@ export default function Player({
 
   useEffect(() => {
     onControls?.({
-      trackId:record.md5,ready:areTracksReady,position:currentPlaybackTime,snapshot,
+      trackId:record.md5,ready:areTracksReady,position:currentPlaybackTime,snapshot,playing:()=>isPlaying,
       play:async () => { stopAllSources(); await schedulePlayback(startOffsetRef.current); },
       pause:pausePlayback,
       seek:async position => { Object.values(canvasRefs.current).forEach(canvas => { if (canvas) resetSpectrogram(canvas); }); const resume = isPlaying; stopAllSources(); startOffsetRef.current = Math.max(0,Math.min(duration,position)); setCurrentTime(startOffsetRef.current); if (resume) await schedulePlayback(startOffsetRef.current); },

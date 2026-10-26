@@ -1,3 +1,4 @@
+import { readCachedTracks } from './storage.js';
 import { createCaptureTitle } from './captureTitle.js';
 import { createListeningController } from './listening.js';
 import { createPageBridge } from "./pageBridge.js";
@@ -11,6 +12,7 @@ bridge.inject().catch((error) => {
   console.warn("[ktv420] Failed to inject page hooks early", error);
 });
 
+let captureEpoch = 0, hostedCaptureFraction;
 let listening = null;
 let orchestrator = null;
 let orchestratorPromise = null;
@@ -20,7 +22,7 @@ async function getOrchestrator() {
     orchestratorPromise = import("./orchestrator.js").then(({ CaptureOrchestrator }) => {
       orchestrator = new CaptureOrchestrator({ bridge });
       orchestrator.addEventListener("activechange", () => ui.refresh());
-      orchestrator.addEventListener("captureoverallprogress", event => captureTitle.set(event.detail));
+      orchestrator.addEventListener("captureoverallprogress", event => captureTitle.set(hostedCaptureFraction === undefined ? event.detail : hostedCaptureFraction));
       orchestrator.addEventListener("captureprogress", (event) => ui.notifyCaptureProgress(event.detail));
       orchestrator.addEventListener("trackstored", (event) => {
         const detail = event.detail || {};
@@ -45,24 +47,30 @@ const ui = mountButton({
   onReplay: enabled => listening?.prepareReplay(enabled),
   onOpenChange: async (open, options) => {
     captureTitle.setOpen(open);
+    if (!open) captureEpoch++;
     if (!open && orchestrator?.isActive()) await orchestrator.requestStop();
     await listening?.setEnabled(open, options);
   },
   isRunActive: () => Boolean(orchestrator?.isActive()),
   loadSpotifyTracks: () => loadSpotifyPlaylistTracks(),
   onTransport: command => listening?.command(command),
-  onHeartbeat: () => listening?.heartbeat(),
+  onHeartbeat: fraction => { listening?.heartbeat(); if (fraction === null || Number.isFinite(fraction) && fraction >= 0 && fraction <= 1) { hostedCaptureFraction = fraction; captureTitle.set(fraction); } },
+  onCancelCapture: async () => { captureEpoch++; await orchestrator?.requestStop(); await listening?.stopCapture(); },
   onToggleRun: async (options = {}) => {
+    const epoch = captureEpoch;
     try {
       const runner = await getOrchestrator();
+      if (epoch !== captureEpoch) throw new Error('Capture stopped.');
       if (runner.isActive()) { await runner.requestStop(); await listening?.stopCapture(); return; }
       if (!runner.isActive() && listening?.isCapturing()) { await listening.stopCapture(); return; }
       if (!runner.isActive()) await listening?.beforeBatch();
       try {
+        if (epoch !== captureEpoch) throw new Error('Capture stopped.');
         await runner.toggleRun(options);
+        if (options.trackIds?.length === 1 && !(await readCachedTracks(options.trackIds)).has(options.trackIds[0])) throw new Error('Capture was interrupted. Nothing was saved.');
         if (!runner.handingOff) await listening?.stopCapture();
       }
-      catch (error) { await listening?.stopCapture(); throw error; }
+      catch (error) { if (!runner.handingOff) await listening?.stopCapture(); throw error; }
       finally { listening?.afterBatch(); }
       ui.refresh();
     } catch (error) {
@@ -74,7 +82,7 @@ const ui = mountButton({
 
 listening = createListeningController({ bridge, emit: state => {
   ui.notifyListening(state);
-  if (!orchestrator?.isActive()) captureTitle.set(state.overallCaptureFraction);
+  if (!orchestrator?.isActive()) captureTitle.set(hostedCaptureFraction === undefined ? state.overallCaptureFraction : hostedCaptureFraction);
 }, ensurePlayer: () => ui.prepare(), getRunner: () => orchestrator, getTrackIds: () => ui.getTrackIds(), getTrackMetadata: id => ui.getTrackMetadata(id) });
 window.addEventListener('pagehide', () => { listening?.dispose(); captureTitle.dispose(); }, { once: true });
 
