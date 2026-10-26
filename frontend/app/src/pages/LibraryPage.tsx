@@ -417,6 +417,11 @@ export default function LibraryPage() {
     window.addEventListener('keydown', keydown);
     return () => window.removeEventListener('keydown', keydown);
   }, [close, spotify, viewMode, canCapture, capture]);
+  const onLogoClick = () => {
+    if (viewMode !== 'player') { capture.toggle(); return; }
+    setViewMode('tracks');
+    if (urlNavigation) setUrlView(null, urlNavigation.revision, false);
+  };
   const openTrack = (id: string, rowIndex?: number) => {
     if (tracks.find(track => track.id === id)?.status !== 'ready' || deleting.current || (recording && selected !== id)) return;
     if (selected !== id || selectedRowIndex !== rowIndex) { loadedRevision.current = ''; setRecord(null); setSelected(id); setSelectedRowIndex(rowIndex ?? null); viewScroll.current.player = 0; }
@@ -442,9 +447,10 @@ export default function LibraryPage() {
     </div>
     <div className="iframe-actions-shell"><div className="iframe-actions">
       <button type="button" className="iframe-close-button" aria-label="Close" title="Close" onClick={close}><OverlayIcon name="close" /></button>
-      <button type="button" className="iframe-logo-button" aria-label="Start or stop ktv420 capture"
-        title={capture.active ? 'Stop capture' : 'Start capture'} aria-disabled={!canCapture} disabled={!canCapture}
-        aria-pressed={capture.active} onClick={capture.toggle}><img alt="" src="./favicon.svg" /></button>
+      <button type="button" className="iframe-logo-button" aria-label={viewMode === 'player' ? 'Back to playlist' : 'Start or stop ktv420 capture'}
+        title={viewMode === 'player' ? 'Back to playlist' : capture.active ? 'Stop capture' : 'Start capture'}
+        aria-disabled={viewMode !== 'player' && !canCapture} disabled={viewMode !== 'player' && !canCapture}
+        aria-pressed={viewMode === 'player' ? undefined : capture.active} onClick={onLogoClick}><img alt="" src="./favicon.svg" /></button>
       <button type="button" className="iframe-settings-button" aria-label="Toggle settings view" title={viewMode === 'settings' ? 'Back to music' : 'Settings'}
         aria-pressed={viewMode === 'settings'} onClick={toggleSettings}><OverlayIcon name="settings" /></button>
     </div>
