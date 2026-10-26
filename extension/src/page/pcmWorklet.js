@@ -1,4 +1,11 @@
 class ktv420PcmCaptureProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.port.onmessage = event => {
+      // Ordered behind previously posted PCM, so the collector can drain its tail.
+      if (event.data?.type === 'flush') this.port.postMessage({ type: 'flushed', id: event.data.id });
+    };
+  }
   process(inputs) {
     const input = inputs[0];
     if (!input || input.length === 0 || !input[0]) {
@@ -23,7 +30,8 @@ class ktv420PcmCaptureProcessor extends AudioWorkletProcessor {
     this.port.postMessage(
       {
         bytesBuffer: bytes.buffer,
-        channelCount
+        channelCount,
+        frame: currentFrame
       },
       [bytes.buffer]
     );

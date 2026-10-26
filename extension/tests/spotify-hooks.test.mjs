@@ -23,11 +23,13 @@ function harness(definitions, onWait = () => {}, timeline = null, activate = tru
     removeEventListener(type, listener) { this.listeners.get(type)?.delete(listener); }
     dispatch(type) { for (const listener of this.listeners.get(type) || []) listener(); }
     play() { this.paused = false; return Promise.resolve(); }
+    pause() { this.paused = true; }
   }
   const elements = definitions.map(value => new Media(value));
-  const graphs = [];
+  const graphs = [], ports = [], contexts = [];
   const gains = new Map();
   class AudioContext {
+    constructor() { contexts.push(this); }
     state = 'running'; currentTime = 0; sampleRate = 44100; destination = {};
     audioWorklet = { addModule: async () => {} };
     createMediaElementSource(element) { this.element = element; graphs.push(element); return { connect() {} }; }
@@ -58,11 +60,11 @@ function harness(definitions, onWait = () => {}, timeline = null, activate = tru
   };
   const context = vm.createContext({ window, document: new Document(), Document, HTMLMediaElement: Media,
     XMLHttpRequest: XHR, navigator: {}, performance: { now: () => now }, setInterval() {},
-    AudioWorkletNode: class { port = {}; }, console, Uint8Array, ArrayBuffer });
+    AudioWorkletNode: class { port = {}; constructor() { ports.push(this.port); this.port.postMessage = message => this.port.onmessage({data:{type:'flushed',id:message.id}}); } }, console, Uint8Array, ArrayBuffer });
   vm.runInContext(hookSource, context);
   if (activate) commandListener({ source: window, data: { source: 'ktv420_content', commandId: 0,
     command: 'listening-enable', payload: { enabled: true } } });
-  return { elements, graphs, gains, async command(command, payload = {}) {
+  return { elements, graphs, gains, ports, contexts, async command(command, payload = {}) {
     reply = null;
     await commandListener({ source: window, data: { source: 'ktv420_content', commandId: 1, command, payload } });
     assert.ok(reply, 'bridge must reply');
@@ -262,4 +264,56 @@ test('capture waits for the song timeline to catch up during a transition', asyn
   const h = harness([{ src: 'next', duration: 180 }, { tagName: 'VIDEO', loop: true, duration: 8 }],
     () => { timeline.duration = 180; }, timeline);
   assert.equal((await h.command('capture-begin', { timeoutMs: 100 })).result.target.source, 'next');
+});
+
+
+test('verified capture arms while paused at zero and late metadata never discards its opening', async () => {
+  const h=harness([{src:'song',paused:true,duration:1/44100}]);
+  const begin=await h.command('capture-begin',{requireStart:true,expectedSource:'song'});
+  assert.equal(begin.ok,true);assert.equal(begin.result.startVerified,true);
+  await h.elements[0].play();
+  const bytes=new Uint8Array([1,2,3,4,5,6,7,8]);
+  h.ports[0].onmessage({data:{bytesBuffer:bytes.buffer,channelCount:2,frame:0}});
+  h.elements[0].currentTime=.4;
+  h.contexts[0].currentTime=1/44100;
+  await h.command('capture-mark-start');
+  const result=(await h.command('capture-finish')).result;
+  assert.deepEqual(new Uint8Array(result.bytesBuffer),bytes);
+  assert.equal(result.startMediaTime,0);assert.equal(result.startVerified,true);
+});
+
+test('verified capture rejects a late, playing, seeking, or changed source at the final arm boundary', async () => {
+  for(const values of [{currentTime:.1},{paused:false},{seeking:true},{src:'different'}]){
+    const h=harness([{src:'song',paused:true,...values}]);
+    const result=await h.command('capture-begin',{requireStart:true,expectedSource:'song'});
+    assert.equal(result.ok,false);assert.match(result.error,/before recording was armed/);
+  }
+});
+
+test('audio-clock intervals retain delayed pre-pause/tail samples and exclude paused/next-song blocks', async () => {
+  const h=harness([{src:'song',paused:true,duration:4/44100}]);
+  await h.command('capture-begin',{requireStart:true,expectedSource:'song'});
+  const element=h.elements[0],clock=h.contexts[0];
+  await element.play();clock.currentTime=2/44100;element.pause();
+  clock.currentTime=10/44100;await element.play();
+  const block=(frame,values)=>h.ports[0].onmessage({data:{frame,channelCount:2,bytesBuffer:new Float32Array(values.flatMap(value=>[value,value])).buffer}});
+  block(0,[1,2]); // delivered after resume, but produced before pause
+  block(2,[0,0,0,0,0,0,0,0]);
+  clock.currentTime=12/44100;element.ended=true;element.paused=true;element.dispatch('ended');
+  block(10,[3,4]); // delivered after ended, still belongs to this capture
+  element.src='next';element.dispatch('seeking');block(12,[99,99]);
+  const result=(await h.command('capture-finish')).result;
+  assert.equal(result.invalid,false);
+  assert.deepEqual([...new Float32Array(result.bytesBuffer)],[1,1,2,2,3,3,4,4]);
+});
+
+test('verified finalization trims block padding only at the known tail and rejects missing frames', async () => {
+  for(const count of [3,5]){
+    const h=harness([{src:'song',paused:true,duration:4/44100}]);
+    await h.command('capture-begin',{requireStart:true,expectedSource:'song'});
+    await h.elements[0].play();h.contexts[0].currentTime=count/44100;
+    h.ports[0].onmessage({data:{frame:0,channelCount:2,bytesBuffer:new Float32Array(count*2).buffer}});
+    const result=(await h.command('capture-finish')).result;
+    assert.equal(result.invalid,count<4);assert.equal(result.byteLength,Math.min(count,4)*8);
+  }
 });

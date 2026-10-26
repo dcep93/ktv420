@@ -1,9 +1,10 @@
+import { startPreciseCapture, captureTiming } from './preciseCapture.js';
 import { readTransportDom, commandTransport, setSpotifyVolume } from './transport.js';
 import { sendLocalMessage, writeTrackArtifact } from './storage.js';
 import { withTrackMetadata } from './trackMetadata.js';
 import { StemClock } from './stemClock.js';
 
-export function createListeningController({ bridge, emit, ensurePlayer, getRunner, getTrackIds = () => [], getTrackMetadata = () => null }) {
+export function createListeningController({ bridge, emit, ensurePlayer, getRunner, getTrackIds = () => [], getTrackMetadata = () => null, startCapture = startPreciseCapture }) {
   let busy = false, disposed = false, owner = false, lastLease = 0, catalogAt = 0;
   let enabled = false, activation = Promise.resolve();
   let halted = false, customPlayback = false, syncPending = 0, syncSettlesAt = 0;
@@ -44,13 +45,10 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
     if (!valid || !capture.complete || catalog.has(capture.trackId)) { await bridge.command('capture-abort'); return; }
     const result = await bridge.command('capture-finish', {}, 60000);
     const bytes = new Uint8Array(result.bytesBuffer || new ArrayBuffer(0));
-    const seconds = bytes.byteLength / (result.sampleRate * result.channelCount * 4);
-    const expected = capture.duration - result.startMediaTime;
-    // Never publish a partial recording or a recording padded by a long pause.
-    if (result.invalid || result.startMediaTime > 0.35 || Math.abs(seconds - expected) > 0.45 || seconds < 0.1) return;
+    const timing = captureTiming({ ...result, byteLength: bytes.byteLength }, capture.duration);
     storing.add(capture.trackId);
     storageQueue = storageQueue.then(() => writeTrackArtifact(capture.trackId, bytes, {
-      storageVersion: 3, trackId: capture.trackId, trackName: capture.title, trackArtist: capture.artist,
+      ...timing, storageVersion: 3, trackId: capture.trackId, trackName: capture.title, trackArtist: capture.artist,
       trackArtworkSrc: capture.artwork, audioSampleRate: result.sampleRate, audioChannelCount: result.channelCount,
       audioChannelLayout: 'interleaved', audioSampleFormat: 'PCM_F32LE', audioByteLength: bytes.byteLength,
       crop: `${result.startMediaTime.toFixed(3)}-0`,
@@ -123,12 +121,15 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       const playing = !!(!halted && owner && local && dom.trackId && dom.playing && !media.paused && !media.ended && media.playbackRate === 1 && !error);
       stemClock.observe(local ? media.currentTime : dom.position, playing, seeked);
       if (playing) { armed = true; ensurePlayer(); }
-      // Start the PCM tap while the player loads, so a cold iframe does not
-      // discard the beginning of a newly selected song. Monitoring still waits
-      // for the hosted player's explicit silence acknowledgment below.
+      // Every new capture restarts at verified zero, including remote/automatic song changes.
       if (playing && armed && !replayPreparation && !customPlayback && !batch && !ready && !batchPending && now > ignoreUntil && !recording) {
-        const result = await bridge.command('capture-begin');
-        recording = withTrackMetadata({ ...dom, complete: result.target.currentTime <= 0.35 && !catalog.has(dom.trackId) && !storing.has(dom.trackId) }, getTrackMetadata(dom.trackId));
+        const result = await startCapture({ bridge, trackId: dom.trackId, checkCancelled: () => {
+          if (!enabled || disposed || halted || getRunner()?.isActive()) throw new Error('Capture preparation stopped.');
+        } });
+        recording = withTrackMetadata({ ...dom, duration: result.target.duration, complete: !catalog.has(dom.trackId) && !storing.has(dom.trackId) }, getTrackMetadata(dom.trackId));
+        // Our intentional restart must not be mistaken for a remote seek next tick.
+        last = null; lastSource = ''; generation++;
+        return;
       }
       const connected = now - frameHeartbeat < 2000;
       const previousOutput = output;

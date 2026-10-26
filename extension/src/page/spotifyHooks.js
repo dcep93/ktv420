@@ -236,6 +236,8 @@
           if (!Number.isFinite(payload?.gain) || payload.gain < 0 || payload.gain > 1) throw new Error('Invalid listening volume.');
           monitor = { gain: payload.gain, expires: performance.now() + 2500 };
           updateMonitor(); result = { ok: true };
+        } else if (command === "capture-prepare") {
+          result = await controller.prepare(payload || {});
         } else if (command === "capture-begin") {
           if (!listeningEnabled) throw new Error('Open ktv420 before capturing audio.');
           result = await controller.begin(payload || {});
@@ -247,7 +249,7 @@
         } else if (command === "capture-state") {
           result = controller.state();
         } else if (command === "capture-finish") {
-          result = controller.finish();
+          result = await controller.finish();
         } else if (command === "capture-abort") {
           result = controller.abort();
         } else if (command === "playlist-tracks") {
@@ -296,7 +298,16 @@
     HTMLMediaElement.prototype.play = function ktv420Play() {
       remember(this);
       if (listeningEnabled) void getOrCreateAudioGraph(this).then(graph => graph.context.resume()).catch(() => {});
-      return nativePlay.apply(this, arguments);
+      const result = nativePlay.apply(this, arguments);
+      audioGraphs.get(this)?.consumers.forEach(capture => capture.resumeAt());
+      return result;
+    };
+
+    const nativePause = HTMLMediaElement.prototype.pause;
+    HTMLMediaElement.prototype.pause = function ktv420Pause() {
+      const result = nativePause.apply(this, arguments);
+      audioGraphs.get(this)?.consumers.forEach(capture => capture.pauseAt());
+      return result;
     };
 
     const NativeAudio = window.Audio;
@@ -326,7 +337,15 @@
       describeTargets() {
         return discoverUsableTargets(mediaTracker).map(describeMediaElement);
       },
-      async begin({ timeoutMs = 1000 } = {}) {
+      async prepare({ timeoutMs = 3000 } = {}) {
+        if (!listeningEnabled) throw new Error('Open ktv420 before capturing audio.');
+        const element = await waitForSingleCaptureTarget(mediaTracker, timeoutMs);
+        const graph = await getOrCreateAudioGraph(element);
+        if (graph.context.state === 'suspended') await graph.context.resume();
+        element.playbackRate = 1; rateElements.delete(element);
+        return { target: describeMediaElement(element) };
+      },
+      async begin({ timeoutMs = 1000, requireStart = false, expectedSource } = {}) {
         const startedAt = Date.now();
         const timing = [];
         markTiming(timing, "wait_for_capture_target_start", startedAt);
@@ -337,10 +356,11 @@
         currentCapture = await PagePcmCapture.create(element);
         markTiming(timing, "pcm_capture_create_end", startedAt);
         markTiming(timing, "pcm_capture_begin_start", startedAt);
-        await currentCapture.begin();
+        await currentCapture.begin({ requireStart, expectedSource });
         markTiming(timing, "pcm_capture_begin_end", startedAt);
         return {
           target: describeMediaElement(element),
+          startVerified: currentCapture.startVerified,
           sampleRate: currentCapture.sampleRate,
           channelCount: currentCapture.channelCount,
           timing
@@ -348,7 +368,7 @@
       },
       async finishAndBegin({ timeoutMs = 1000 } = {}) {
         assertCapture(currentCapture);
-        const finished = currentCapture.finish();
+        const finished = await currentCapture.finish();
         currentCapture = null;
 
         const element = await waitForSingleCaptureTarget(mediaTracker, timeoutMs);
@@ -372,9 +392,9 @@
         assertCapture(currentCapture);
         return currentCapture.endState || describeMediaElement(currentCapture.element);
       },
-      finish() {
+      async finish() {
         assertCapture(currentCapture);
-        const result = currentCapture.finish();
+        const result = await currentCapture.finish();
         currentCapture = null;
         return result;
       },
@@ -406,9 +426,10 @@
       this.sampleRate = this.context.sampleRate;
       this.channelCount = 2;
       this.startMediaTime = 0;
+      this.duration = element.duration;
       this.invalid = false;
-      this.lastMediaTime = safeMediaTime(element);
-      this.onSeek = () => { if (this.capturing) this.invalid = true; };
+      this.intervals = [];
+      this.onSeek = () => { if (this.capturing && !this.ended) this.invalid = true; };
       this.ended = false;
       this.endState = null;
       this.onEnded = () => {
@@ -416,35 +437,49 @@
         // Spotify can reuse this element before the content script polls again.
         // Preserve the completed recording's boundary, not the next song's state.
         this.endState = { ...describeMediaElement(element), ended: true };
-        this.capturing = false;
+        this.pauseAt();
         this.ended = true;
       };
-      this.onRate = () => { if (this.capturing && element.playbackRate !== 1) this.invalid = true; };
+      this.onRate = () => { if (this.capturing && !this.ended && element.playbackRate !== 1) this.invalid = true; };
       element.addEventListener('ratechange', this.onRate);
       element.addEventListener('seeking', this.onSeek);
       element.addEventListener('ended', this.onEnded);
       this.graph.consumers.add(this);
     }
 
-    async begin() {
+    async begin({ requireStart = false, expectedSource } = {}) {
       if (this.context.state === "suspended") {
         await this.context.resume();
       }
       if (!listeningEnabled) { this.abort(); throw new Error('ktv420 capture was closed.'); }
 
+      if (requireStart && (!this.element.paused || this.element.seeking || this.element.readyState < 3 ||
+          !Number.isFinite(this.element.currentTime) || this.element.currentTime !== 0 ||
+          this.element.playbackRate !== 1 || getMediaSource(this.element) !== expectedSource)) {
+        this.abort(); throw new Error('Spotify moved before recording was armed. Retry this song.');
+      }
+      this.startVerified = requireStart;
       this.chunks = [];
       this.byteLength = 0;
       this.channelCount = 2;
       this.startMediaTime = safeMediaTime(this.element);
       this.capturing = true;
+      if (!this.element.paused) this.resumeAt();
+    }
+
+    resumeAt() {
+      if (!this.capturing || this.ended || this.intervals.at(-1)?.end === Infinity) return;
+      this.intervals.push({ start: Math.round(this.context.currentTime * this.sampleRate), end: Infinity });
+    }
+
+    pauseAt() {
+      const interval = this.intervals.at(-1);
+      if (interval?.end === Infinity) interval.end = Math.round(this.context.currentTime * this.sampleRate);
     }
 
     markAcceptedStart() {
-      this.invalid = this.element.playbackRate !== 1; this.ended = false;
-      this.endState = null;
-      this.chunks = [];
-      this.byteLength = 0;
-      this.startMediaTime = safeMediaTime(this.element);
+      // Track metadata arriving late must never throw away already-recorded audio.
+      if (this.element.playbackRate !== 1) this.invalid = true;
     }
 
     abort() {
@@ -457,18 +492,31 @@
       this.element.removeEventListener('ended', this.onEnded);
     }
 
-    finish() {
+    async finish() {
+      this.pauseAt();
+      await this.graph.flush();
       this.capturing = false;
       this.graph.consumers.delete(this);
       this.element.removeEventListener('ratechange', this.onRate);
       this.element.removeEventListener('seeking', this.onSeek);
       this.element.removeEventListener('ended', this.onEnded);
+      const rawCapturedFrames = this.byteLength / (this.channelCount * 4);
+      const expectedFrames = Math.round(this.duration * this.sampleRate);
+      // Worklet blocks can contain padding after the media ends. Trim only the
+      // known tail boundary, never silence at the opening. Never pad missing PCM.
+      if (this.startVerified) {
+        const excess = rawCapturedFrames - expectedFrames;
+        if (!Number.isInteger(expectedFrames) || expectedFrames <= 0 || excess < 0 || excess > this.sampleRate * .05) this.invalid = true;
+        else this.byteLength = expectedFrames * this.channelCount * 4;
+      }
       const bytes = new Uint8Array(this.byteLength);
       let offset = 0;
 
       for (const chunk of this.chunks) {
-        bytes.set(chunk, offset);
-        offset += chunk.byteLength;
+        const part = chunk.subarray(0, bytes.length - offset);
+        bytes.set(part, offset);
+        offset += part.byteLength;
+        if (offset === bytes.length) break;
       }
 
       return {
@@ -477,21 +525,31 @@
         sampleRate: this.sampleRate,
         channelCount: this.channelCount,
         startMediaTime: this.startMediaTime,
+        startVerified: this.startVerified,
+        rawCapturedFrames,
         invalid: this.invalid
       };
     }
 
     handleAudioChunk(message) {
-      if (this.capturing && this.element.playbackRate !== 1) this.invalid = true;
-      if (!this.capturing || this.invalid || this.element.paused || this.element.seeking) {
-        return;
-      }
-
+      if (this.capturing && !this.ended && this.element.playbackRate !== 1) this.invalid = true;
+      if (!this.capturing || this.invalid) return;
+      if (!Number.isSafeInteger(message.frame)) { this.invalid = true; return; }
       const bytes = new Uint8Array(message.bytesBuffer || new ArrayBuffer(0));
-      this.channelCount = Math.min(2, Math.max(1, Number(message.channelCount) || this.channelCount || 1));
-      if (this.byteLength + bytes.byteLength > 1024 * 1024 * 1024) { this.invalid = true; return; }
-      this.chunks.push(bytes);
-      this.byteLength += bytes.byteLength;
+      const channels = Number(message.channelCount), stride = channels * 4;
+      if (![1,2].includes(channels) || bytes.byteLength % stride) { this.invalid = true; return; }
+      this.channelCount = channels;
+      const end = message.frame + bytes.length / stride;
+      // Message delivery can lag behind pause/resume/ended. Use the audio clock
+      // at production time, never the media element's state at delivery time.
+      for (const interval of this.intervals) {
+        const from = Math.max(message.frame, interval.start), to = Math.min(end, interval.end);
+        if (to <= from) continue;
+        const part = bytes.subarray((from-message.frame)*stride,(to-message.frame)*stride);
+        if (this.byteLength + part.byteLength > 1024*1024*1024) { this.invalid = true; return; }
+        this.chunks.push(part); this.byteLength += part.byteLength;
+      }
+      while (this.intervals.length && this.intervals[0].end <= end) this.intervals.shift();
     }
   }
 
@@ -518,7 +576,10 @@
       numberOfOutputs: 0
     });
     const monitorNode = context.createGain(); monitorNode.gain.value = 0;
+    let flushId = 0;
+    const flushes = new Map();
     const graph = {
+      flush() { return new Promise(resolve => { const id = ++flushId; flushes.set(id,resolve); worklet.port.postMessage({ type: 'flush', id }); }); },
       monitor: monitorNode,
       context,
       source,
@@ -527,6 +588,7 @@
     };
 
     worklet.port.onmessage = (event) => {
+      if (event.data?.type === 'flushed') { flushes.get(event.data.id)?.(); flushes.delete(event.data.id); return; }
       for (const consumer of graph.consumers) {
         consumer.handleAudioChunk(event.data || {});
       }
@@ -651,6 +713,7 @@
       currentTime: safeMediaTime(element),
       duration: Number.isFinite(element.duration) ? element.duration : null,
       paused: Boolean(element.paused),
+      seeking: Boolean(element.seeking),
       ended: Boolean(element.ended),
       readyState: element.readyState,
       muted: Boolean(element.muted),

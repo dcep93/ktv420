@@ -64,6 +64,7 @@ test('Stop silences and pauses, and stale playing state cannot restart capture',
     t.after(() => previous ? Object.defineProperty(globalThis, key, previous) : delete globalThis[key]);
   }
   const controller = createListeningController({
+    startCapture: ({bridge}) => bridge.command('capture-begin'),
     bridge: { async command(command, payload) {
       calls.push({ command, payload });
       if (command === 'listening-state') return { media: { source: 'song', readyState: 4, paused, currentTime: 0, playbackRate: 1 }, volumeRevision: 0 };
@@ -74,6 +75,7 @@ test('Stop silences and pauses, and stale playing state cannot restart capture',
   const settle = () => new Promise(resolve => setImmediate(resolve));
   controller.heartbeat(); await controller.setEnabled(true); await settle();
   assert.equal(calls.filter(c => c.command === 'capture-begin').length, 1);
+  ticks[0](); await settle();
   await controller.stopCapture(); await settle();
   assert.equal(playing, false);
   assert.equal(updates.at(-1).capturing, false);

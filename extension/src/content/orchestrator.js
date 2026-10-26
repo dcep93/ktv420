@@ -1,3 +1,4 @@
+import { startPreciseCapture, captureTiming } from './preciseCapture.js';
 import { CaptureRunProgress } from "./captureTitle.js";
 import { STORAGE_VERSION } from "./constants.js";
 import {
@@ -174,28 +175,11 @@ export class CaptureOrchestrator extends EventTarget {
         }
 
         startInfo = null;
-        if (nextItem) {
-          if (item.cached) {
-            clickSkipForward();
-            debug.events.push({ type: "skip-forward", fromTrackId: item.trackId, at: Date.now() });
-            startInfo = await this.beginAndAcceptItem(nextItem, debug, {
-              logFirstStartTiming: !hasLoggedFirstStartTiming
-            });
-            hasLoggedFirstStartTiming = true;
-          } else {
-            const { finished } = await this.finishAndBeginNextCapture();
-            pendingCapture.capture = finished;
-            startInfo = await this.beginAndAcceptItem(nextItem, debug, {
-              captureAlreadyBegun: true,
-              logFirstStartTiming: !hasLoggedFirstStartTiming
-            });
-            hasLoggedFirstStartTiming = true;
-          }
-        } else if (pendingCapture) {
-          pendingCapture.capture = await this.finishPageCapture();
-        }
-
         if (pendingCapture) {
+          // Save this complete track before preparing another, so a failed next
+          // seek cannot discard good audio. Pause the new song while transferring.
+          pausePlaybackCleanly();
+          pendingCapture.capture = await this.finishPageCapture();
           const metadata = await this.storeCapturedTrack(pendingCapture.item, pendingCapture.capture, pendingCapture.captureEnd);
           queuedTrackIds.push(pendingCapture.item.trackId);
           summary.push({
@@ -210,6 +194,14 @@ export class CaptureOrchestrator extends EventTarget {
           });
           this.dispatchTrackStored(pendingCapture.item.trackId, metadata);
         }
+        if (nextItem) {
+          if (item.cached) clickSkipForward();
+          startInfo = await this.beginAndAcceptItem(nextItem, debug, {
+            logFirstStartTiming: !hasLoggedFirstStartTiming
+          });
+          hasLoggedFirstStartTiming = true;
+        }
+
       }
 
       pausePlaybackCleanly();
@@ -365,58 +357,20 @@ export class CaptureOrchestrator extends EventTarget {
     this.dispatchEvent(new CustomEvent("captureprogress", { detail: null }));
   }
 
-  async beginAndAcceptItem(
-    item,
-    debug,
-    { captureAlreadyBegun = false, logFirstStartTiming = false } = {}
-  ) {
-    if (!captureAlreadyBegun) {
-      markTiming(debug.timingTrace, "page_capture_begin_command_start", {
-        trackId: item.trackId
-      });
-      const beginResult = await this.bridge.command("capture-begin", { timeoutMs: START_TIMEOUT_MS }, START_TIMEOUT_MS + 1000);
-      markTiming(debug.timingTrace, "page_capture_begin_command_end", {
-        trackId: item.trackId,
-        pageTiming: summarizePageTiming(beginResult?.timing)
-      });
-    } else {
-      markTiming(debug.timingTrace, "page_capture_already_begun", {
-        trackId: item.trackId
-      });
-    }
-
+  async beginAndAcceptItem(item, debug, { logFirstStartTiming = false } = {}) {
     try {
-      markTiming(debug.timingTrace, "spotify_expected_track_wait_start", {
-        trackId: item.trackId
-      });
-      const startInfo = await this.waitForExpectedTrackStart(item, debug);
-      markTiming(debug.timingTrace, "spotify_expected_track_wait_end", {
-        trackId: item.trackId,
-        currentTime: startInfo.currentTime,
-        source: startInfo.source
-      });
-      if (logFirstStartTiming) {
-        markTiming(debug.timingTrace, "spotify_first_track_started", {
-          trackId: item.trackId,
-          trackName: item.trackName,
-          currentTime: startInfo.currentTime,
-          source: startInfo.source
-        });
-      }
-      if (!item.cached) {
-        markTiming(debug.timingTrace, "page_capture_mark_start_command_start", {
-          trackId: item.trackId
-        });
-        await this.bridge.command("capture-mark-start");
-        markTiming(debug.timingTrace, "page_capture_mark_start_command_end", {
-          trackId: item.trackId
-        });
-      } else {
-        await this.bridge.command("capture-abort");
-      }
+      // Identify the requested song first. The initial playhead may be anywhere;
+      // exact start verification happens after pause + seek below.
+      await this.waitForExpectedTrackStart(item, debug);
+      if (item.cached) return { currentTime: 0, source: 'cached' };
+      const result = await startPreciseCapture({ bridge: this.bridge, trackId: item.trackId,
+        checkCancelled: () => this.throwIfStopped() });
+      const startInfo = { acceptedAt: Date.now(), currentTime: result.target.currentTime, source: result.target.source };
+      debug.events.push({ type: 'verified-zero-start', trackId: item.trackId, ...startInfo });
+      if (logFirstStartTiming) markTiming(debug.timingTrace, 'spotify_first_track_started', startInfo);
       return startInfo;
     } catch (error) {
-      await this.bridge.command("capture-abort").catch(() => {});
+      await this.bridge.command('capture-abort').catch(() => {});
       throw error;
     }
   }
@@ -432,11 +386,9 @@ export class CaptureOrchestrator extends EventTarget {
       lastResolved = current;
 
       if (current?.trackId === item.trackId) {
-        const mediaState = await this.bridge.command("capture-state");
+        const { media: mediaState } = await this.bridge.command("listening-state");
+        if (!mediaState) { await delay(50); continue; }
         const currentTime = safeCurrentTime(mediaState);
-        if (currentTime >= 1) {
-          throw new Error(`Spotify started ${item.trackName} too far in (${currentTime.toFixed(3)}s).`);
-        }
 
         const mediaArtworkSrc = mediaSessionMatchesItem(snapshot.mediaSession, item)
           ? largestArtworkSrc(snapshot.mediaSession?.artwork)
@@ -468,7 +420,7 @@ export class CaptureOrchestrator extends EventTarget {
     }
 
     throw new Error(
-      `Spotify did not switch to expected track ${item.trackName} (${item.trackId}) within 1s. Last resolved: ${JSON.stringify(lastResolved)}`
+      `Spotify did not switch to expected track ${item.trackName} (${item.trackId}) within 3s. Last resolved: ${JSON.stringify(lastResolved)}`
     );
   }
 
@@ -592,18 +544,6 @@ export class CaptureOrchestrator extends EventTarget {
     return this.normalizePageCapture(capture);
   }
 
-  async finishAndBeginNextCapture() {
-    const result = await this.bridge.command(
-      "capture-finish-and-begin",
-      { timeoutMs: START_TIMEOUT_MS },
-      60000
-    );
-    return {
-      ...result,
-      finished: this.normalizePageCapture(result.finished)
-    };
-  }
-
   normalizePageCapture(capture) {
     const bytes = new Uint8Array(capture.bytesBuffer || new ArrayBuffer(0));
     return {
@@ -612,17 +552,19 @@ export class CaptureOrchestrator extends EventTarget {
       sampleRate: capture.sampleRate,
       channelCount: capture.channelCount,
       startMediaTime: capture.startMediaTime,
+      startVerified: capture.startVerified,
+      rawCapturedFrames: capture.rawCapturedFrames,
       invalid: capture.invalid
     };
   }
 
   async storeCapturedTrack(item, capture, captureEnd) {
-    if (capture.invalid) throw new Error('The song was seeked during capture. Listen from the beginning to capture it.');
+    const timing = captureTiming(capture, captureEnd.duration);
     const captureWithHash = {
       ...capture,
       md5: md5Hex(capture.bytes)
     };
-    const metadata = buildMetadata(item, captureWithHash, captureEnd);
+    const metadata = { ...buildMetadata(item, captureWithHash, captureEnd), ...timing };
     await writeTrackArtifact(item.trackId, capture.bytes, metadata);
     return metadata;
   }
