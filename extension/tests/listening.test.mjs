@@ -194,3 +194,72 @@ test('media handoff mute does not reset listening volume, but Spotify slider cha
   assert.equal(updates.at(-1).volume, 0.65);
   await controller.setEnabled(false); controller.dispose();
 });
+
+test('tempo advances the remix clock and seeks the DOM without changing Spotify media rate', async t => {
+  let now = 10000, position = 10, playing = true, trackId = '5EGTNEoUpibGgMWf6ECe0X';
+  const ticks = [], calls = [], updates = [], seeks = [];
+  t.mock.method(Date, 'now', () => now);
+  class Input {
+    max = '180000'; disabled = false;
+    get value() { return String(position * 1000); }
+    set value(value) { position = Number(value) / 1000; seeks.push(position); }
+    getAttribute() { return null; }
+    dispatchEvent() {}
+  }
+  const seek = new Input(), slider = { max: '1', value: '0.43' };
+  const link = { getAttribute: () => `/track/${trackId}` };
+  for (const [key, value] of Object.entries({
+    document: {
+      querySelector: selector => selector.includes('control-button-playpause') ? { disabled: false, getAttribute: () => playing ? 'Pause' : 'Play', click() { playing = !playing; } }
+        : selector.includes('now-playing-widget') ? { contains: () => true, querySelector: () => null } : null,
+      querySelectorAll: selector => selector.includes('input[type="range"]') ? [seek, slider] : [link],
+    },
+    HTMLInputElement: Input, location: { origin: 'https://open.spotify.com' },
+    chrome: { runtime: { async sendMessage(message) { return { ok: true, result: message.type === 'ktv420:listening-claim' ? true : [{ trackId, status: 'ready' }] }; } } },
+    setInterval(callback) { ticks.push(callback); return 0; }, clearInterval() {},
+    setTimeout(callback) { queueMicrotask(callback); return 0; }, clearTimeout() {},
+  })) {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, key);
+    Object.defineProperty(globalThis, key, { value, writable: true, configurable: true });
+    t.after(() => previous ? Object.defineProperty(globalThis, key, previous) : delete globalThis[key]);
+  }
+  const controller = createListeningController({
+    bridge: { async command(command, payload) {
+      calls.push({ command, payload });
+      assert.notEqual(command, 'listening-rate', 'tempo must never command a Spotify media playbackRate');
+      return command === 'listening-state' ? {
+        media: { source: trackId, readyState: 4, paused: !playing, currentTime: position, playbackRate: 1 },
+      } : {};
+    } }, emit: state => updates.push(state), ensurePlayer() {}, getRunner: () => null,
+  });
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  const tick = async (seconds = 0) => { now += seconds * 1000; if (playing) position += seconds; controller.heartbeat(); ticks[0](); await settle(); };
+  controller.heartbeat(); await controller.setEnabled(true); await settle();
+  await controller.command({ action: 'rate', trackId, rate: 1.5 });
+  await tick(2);
+  assert.equal(updates.at(-1).playbackRate, 1.5);
+  assert.equal(updates.at(-1).position, 13);
+  assert.equal(updates.at(-1).error, '');
+  assert.deepEqual(seeks, [13], 'muted Spotify is brought near the remix using its seek slider');
+  await tick(.2);
+  assert.ok(Math.abs(updates.at(-1).position - 13.3) < 1e-9, 'our seek must not reset the remix clock');
+  await controller.command({ action: 'pause' }); await tick();
+  const pausedPosition = updates.at(-1).position;
+  await tick(2); assert.equal(updates.at(-1).position, pausedPosition);
+  await controller.command({ action: 'seek', trackId, position: 30 }); await tick();
+  assert.equal(updates.at(-1).position, 30);
+  await controller.command({ action: 'rate', trackId, rate: .5 });
+  await controller.command({ action: 'play' }); await tick(); await tick(2);
+  assert.equal(updates.at(-1).position, 31);
+  position = 50; await tick();
+  assert.equal(updates.at(-1).position, 50, 'a real remote seek still controls the remix');
+  await controller.command({ action: 'seek', trackId, position: 178 }); await tick();
+  await tick(1);
+  assert.equal(updates.at(-1).position, 178.5);
+  assert.ok(position <= 178, 'slow playback keeps Spotify away from premature auto-advance');
+  await tick(3);
+  assert.equal(playing, false, 'end of remix pauses when Spotify has no next song');
+  trackId = '6EGTNEoUpibGgMWf6ECe0X'; position = 0; playing = true; await tick(3);
+  assert.equal(updates.at(-1).playbackRate, 1, 'new song starts at neutral tempo');
+  await controller.setEnabled(false); controller.dispose();
+});

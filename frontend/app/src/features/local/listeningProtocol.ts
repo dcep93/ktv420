@@ -1,5 +1,6 @@
 import { validTempo } from '../stems/player/tempo';
 export type ListeningState = {
+  // Remix clock rate; Spotify’s native media element remains at 1×.
   tempoSupported?: boolean; playbackRate?: number;
   capability: 1; trackId: string; generation: number; position: number; duration: number;
   playing: boolean; local: boolean; output: 'muted' | 'capture' | 'stems'; volume: number;

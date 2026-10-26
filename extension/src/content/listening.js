@@ -1,6 +1,7 @@
 import { readTransportDom, commandTransport, setSpotifyVolume } from './transport.js';
 import { sendLocalMessage, writeTrackArtifact } from './storage.js';
 import { withTrackMetadata } from './trackMetadata.js';
+import { StemClock } from './stemClock.js';
 
 export function createListeningController({ bridge, emit, ensurePlayer, getRunner, getTrackIds = () => [], getTrackMetadata = () => null }) {
   let busy = false, disposed = false, owner = false, lastLease = 0, catalogAt = 0;
@@ -9,7 +10,8 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
   let catalog = new Map(), recording = null, last = null, generation = 0, lastSource = '';
   let volume = 0, output = 'muted', error = '', armed = false;
   let volumeTimer = null, volumeEdit = 0, volumeSettlesAt = 0, latestState = null;
-  let desiredRate = 1, pendingRate = null, rateQueued = false;
+  const stemClock = new StemClock();
+  let syncedAt = 0, pendingRate = null, rateQueued = false;
   let batchPending = false, silentGeneration = -1, replayPreparation = false;
   let frameHeartbeat = 0, failedTrack = '', ignoreUntil = 0, commands = Promise.resolve();
   let lastVolumeDom = null;
@@ -108,18 +110,13 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       if (changed) failedTrack = '';
       if (dom.playing && !dom.trackId) error = 'Open Spotify’s Now Playing view to identify this song.';
       else if (error === 'Open Spotify’s Now Playing view to identify this song.') error = '';
-      if (changed || batch || !ready || !owner || now - frameHeartbeat >= 2000) {
-        desiredRate = 1;
-        if (media && media.playbackRate !== 1) {
-          await bridge.command('listening-rate', {rate:1,reset:true});
-          media.playbackRate = 1;
-        }
-      }
-      if (media && media.playbackRate !== desiredRate) {
-        error = 'Spotify reset the tempo. Pause and choose the tempo again.';
+      if (changed || batch || !ready || !owner || now - frameHeartbeat >= 2000) stemClock.reset();
+      if (media && media.playbackRate !== 1) {
+        error = 'Spotify must play at normal speed. Tempo belongs to the ktv420 player.';
         if (dom.playing) await commandTransport({action:'pause'});
       }
-      const playing = !!(!halted && owner && local && dom.trackId && dom.playing && !media.paused && !media.ended && media.playbackRate === desiredRate && !error);
+      const playing = !!(!halted && owner && local && dom.trackId && dom.playing && !media.paused && !media.ended && media.playbackRate === 1 && !error);
+      stemClock.observe(local ? media.currentTime : dom.position, playing, seeked);
       if (playing) { armed = true; ensurePlayer(); }
       // Start the PCM tap while the player loads, so a cold iframe does not
       // discard the beginning of a newly selected song. Monitoring still waits
@@ -141,7 +138,26 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       if (current.trackId !== dom.trackId || current.playing !== dom.playing) { await policy(0); return; }
       // Playback is acknowledged only after the capture output is silenced.
       await policy(output === 'capture' && silentGeneration === generation ? volume : 0);
-      last = { ...dom, playbackRate: media?.playbackRate ?? 1, observedAt: now };
+      if (stemClock.active && output === 'stems' && playing && dom.duration > 0) {
+        if (stemClock.position >= dom.duration) {
+          await commandTransport({ action: dom.canNext ? 'next' : 'pause' });
+          return;
+        }
+        // Keep Spotify's remote display nearby by seeking its muted DOM player.
+        // Never change its playbackRate or feed these corrections back into the remix clock.
+        const drift = Math.abs(stemClock.position - media.currentTime);
+        const approachingEnd = stemClock.rate < 1 && dom.duration - media.currentTime < 2;
+        if (now - syncedAt >= 1000 && (drift > .75 || approachingEnd)) {
+          // Leave headroom for the next poll: a slowed remix can still be
+          // playing after Spotify would naturally reach the end at 1×.
+          const target = stemClock.rate < 1 ? Math.min(stemClock.position, Math.max(0, dom.duration - 2)) : stemClock.position;
+          await commandTransport({ action: 'seek', trackId: dom.trackId, position: target });
+          syncedAt = Date.now();
+          dom = readTransportDom();
+          if (dom.trackId !== current.trackId || dom.playing !== current.playing) return;
+        }
+      }
+      last = { ...dom, playbackRate: 1, observedAt: Date.now() };
       lastSource = media?.source || '';
       const playlist = [...new Set(getTrackIds())];
       const scope = playlist.includes(dom.trackId) ? playlist : [dom.trackId];
@@ -149,9 +165,9 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       const saving = scope.filter(id => !catalog.has(id) && storing.has(id)).length * .99;
       const partial = recording?.complete && !catalog.has(dom.trackId) && dom.duration > 0 ? Math.min(.99, dom.position / dom.duration) : 0;
       const overallCaptureFraction = recording && scope.length ? (captured + saving + partial) / scope.length : null;
-      publish({ ...dom, overallCaptureFraction, generation, position: local ? media.currentTime : dom.position, observedAt: Date.now(),
+      publish({ ...dom, overallCaptureFraction, generation, position: stemClock.active ? Math.min(dom.duration, stemClock.position) : local ? media.currentTime : dom.position, observedAt: Date.now(),
         playing: playing && connected, local: owner && local, output, volume, error,
-        capability: 1, tempoSupported: true, playbackRate: media?.playbackRate ?? 1, capturing: !!recording || !!batch,
+        capability: 1, tempoSupported: true, playbackRate: stemClock.active ? stemClock.rate : 1, capturing: !!recording || !!batch,
         captureProgress: recording ? { trackId: recording.trackId, fraction: dom.duration > 0 ? Math.min(.99, dom.position / dom.duration) : null } : null,
       });
     } catch (reason) {
@@ -176,7 +192,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
         lastVolumeDom = readTransportDom().volume;
         volume = replayPreparation ? 0 : lastVolumeDom ?? 0;
         volumeSettlesAt = 0; latestState = null;
-        output = 'muted'; armed = false; desiredRate = 1; silentGeneration = -1; generation++;
+        output = 'muted'; armed = false; stemClock.reset(); silentGeneration = -1; generation++;
         halted = false;
         enabled = value && !disposed;
         if (enabled) void tick();
@@ -204,8 +220,11 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
           while (busy) await new Promise(resolve => setTimeout(resolve,20));
           busy = true;
           try {
-            if (readTransportDom().trackId !== command.trackId) throw new Error('The song changed before setting tempo.');
-            await policy(0); await bridge.command('listening-rate',{rate:command.rate}); desiredRate=command.rate;
+            const current = readTransportDom();
+            if (current.trackId !== command.trackId) throw new Error('The song changed before setting tempo.');
+            const page = await bridge.command('listening-state');
+            if (readTransportDom().trackId !== command.trackId || !page.media || page.media.playbackRate !== 1) throw new Error('Spotify playback changed before setting tempo.');
+            stemClock.setRate(command.rate, page.media.currentTime, current.playing && !page.media.paused);
           }
           finally { busy=false; }
           return;
@@ -219,6 +238,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
         if (command.action === 'seek') {
           const page = await bridge.command('listening-state');
           if (!page.media || Math.abs(page.media.currentTime - command.position) > 1.5) throw new Error('Spotify did not apply the requested seek to its local audio.');
+          stemClock.observe(page.media.currentTime, !page.media.paused, true);
         }
       }).catch(reason => { error = reason?.message || String(reason); });
       return commands;
@@ -235,7 +255,7 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       }
     },
     afterBatch() { batchPending = false; },
-    async beforeBatch() { batchPending = true; halted = false; desiredRate = 1; await bridge.command('listening-rate',{rate:1,reset:true}); while (busy) await new Promise(resolve => setTimeout(resolve, 20)); await finish(false); last = null; lastSource = ''; },
+    async beforeBatch() { batchPending = true; halted = false; stemClock.reset(); while (busy) await new Promise(resolve => setTimeout(resolve, 20)); await finish(false); last = null; lastSource = ''; },
     dispose() { disposed = true; clearInterval(timer); if (enabled) void this.setEnabled(false).catch(() => {}); },
   };
 }
