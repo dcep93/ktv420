@@ -57,7 +57,7 @@ import {
   type VisualizerType,
 } from "./types";
 import { visualizerOptions, supportsVisualizer } from "./visualizerOptions";
-import { pitchWindowSize } from './visuals/pitchAnalysis';
+import { PitchTimelineClient } from './visuals/pitchTimelineClient';
 import { drawVisualizer, resetVisualizerState } from "./visualizers";
 
 type SpotlightIntent =
@@ -117,12 +117,13 @@ export default function Player({
       syncAudioEffects(nodes,engine.current?.position ?? startOffsetRef.current,playing?rate:0,context.currentTime);
     });
     tempoRef.current = rate; pitchRef.current = semitones;
-    setTempo(rate); setPitch(semitones);
+    setTempo(rate); setPitch(semitones); visualRevision.current++;
   }, []);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volumes, setVolumes] = useState<Record<string, number>>({});
+  const pitchTimelines = useRef<PitchTimelineClient | null>(null);
   const [amplitudeEnvelopes, setAmplitudeEnvelopes] = useState<
     Record<string, number[]>
   >({});
@@ -686,6 +687,8 @@ export default function Player({
 
   useEffect(() => {
     let isCancelled = false;
+    const pitchClient = new PitchTimelineClient(() => { visualRevision.current++; });
+    pitchTimelines.current = pitchClient;
     const context = ensureAudioContext();
     const activeTrackIds = new Set(tracks.map((track) => track.id));
 
@@ -794,6 +797,7 @@ export default function Player({
           ...previous,
           [track.id]: envelope,
         }));
+        pitchClient.add(track.id, audioBuffer);
         setReadyTrackIds((previous) => {
           if (previous.includes(track.id)) {
             return previous;
@@ -825,6 +829,8 @@ export default function Player({
 
     return () => {
       isCancelled = true;
+      pitchClient.dispose();
+      if (pitchTimelines.current === pitchClient) pitchTimelines.current = null;
     };
   }, [
     applyEffectValue,
@@ -899,11 +905,7 @@ export default function Player({
       }
       if (!isPlaying && now > settleUntil) return;
       const canDraw = (canvas: HTMLCanvasElement) => visible.has(canvas) && canvas.checkVisibility();
-      // Pitch needs several periods of low notes; other views keep their normal cost.
-      for (const analyser of Object.values(analyserNodesRef.current)) {
-        const fftSize = visualizerType === 'pitch-ribbon' ? pitchWindowSize(analyser.context.sampleRate) : 2048;
-        if (analyser.fftSize !== fftSize) analyser.fftSize = fftSize;
-      }
+      pitchTimelines.current?.setTime(playbackTime);
       if (isCombinedVisualizer(visualizerType)) {
         const canvas = combinedCanvas.current;
         if (canvas && canDraw(canvas)) drawCombinedVisualizer(visualizerType, canvas, tracks.flatMap(track => {
@@ -924,7 +926,8 @@ export default function Player({
           if (!tap) { tap = createStereoTap(analyser); taps.set(track.id, tap); }
           drawStereoBloom(canvas, tap);
         } else drawVisualizer({ analyser, canvas, visualizerType, amplitudeEnvelope: amplitudeEnvelopes[track.id],
-          amplitudeMaximum: amplitudeMaximums[track.id], sampleRate, currentTime: playbackTime, duration: duration || 0,
+          amplitudeMaximum: amplitudeMaximums[track.id], pitchTimeline: pitchTimelines.current?.get(track.id),
+          pitchSemitones: pitchRef.current, sampleRate, currentTime: playbackTime, duration: duration || 0,
           isPlaying, effectiveVolume: getEffectiveVolumeFromRefs(track.id) });
       }
     };
@@ -1111,7 +1114,8 @@ export default function Player({
     (event: PointerEvent<HTMLCanvasElement>) => {
       if (
         visualizerType !== "time-ribbon" &&
-        visualizerType !== "super-time-ribbon"
+        visualizerType !== "super-time-ribbon" &&
+        visualizerType !== "pitch-ribbon"
       ) {
         return;
       }
@@ -1773,7 +1777,7 @@ export default function Player({
                 key={track.id}
                 track={track}
                 hideCanvas={isCombinedVisualizer(visualizerType)}
-                seekable={visualizerType === "time-ribbon" || visualizerType === "super-time-ribbon"}
+                seekable={visualizerType === "time-ribbon" || visualizerType === "super-time-ribbon" || visualizerType === "pitch-ribbon"}
                 volume={volumes[track.id] ?? 1}
                 isMuted={!!trackMuteStates[track.id]}
                 isLocked={!!trackLockStates[track.id]}

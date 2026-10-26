@@ -47,36 +47,3 @@ export class PitchEstimator {
     return null;
   }
 }
-
-/** Don't mistake a brief attack/release for a sudden change of register. */
-export class PitchContinuity {
-  private hz: number | null = null;
-  private uncertainAt = NaN;
-  private candidate: number | null = null;
-  private candidateAt = -Infinity;
-  reset() { this.hz = null; this.gap(); }
-  gap() { this.uncertainAt = NaN; this.candidate = null; this.candidateAt = -Infinity; }
-  resolve(hz: number | null, time: number): number | null {
-    if (hz === null) {
-      if (!Number.isFinite(this.uncertainAt)) this.uncertainAt = time;
-      return time - this.uncertainAt <= .18 ? this.hz : null;
-    }
-    this.uncertainAt = NaN;
-    // Large one-frame errors occur at note boundaries. Require a second
-    // agreeing observation for a leap; ordinary melodic steps respond immediately.
-    if (this.hz !== null && Math.abs(Math.log2(hz / this.hz)) > .4) {
-      if (this.candidate === null || Math.abs(Math.log2(hz / this.candidate)) > .1 || time - this.candidateAt > .12) {
-        this.candidate = hz; this.candidateAt = time; return this.hz;
-      }
-    }
-    this.hz = hz; this.candidate = null; return hz;
-  }
-}
-
-/** Short level window keeps the longer pitch window from filling musical rests. */
-export function pitchLevel(samples: Float32Array, sampleRate: number) {
-  const start = Math.max(0, samples.length - Math.ceil(sampleRate * .02));
-  let energy = 0;
-  for (let i = start; i < samples.length; i++) energy += samples[i] ** 2;
-  return Math.sqrt(energy / Math.max(1, samples.length - start));
-}

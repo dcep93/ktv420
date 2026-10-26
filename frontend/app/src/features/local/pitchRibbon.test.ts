@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { newPitchHistory, pitchCenter, pitchHeight, pitchOpacity, updatePitchHistory } from '../stems/player/visuals/pitchRibbon';
-import { PitchContinuity, PitchEstimator, pitchLevel, pitchWindowSize } from '../stems/player/visuals/pitchAnalysis';
+import { drawPitchRibbon, pitchCenter, pitchHeight, pitchOpacity, pitchRange } from '../stems/player/visuals/pitchRibbon';
+import { PitchEstimator, pitchWindowSize } from '../stems/player/visuals/pitchAnalysis';
 import { signalRms } from '../stems/player/visuals/analysis';
 import { supportsVisualizer, visualizerOptions } from '../stems/player/visualizerOptions';
 
@@ -29,33 +29,6 @@ test('octaves have equal vertical spacing; quiet active passages stay visible an
   assert.ok(pitchOpacity(.003)>.1 && pitchOpacity(.003)<.8);
   assert.equal(pitchOpacity(.001),0);
   assert.equal(pitchOpacity(0), 0); assert.equal(pitchOpacity(NaN), 0); assert.equal(pitchOpacity(1), 1);
-});
-
-test('history samples at a bounded rate, smooths jumps and freezes on pause', () => {
-  const state = newPitchHistory(); let samples = 0;
-  const measure = () => { samples++; return { hz: 110, rms: .1 }; };
-  updatePitchHistory(state, 0, true, measure);
-  updatePitchHistory(state, .01, true, measure);
-  assert.equal(samples, 1);
-  updatePitchHistory(state, .05, true, () => ({ hz: 1760, rms: .2 }));
-  const last = state.points.at(-1)!;
-  assert.ok(last.pitch > Math.log2(110) && last.pitch < Math.log2(1760));
-  const saved = structuredClone(state.points);
-  updatePitchHistory(state, .05, false, measure);
-  assert.deepEqual(state.points, saved); assert.equal(samples, 1);
-  updatePitchHistory(state, .1, true, () => ({ hz: null, rms: 0 }));
-  assert.equal(state.points.at(-1)!.opacity, 0);
-});
-
-test('seeks, hidden intervals and new tracks do not connect unrelated audio; history stays bounded', () => {
-  const state = newPitchHistory(), measure = () => ({ hz: 440, rms: .1 });
-  for (let i = 0; i < 6000; i++) updatePitchHistory(state, i * .05, true, measure);
-  assert.ok(state.points.length <= 402);
-  assert.ok(state.points[0].time >= state.lastTime - 20.1);
-  updatePitchHistory(state, 10, false, measure); assert.equal(state.points.length, 0);
-  updatePitchHistory(state, 10, true, measure); assert.equal(state.points.length, 1);
-  updatePitchHistory(state, 30, true, measure); assert.equal(state.points.length, 1);
-  assert.equal(newPitchHistory().points.length, 0);
 });
 
 test('Pitch Ribbon follows Super Time Ribbon and is accepted by replay/settings validation', () => {
@@ -88,51 +61,40 @@ test('periodicity rejects silence, DC and unpitched noise without inventing a no
   assert.equal(estimator.estimate(noise,rate),null);
 });
 
-test('melodic steps remain visible without flattening or a jumpy vertical scale',()=>{
-  const state=newPitchHistory();
-  for(let i=0;i<20;i++)updatePitchHistory(state,i*.05,true,()=>({hz:55,rms:.02,hue:25}));
-  const before={...state.range!};
-  for(let i=20;i<23;i++)updatePitchHistory(state,i*.05,true,()=>({hz:55*2**(2/12),rms:.02,hue:35}));
-  const point=state.points.at(-1)!;
-  assert.ok(Math.abs(point.pitch-Math.log2(55*2**(2/12)))<.01,'two-semitone change settles within 150ms');
-  const movement=(point.pitch-state.points[19].pitch)/(state.range!.high-state.range!.low);
-  assert.ok(movement>.075,'two semitones span at least 7.5% of panel height');
-  assert.ok(state.range!.high-state.range!.low>=2-1e-10);
-  assert.ok(Math.abs(state.range!.low-before.low)<.03,'range drifts gently');
-  assert.equal(point.hue,35,'history preserves the shared ribbon hue for each sample');
-  updatePitchHistory(state,1.15,true,()=>({hz:55,rms:0,hue:35}));
-  assert.equal(state.points.at(-1)!.opacity,0,'silence breaks even a confident pitch');
-  updatePitchHistory(state,1.2,true,()=>({hz:110,rms:.02,hue:70}));
-  assert.equal(state.points.at(-1)!.pitch,Math.log2(110),'new phrase does not glide through silence');
-});
-
-test('brief pitch uncertainty holds the note but sustained unpitched audio can use the fallback',()=>{
-  const tracker=new PitchContinuity();
-  assert.equal(tracker.resolve(55,1),55);
-  assert.equal(tracker.resolve(null,1.1),55);
-  assert.equal(tracker.resolve(null,1.3),null);
-  assert.equal(tracker.resolve(65.4,1.35),65.4);
-  tracker.reset();assert.equal(tracker.resolve(null,1.35),null);
-});
-test('silence opacity reads the recent waveform instead of smearing the pitch window into a gap',()=>{
-  const samples=tone(55,48000);
-  samples.fill(0,samples.length-960);
-  assert.ok(signalRms(samples)>.01);
-  assert.equal(pitchLevel(samples,48000),0);
-});
-
-test('pitch continuity rejects isolated register spikes but accepts a sustained leap',()=>{
-  const tracker=new PitchContinuity();
-  assert.equal(tracker.resolve(55,0),55);
-  tracker.gap();
-  assert.equal(tracker.resolve(null,.3),55,'new attack can reuse the previous tonal estimate');
-  assert.equal(tracker.resolve(110,.35),55,'one-frame octave error does not draw a spike');
-  assert.equal(tracker.resolve(55,.4),55);
-  assert.equal(tracker.resolve(110,.45),55);
-  assert.equal(tracker.resolve(110,.5),110,'intentional leaps remain visible after one confirmation');
-});
-
 test('tones above the periodicity range fall back rather than inventing a lower octave',()=>{
   const estimator=new PitchEstimator();
   for(const rate of [44100,48000,96000])for(const hz of [1800,2400])assert.equal(estimator.estimate(tone(hz,rate),rate),null);
+});
+
+function preparedTimeline() {
+  const count=6000;
+  return {pitches:Float32Array.from({length:count},(_,i)=>Math.log2(55)+(Math.floor(i/12)%5)/6),
+    levels:Float32Array.from({length:count},(_,i)=>i%48>40?0:.04),hues:new Float32Array(count).fill(35),
+    ready:new Uint8Array(count).fill(1),revision:1,failed:false};
+}
+test('source range is deterministic after seeks and shows two-semitone movement',()=>{
+  const timeline=preparedTimeline(),before=pitchRange(timeline,12);
+  pitchRange(timeline,180);assert.deepEqual(pitchRange(timeline,12),before);
+  assert.ok((2/12)/(before.high-before.low)>.075);
+  const next=pitchRange(timeline,12+1/60);
+  assert.ok(Math.abs(next.low-before.low)<.01);
+});
+test('preloaded renderer shows the future while paused, preserves geometry on seek, and offsets pitch',()=>{
+  let depth=0,trace:unknown[][]=[];
+  const c=new Proxy({}, {get(_t,key){
+    if(key==='createLinearGradient')return()=>({addColorStop(...args:unknown[]){trace.push(['color',...args]);}});
+    return(...args:unknown[])=>{trace.push([key,...args]);for(const a of args)if(typeof a==='number')assert.ok(Number.isFinite(a));
+      if(key==='save')depth++;if(key==='restore')depth--;};
+  },set(){return true;}});
+  const canvas={width:1000,height:160,getContext:()=>c} as unknown as HTMLCanvasElement;
+  const analyser=new Proxy({}, {get(){throw new Error('No live audio reads allowed');}}) as AnalyserNode;
+  const inputs={canvas,analyser,visualizerType:'pitch-ribbon' as const,sampleRate:48000,currentTime:3,duration:300,isPlaying:false,pitchTimeline:preparedTimeline()};
+  drawPitchRibbon(inputs);const original=trace;
+  assert.ok(trace.some(row=>row[0]==='lineTo'&&Number(row[1])>750),'future contour is drawn before playback');
+  assert.ok(trace.some(row=>row[0]==='moveTo'&&row[1]===250&&row[2]===0),'now is one quarter across');
+  assert.equal(depth,0);assert.ok(trace.length<1000);
+  trace=[];drawPitchRibbon({...inputs,currentTime:170});trace=[];drawPitchRibbon(inputs);
+  assert.deepEqual(trace,original,'seeking back recovers identical source geometry');
+  trace=[];drawPitchRibbon({...inputs,pitchSemitones:12});assert.notDeepEqual(trace,original);
+  trace=[];drawPitchRibbon({...inputs,currentTime:3.25});assert.equal(depth,0);
 });

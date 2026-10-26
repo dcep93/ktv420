@@ -1,4 +1,5 @@
-import { drawPitchRibbon, resetPitchRibbon } from './visuals/pitchRibbon';
+import type { PitchTimeline } from './visuals/pitchTimeline';
+import { drawPitchRibbon } from './visuals/pitchRibbon';
 import { drawKaleidoscope, resetKaleidoscope } from './visuals/kaleidoscope';
 import { seed } from './visuals/stemScene';
 import { drawTimeRibbon, resetTimeRibbon, smoothRibbonColor } from './visuals/timeRibbon';
@@ -16,7 +17,6 @@ function isLowPowerMode(): boolean {
 export function resetVisualizerState(canvas: HTMLCanvasElement) {
   resetKaleidoscope(canvas);
   resetTimeRibbon(canvas);
-  resetPitchRibbon(canvas);
 }
 
 export type VisualizerInputs = {
@@ -27,6 +27,8 @@ export type VisualizerInputs = {
   visualizerType: VisualizerType;
   isPlaying: boolean;
   amplitudeEnvelope?: number[];
+  pitchTimeline?: PitchTimeline;
+  pitchSemitones?: number;
   amplitudeMaximum?: number;
   effectiveVolume?: number;
   sampleRate: number;
