@@ -402,7 +402,7 @@ export default function LibraryPage() {
         {audioBusy && !deletingAudio && <p className="iframe-settings-help">Stop capture, separation, and mix recording before deleting audio.</p>}
         {!tracks.length && <p className="iframe-settings-help">No saved audio.</p>}
         <ol className="iframe-settings-list">{tracks.map(track => <li key={track.id}>
-          <div className="iframe-settings-row"><span className="iframe-settings-kind"><OverlayIcon name="music" /></span><span className="iframe-settings-path">{track.title}</span>
+          <div className="iframe-settings-row"><span className="iframe-settings-kind" data-ready={track.status === 'ready'} role="img" aria-label={track.status === 'ready' ? 'Original + 4 stems' : 'Original only'} title={track.status === 'ready' ? 'Original + 4 stems' : 'Original only'}><OverlayIcon name="music" /></span><span className="iframe-settings-path">{track.title}</span>
             <span className="iframe-settings-size">{size(track.bytes)}</span><span className="iframe-settings-row-actions">
               {track.status === 'error' && <button className="iframe-settings-icon-button" disabled={!!active || deletingAudio} title="Retry separation" aria-label={`Retry ${track.title}`} onClick={() => void processTracks([track.id])}><OverlayIcon name="retry" /></button>}
               {confirmDelete === track.id ? <><button disabled={audioBusy} onClick={() => void remove(track.id)}>Delete</button><button onClick={() => setConfirmDelete('')}>Cancel</button></> :

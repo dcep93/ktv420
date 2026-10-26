@@ -460,11 +460,12 @@
 }
 
 .iframe-settings-kind {
-  color: var(--ww-accent-cyan);
+  color: #a3a3a3;
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
 }
+.iframe-settings-kind[data-ready="true"] { color: var(--ww-title-pink); }
 
 .iframe-settings-path {
   color: var(--ww-text-soft);
