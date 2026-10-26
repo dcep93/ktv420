@@ -106,7 +106,7 @@ export function TrackRow({
           onClick={onToggleSpotlight}
           disabled={hideCanvas}
           aria-pressed={isSpotlighted}
-          title={hideCanvas ? "Stem Weather shows the whole mix" : isSpotlighted ? "Exit spotlight view" : "Spotlight track"}
+          title={hideCanvas ? "This visualizer shows the whole mix" : isSpotlighted ? "Exit spotlight view" : "Spotlight track"}
           style={{ minWidth: "187px", fontWeight: 600, color: "var(--ww-text)" }}
         >
           {label}

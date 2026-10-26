@@ -1,14 +1,11 @@
 import { bandLevel, signalRms, waveform } from './analysis';
 import { beginVisualizer } from './canvas';
-export type WeatherVoice = { name: string; input: boolean; analyser: AnalyserNode; audible: boolean };
+import { stemRole as weatherRole, type StemVoice } from './stemScene';
+export { stemRole as weatherRole } from './stemScene';
+export type WeatherVoice = StemVoice;
 type WeatherState = { lastTime: number; drums: number; bass: number; vocals: number; other: number; original: number; flash: number };
 const states = new WeakMap<HTMLCanvasElement, WeatherState>();
 export function resetWeather(canvas: HTMLCanvasElement) { states.delete(canvas); }
-export function weatherRole(name: string, input: boolean): 'drums'|'bass'|'vocals'|'other'|'original' {
-  if (input) return 'original';
-  const stem = name.replace(/\.(mp3|wav)$/i, '').toLowerCase();
-  return stem === 'drums' || stem === 'bass' || stem === 'vocals' ? stem : 'other';
-}
 export function drawStemWeather(canvas: HTMLCanvasElement, voices: WeatherVoice[], time: number, playing: boolean) {
   const view = beginVisualizer(canvas); if (!view) return;
   const {context: ctx, width: w, height: h, background} = view;

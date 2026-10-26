@@ -2,7 +2,7 @@ import { resizeVisualizer, canvasVisible } from './visuals/canvas';
 import { createStereoTap, type StereoTap } from './visuals/analysis';
 import { drawSpectrogram, resetSpectrogram } from './visuals/spectrogram';
 import { drawStereoBloom } from './visuals/stereoBloom';
-import { drawStemWeather, resetWeather } from './visuals/stemWeather';
+import { combinedVisualizers, isCombinedVisualizer, drawCombinedVisualizer, resetCombinedVisualizer } from './visuals/combinedVisualizers';
 import { getLogarithmicVolumeGain } from './mixerGain';
 import { connectStemEffects } from './stemGraph';
 import { TempoEngine } from './tempoEngine';
@@ -155,7 +155,7 @@ export default function Player({
   const gainNodesRef = useRef<Record<string, GainNode>>({});
   const effectNodesRef = useRef<Record<string, EffectNodes>>({});
   const analyserNodesRef = useRef<Record<string, AnalyserNode>>({});
-  const weatherCanvas = useRef<HTMLCanvasElement | null>(null);
+  const combinedCanvas = useRef<HTMLCanvasElement | null>(null);
   const visualRevision = useRef(0);
   useEffect(() => { visualRevision.current++; }, [volumes, trackMuteStates, trackDeafenStates, effectValues, effectTypes]);
   const canvasRefs = useRef<Record<string, HTMLCanvasElement | null>>({});
@@ -222,7 +222,7 @@ export default function Player({
       ) ?? null
     );
   }, [inputTrack, spotlightState, tracks]);
-  const spotlightTrackId = visualizerType === "stem-weather" ? null : spotlightTrack?.id ?? null;
+  const spotlightTrackId = isCombinedVisualizer(visualizerType) ? null : spotlightTrack?.id ?? null;
   const spotlightModeKey = spotlightTrackId
     ? `${spotlightTrackId}:${spotlightState?.level ?? "track"}`
     : "default";
@@ -824,7 +824,7 @@ export default function Player({
   }, [applyEffectiveVolume, getEffectiveVolume, tracks]);
 
   useEffect(() => {
-    const canvases = [...Object.values(canvasRefs.current), weatherCanvas.current].filter((c): c is HTMLCanvasElement => !!c);
+    const canvases = [...Object.values(canvasRefs.current), combinedCanvas.current].filter((c): c is HTMLCanvasElement => !!c);
     const resize = () => { canvases.forEach(resizeVisualizer); visualRevision.current++; };
     const observer = new ResizeObserver(resize);
     canvases.forEach(canvas => observer.observe(canvas));
@@ -833,26 +833,29 @@ export default function Player({
   }, [shouldShowVisualizerPicker, spotlightTrackId, tracks, visualizerType]);
 
   useEffect(() => {
-    const canvases = [...Object.values(canvasRefs.current), weatherCanvas.current].filter((c): c is HTMLCanvasElement => !!c);
-    canvases.forEach(canvas => { resetVisualizerState(canvas); resetSpectrogram(canvas); resetWeather(canvas); });
-    return () => canvases.forEach(canvas => { resetVisualizerState(canvas); resetSpectrogram(canvas); resetWeather(canvas); });
+    const canvases = [...Object.values(canvasRefs.current), combinedCanvas.current].filter((c): c is HTMLCanvasElement => !!c);
+    canvases.forEach(canvas => { resetVisualizerState(canvas); resetSpectrogram(canvas); resetCombinedVisualizer(canvas); });
+    return () => canvases.forEach(canvas => { resetVisualizerState(canvas); resetSpectrogram(canvas); resetCombinedVisualizer(canvas); });
   }, [tracks, visualizerType]);
 
   useEffect(() => {
     const taps = new Map<string, StereoTap>();
-    const canvases = [...Object.values(canvasRefs.current), weatherCanvas.current].filter((c): c is HTMLCanvasElement => !!c);
+    const canvases = [...Object.values(canvasRefs.current), combinedCanvas.current].filter((c): c is HTMLCanvasElement => !!c);
     const visible = new Set(canvases.filter(canvasVisible));
     const observer = new IntersectionObserver(entries => {
       entries.forEach(entry => {
         const canvas = entry.target as HTMLCanvasElement;
-        if (entry.isIntersecting) { if (!visible.has(canvas)) resetSpectrogram(canvas); visible.add(canvas); }
+        if (entry.isIntersecting) {
+          if (!visible.has(canvas)) { resetSpectrogram(canvas); resetCombinedVisualizer(canvas); }
+          visible.add(canvas);
+        }
         else visible.delete(canvas);
       });
       visualRevision.current++;
     });
     canvases.forEach(canvas => observer.observe(canvas));
     const visibilityChanged = () => {
-      if (!document.hidden) { canvases.forEach(resetSpectrogram); visualRevision.current++; }
+      if (!document.hidden) { canvases.forEach(canvas => { resetSpectrogram(canvas); resetCombinedVisualizer(canvas); }); visualRevision.current++; }
     };
     document.addEventListener('visibilitychange', visibilityChanged);
     let revision = -1, settleUntil = performance.now() + 1500, lastPosition = -1;
@@ -865,9 +868,9 @@ export default function Player({
       }
       if (!isPlaying && now > settleUntil) return;
       const canDraw = (canvas: HTMLCanvasElement) => visible.has(canvas) && canvas.checkVisibility();
-      if (visualizerType === 'stem-weather') {
-        const canvas = weatherCanvas.current;
-        if (canvas && canDraw(canvas)) drawStemWeather(canvas, tracks.flatMap(track => {
+      if (isCombinedVisualizer(visualizerType)) {
+        const canvas = combinedCanvas.current;
+        if (canvas && canDraw(canvas)) drawCombinedVisualizer(visualizerType, canvas, tracks.flatMap(track => {
           const analyser = analyserNodesRef.current[track.id];
           return analyser ? [{name: track.name, input: track.isInput, analyser, audible: getEffectiveVolumeFromRefs(track.id) > 0}] : [];
         }), playbackTime, isPlaying);
@@ -1216,7 +1219,7 @@ export default function Player({
         previous: visualizerType,
         next: nextVisualizerType,
       });
-      if (nextVisualizerType === "stem-weather") setSpotlightState(null);
+      if (isCombinedVisualizer(nextVisualizerType)) setSpotlightState(null);
       setVisualizerType(nextVisualizerType);
     },
     [emitRecordingEvent, visualizerType]
@@ -1773,16 +1776,16 @@ export default function Player({
       </div>
       {tracks.length ? (
         <>
-          {visualizerType === 'stem-weather' && <section className="stem-weather" aria-label="Stem Weather">
-            <canvas ref={weatherCanvas} aria-label="Combined stem visualization" />
-            <div className="stem-weather__legend" aria-hidden="true"><span>Drums · rain</span><span>Bass · waves</span><span>Vocals · thread</span><span>Other · atmosphere</span></div>
+          {isCombinedVisualizer(visualizerType) && <section className="combined-visualizer" aria-label={combinedVisualizers[visualizerType].label}>
+            <canvas ref={combinedCanvas} aria-label="Combined stem visualization" />
+            <div className="combined-visualizer__legend">{combinedVisualizers[visualizerType].legend.map(label => <span key={label}>{label}</span>)}</div>
           </section>}
           <div className="player-track-list" style={{ marginTop: "1rem" }}>
             {tracks.map((track) => (
               <TrackRow
                 key={track.id}
                 track={track}
-                hideCanvas={visualizerType === "stem-weather"}
+                hideCanvas={isCombinedVisualizer(visualizerType)}
                 seekable={visualizerType === "time-ribbon" || visualizerType === "super-time-ribbon"}
                 volume={volumes[track.id] ?? 1}
                 isMuted={!!trackMuteStates[track.id]}
@@ -1801,7 +1804,7 @@ export default function Player({
                 onToggleMute={toggleTrackMute}
                 onToggleDeafen={toggleTrackDeafen}
                 isSpotlighted={spotlightTrackId === track.id}
-                onToggleSpotlight={() => { if (visualizerType !== "stem-weather") toggleTrackSpotlight(track); }}
+                onToggleSpotlight={() => { if (!isCombinedVisualizer(visualizerType)) toggleTrackSpotlight(track); }}
                 registerCanvas={(ref) => {
                   canvasRefs.current[track.id] = ref;
                 }}

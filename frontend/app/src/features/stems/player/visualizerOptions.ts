@@ -7,6 +7,9 @@ export const visualizerOptions: Array<{
 }> = [
   { value: "time-ribbon", label: "Time Ribbon", hint: "Amplitude Timeline" },
   { value: "stem-weather", label: "Stem Weather", hint: "The whole mix" },
+  { value: "night-city", label: "Night City", hint: "The mix lights a skyline" },
+  { value: "stem-garden", label: "Stem Garden", hint: "The mix grows a garden" },
+  { value: "stem-orbit", label: "Orbit", hint: "The mix becomes a solar system" },
   { value: "spectrogram", label: "Spectrogram", hint: "Frequency history" },
   { value: "stereo-bloom", label: "Stereo Bloom", hint: "Left / right image" },
   { value: "laser-ladders", label: "Laser Ladders", hint: "Graphic EQ" },

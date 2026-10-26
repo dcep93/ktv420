@@ -46,6 +46,9 @@ export type RecordingStartRequest = {
 
 export type VisualizerType =
   | "stem-weather"
+  | "night-city"
+  | "stem-garden"
+  | "stem-orbit"
   | "spectrogram"
   | "stereo-bloom"
   | "laser-ladders"
