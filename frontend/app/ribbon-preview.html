@@ -1,7 +1,7 @@
 <!doctype html><html><head><meta charset="utf-8"><title>Time Ribbon stability preview</title></head><body>
-<main style="max-width:1100px;margin:24px auto;padding:24px"><h1>Ribbon stability</h1><label>Style <select id="mode"><option value="time-ribbon">Time Ribbon</option><option value="super-time-ribbon">Super Time Ribbon</option></select></label>
+<main style="max-width:1100px;margin:24px auto;padding:24px"><h1>Super Time Ribbon</h1><label>Style <select id="mode"><option value="time-ribbon">Time Ribbon</option><option value="super-time-ribbon" selected>Super Time Ribbon</option></select></label>
 <p>Competing frequency peaks alternate every frame. The waveform should scroll without flashing or changing shape.</p>
-<button id="pause">Pause</button><button id="seek">Seek ahead</button>
+<button id="pause">Pause</button><button id="seek">Seek ahead</button><button id="expand">Large panel</button>
 <h3>Wide</h3><canvas id="wide" aria-label="Wide ribbon" style="width:100%;height:200px"></canvas>
 <h3>Compact</h3><canvas id="compact" aria-label="Compact ribbon" style="width:360px;max-width:100%;height:100px"></canvas>
-<p id="status" role="status"></p></main><script type="module" src="/ribbon-preview.ts"></script></body></html>
+<p id="status" role="status"></p><p id="timing"></p></main><script type="module" src="/ribbon-preview.ts"></script></body></html>

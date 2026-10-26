@@ -45,7 +45,7 @@ export const visualizerOptions: Array<{
   {
     value: "super-time-ribbon",
     label: "Super Time Ribbon",
-    hint: "Shaking Ribbon",
+    hint: "Prismatic trails & beat sparks",
   },
   {
     value: "prismatic-turbine",

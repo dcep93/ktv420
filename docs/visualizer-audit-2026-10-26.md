@@ -6,7 +6,7 @@ The strongest direction is the combined scene: each stem has a readable contribu
 
 ## Changes implemented in this pass
 
-- **Super Time Ribbon:** fixed source-envelope vertices and smoothed energy-weighted color shared with Time Ribbon. Motion is bounded and smoothed, with a stationary playhead/grid; no resampling flicker or loudest-bin color jumps.
+- **Super Time Ribbon:** fixed source-envelope vertices and smoothed energy-weighted color shared with Time Ribbon. Its amplified scene adds five prismatic trail layers, a mirrored underside, peak sparks and expanding rings, and an energy-reactive playhead. Geometry and animation use song time, retaining stable seeking and a frozen paused scene; no resampling flicker or loudest-bin color jumps.
 - **Highway:** coordinated sky/sun/road/desert palette with eased, sixty-second color transitions; subtle deterministic twinkle. Pauses freeze the scene and seeking maps to the corresponding palette. The five-minute palette cycle traverses amber, teal, blue, violet and rose rather than staying pink.
 - **All five combined scenes:** click/Enter/Space toggles a panel occupying exactly 100vh, including its legend, in normal document flow. It does not invoke browser fullscreen. Existing Escape behavior still closes and pauses the overlay.
 - **Spectrum Safari:** smoothed spectral-centroid color replaces abrupt winning-bin selection; the spectrum fill closes to its baseline rather than cutting diagonally across the plot.
@@ -68,3 +68,7 @@ All four should start as combined scenes with mute/solo/fader fidelity, the shar
 ### Four-scene release verification
 
 160 tests pass (38 extension/script, 122 frontend), including all four scenes at compact and full-height dimensions, individual stem/original solo, immediate mute clearing, bounded history, deterministic seek resets, paused-state stability and legacy Delay Pedal replay acceptance. Browser previews verified scene selection and an 800px panel in an 800px viewport. Synthetic full-height drawing/analysis samples: Signal Loom 0.81 ms mean / 1.40 ms p95, Ink Tank 0.34 / 0.50 before curve smoothing (final compact preview 1.05 / 2.20), Resonance Plate 1.31 / 1.90, Glassworks 1.13 / 2.10. These measure CPU command generation plus analysis, not GPU/compositor time or an end-to-end playback benchmark. Hardware/browser variance applies.
+
+### Super Time Ribbon follow-up
+
+165 tests pass, including bounded drawing, finite coordinates at compact/large/tiny sizes, balanced canvas state, pause determinism, and seek boundaries. Browser inspection confirmed compact and expanded rendering and pixel-identical paused frames. Two synthetic preview canvases measured approximately 0.41 ms mean / 0.70 ms p95 CPU drawing-command time; this does not measure compositor cost or full-player performance. Lint and production build pass.

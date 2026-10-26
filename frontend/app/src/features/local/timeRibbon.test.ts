@@ -64,3 +64,34 @@ test('Super ribbon movement is smoothed, bounded and frozen when paused',async()
   assert.equal(ribbonMotion(state,0,10,false).level,state.level);
   assert.equal(ribbonMotion(state,1,0,true).level,state.level);
 });
+
+test('Super ribbon adds bounded layers and sparks, holds exactly on pause, and survives seeks',()=>{
+ let depth=0,trace:unknown[][]=[];
+ const c=new Proxy({}, {
+  get(_t,key){
+   if(key==='createLinearGradient'||key==='createRadialGradient')return(...args:unknown[])=>{
+    trace.push([key,...args]);return {addColorStop(...values:unknown[]){trace.push(['colorStop',...values]);}};
+   };
+   return(...args:unknown[])=>{
+    trace.push([key,...args]);for(const a of args)if(typeof a==='number')assert.ok(Number.isFinite(a),String(key));
+    if(key==='save')depth++;if(key==='restore')depth--;assert.ok(depth>=0);
+   };
+  },set(_t,key,value){trace.push([key,typeof value==='object'?'gradient':value]);return true;},
+ });
+ const analyser={fftSize:128,frequencyBinCount:64,
+  getByteTimeDomainData(data:Uint8Array){data.fill(180);},
+  getByteFrequencyData(data:Uint8Array){data.fill(50);},
+ } as unknown as AnalyserNode;
+ const envelope=Array.from({length:6000},(_,i)=>.1+(i%10===0?.8:.2));
+ for(const [width,height] of [[360,100],[1100,520],[100,30]]){
+  const canvas={width,height,getContext:()=>c} as unknown as HTMLCanvasElement;
+  const inputs={canvas,analyser,visualizerType:'super-time-ribbon' as const,sampleRate:44100,currentTime:12.123,duration:300,isPlaying:true,amplitudeMaximum:1,amplitudeEnvelope:envelope};
+  drawTimeRibbon(inputs);trace=[];
+  inputs.isPlaying=false;drawTimeRibbon(inputs);const paused=trace;
+  trace=[];drawTimeRibbon(inputs);assert.deepEqual(trace,paused,'paused geometry/color must not drift');
+  assert.equal(depth,0);assert.ok(trace.length>2500&&trace.length<5000,`${trace.length} operations`);
+  for(const time of [0,299.9,15,0]){
+   trace=[];drawTimeRibbon({...inputs,currentTime:time,isPlaying:true});assert.equal(depth,0);assert.ok(trace.length<5000);
+  }
+ }
+});
