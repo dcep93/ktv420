@@ -28,9 +28,13 @@ export default function LibraryPage() {
   const [selected, setSelected] = useState('');
   const [record, setRecord] = useState<PlaybackRecord | null>(null);
   const [viewMode, setViewMode] = useState<'tracks' | 'settings' | 'player'>('tracks');
+  const page = useRef<HTMLElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const viewScroll = useRef({ tracks: 0, settings: 0, player: 0 });
-  useLayoutEffect(() => { if (content.current) content.current.scrollTop = viewScroll.current[viewMode]; }, [viewMode]);
+  useLayoutEffect(() => {
+    if (page.current) page.current.scrollTop = viewMode === 'player' ? viewScroll.current.player : 0;
+    if (content.current) content.current.scrollTop = viewMode === 'player' ? 0 : viewScroll.current[viewMode];
+  }, [viewMode]);
   const [error, setError] = useState('');
   const closeRef = useRef<() => void>(() => {});
   const spotify = useSpotifyOverlay(() => closeRef.current());
@@ -333,7 +337,8 @@ export default function LibraryPage() {
   const statusMessage = mp3Export.error || replay.error || error || listening?.error || (stoppedByUser ? 'Capture stopped.' : spotify.error) ||
     (spotify.starting ? 'Starting capture…' : spotify.active ? 'Capturing songs as they play…' :
       spotify.notice.replace(' Local separation is queued automatically.', '').replace(' Separation continues here automatically.', ''));
-  return <main className="iframe-page iframe-page--overlay" aria-label="ktv420 iframe controls">
+  return <main className={`iframe-page iframe-page--overlay${viewMode === 'player' ? ' iframe-page--player' : ''}`} aria-label="ktv420 iframe controls"
+    ref={page} onScroll={event => { if (viewMode === 'player' && event.target === event.currentTarget) viewScroll.current.player = event.currentTarget.scrollTop; }}>
     <div className="iframe-status-slot">
       {statusMessage && <p className="iframe-status-message" data-kind={statusError ? 'error' : 'notice'} role={statusError ? 'alert' : 'status'}>
         <OverlayIcon name={statusError ? 'alert' : 'music'} /><span>{statusMessage}</span>
@@ -352,7 +357,7 @@ export default function LibraryPage() {
         disabled={!listening} onChange={event => transportCommand({ action: 'volume', volume: Number(event.target.value) })} />
       <small>{!listening ? 'Update extension for volume' : listening.output === 'stems' ? 'Stems' : listening.output === 'capture' ? 'Capture' : 'Muted'}</small>
     </label></div>
-    <div className="iframe-content" ref={content} onScroll={event => { viewScroll.current[viewMode] = event.currentTarget.scrollTop; }}>
+    <div className="iframe-content" ref={content} onScroll={event => { if (viewMode !== 'player') viewScroll.current[viewMode] = event.currentTarget.scrollTop; }}>
     {spotify.replay && <section className="replay-card" aria-label="Shared recording">
       <div><h2>{spotify.replay.name}</h2><p>{replay.active ? `${Math.floor(replay.seconds)}s · ${replay.status === 'preparing' ? 'Preparing song…' : replay.status === 'paused' ? 'Paused' : 'Replaying'}` : replayReady ? 'Ready to replay.' : 'Capture missing songs, then let separation finish.'}</p></div>
       {replay.active ? <><button disabled={replay.status==='preparing' || replay.busy} onClick={() => void replay.togglePause()}>{replay.status==='paused' ? 'Resume recording' : 'Pause recording'}</button><button onClick={replay.stop}>Stop replay</button></> : <button disabled={!replayReady || spotify.active || !!active || mp3Export.busy} onClick={replay.start}>Play recording</button>}
