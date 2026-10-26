@@ -1,6 +1,6 @@
 import { type CSSProperties, type PointerEvent } from "react";
 
-import { type AudioEffectOption, type AudioEffectType, type EffectSettings, getEffectOption, getDefaultEffectValue, effectAmountLabel, beatOptions } from "./audioEffects";
+import { type AudioEffectOption, type AudioEffectType, type EffectSettings, getEffectOption, effectAmountLabel, beatOptions } from "./audioEffects";
 import { type Track } from "./types";
 
 type TrackRowProps = {
@@ -193,7 +193,6 @@ export function TrackRow({
               step={0.01}
               value={effectValue}
               aria-valuetext={effectAmountLabel(effectType,effectValue)}
-              disabled={effectSettings.bypass}
               title={effectDescription}
               onChange={(event) =>
                 onEffectValueChange(track.id, Number(event.target.value))
@@ -204,10 +203,6 @@ export function TrackRow({
           </label>
           <button type="button" className="stem-effect-value" aria-label={`Reset ${label} effect`} title="Reset to clean"
             onClick={()=>onResetEffect(track.id)}>{effectSettings.bypass?'Bypassed':effectAmountLabel(effectType,effectValue)}</button>
-          <button type="button" className="stem-effect-bypass" aria-label={`Bypass ${label} effect`} aria-pressed={effectSettings.bypass}
-            title={effectSettings.bypass?'Enable effect':'Bypass effect'} onClick={()=>onEffectSettingsChange(track.id,{...effectSettings,bypass:!effectSettings.bypass})}>
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M12 2v9M6 5a9 9 0 1 0 12 0"/></svg>
-          </button>
           {effectType==='delay-pedal' && <div className="stem-echo-timing">
             <label>BPM <input type="number" min="40" max="240" step="1" aria-label={`${label} echo BPM`} key={effectSettings.bpm} defaultValue={effectSettings.bpm}
               onBlur={event=>{const n=Number(event.target.value),bpm=Number.isFinite(n)&&event.target.value?Math.max(40,Math.min(240,n)):effectSettings.bpm;event.target.value=String(bpm);onEffectSettingsChange(track.id,{...effectSettings,bpm});}}
@@ -216,7 +211,6 @@ export function TrackRow({
               {beatOptions.map(beats=><option key={beats} value={beats}>{beats===.25?'¼':beats===.5?'½':beats} {beats===1?'beat':'beats'}</option>)}
             </select>
           </div>}
-          <span className="stem-effect-neutral" aria-hidden="true">{getDefaultEffectValue(effectType)===.5?'Center = clean':'Left = clean'}</span>
         </div>
       </div>
       {!hideCanvas && <div className="player-track-row__canvas" style={{ marginTop: "0.34rem" }}>

@@ -1266,7 +1266,17 @@ export default function Player({
     emitRecordingEvent("volume_reset", getStemRecordingPayload(trackId));
   };
 
+  const enableEditedEffect = (trackId: string) => {
+    const settings = effectSettingsRef.current[trackId];
+    // Old recordings/settings can contain bypass. Keep their playback intact,
+    // but editing the effect must work without a separate enable button.
+    if (!settings?.bypass) return;
+    effectSettingsRef.current = { ...effectSettingsRef.current, [trackId]: { ...settings, bypass: false } };
+    setEffectSettings(effectSettingsRef.current);
+  };
+
   const handleEffectValueChange = (trackId: string, value: number) => {
+    enableEditedEffect(trackId);
     const clamped = Math.min(1, Math.max(0, value));
 
     effectValuesRef.current[trackId]=clamped;
@@ -1292,6 +1302,7 @@ export default function Player({
     trackId: string,
     effectType: AudioEffectType
   ) => {
+    enableEditedEffect(trackId);
     cancelDebouncedRecordingEvent(`effect-value:${trackId}`);
     const defaultValue = getDefaultEffectValue(effectType);
     effectValuesRef.current[trackId] = defaultValue;
@@ -1306,6 +1317,7 @@ export default function Player({
   };
 
   const handleEffectReset = (trackId: string) => {
+    enableEditedEffect(trackId);
     cancelDebouncedRecordingEvent(`effect-value:${trackId}`);
     const defaultValue = getDefaultEffectValue(
       effectTypesRef.current[trackId] ?? "wah"
