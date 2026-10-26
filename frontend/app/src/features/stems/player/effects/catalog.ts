@@ -11,18 +11,18 @@ export function validEffectSettings(value: unknown): value is EffectSettings {
 }
 export type AudioEffectOption = { value: AudioEffectType; label: string; description: string };
 export const audioEffectOptions: AudioEffectOption[] = [
-  {value:'dj-filter',label:'DJ Filter',description:'Left removes highs; right removes lows.'},
-  {value:'tone',label:'Tone',description:'Balance warmth and brightness.'},
   {value:'wah',label:'Wah',description:'A vocal pedal sweep: low at the left, bright at the right.'},
+  {value:'dj-filter',label:'DJ Filter',description:'Left removes highs; right removes lows.'},
+  {value:'envelope-filter',label:'Envelope Filter',description:'A resonant filter that opens with the stem’s loudness.'},
+  {value:'formant-filter',label:'Vowels',description:'Move through A, E, I, O and U using three vocal resonances.'},
+  {value:'tone',label:'Tone',description:'Balance warmth and brightness.'},
   {value:'telephone',label:'Telephone',description:'Blend in a narrow telephone sound.'},
-  {value:'delay-pedal',label:'Echo',description:'Darkening repeats. Set the song BPM and beat interval separately from amount.'},
-  {value:'reverb',label:'Reverb',description:'A diffused stereo room, growing into a longer wash. Adjustments preserve the tail.'},
+  {value:'saturation',label:'Saturation',description:'Soft harmonic drive with level compensation.'},
   {value:'chorus',label:'Chorus',description:'Stereo doubles from a gentle shimmer to a deep chorus. Amount controls depth and blend.'},
   {value:'flange',label:'Flanger',description:'A slow comb-filter sweep with controlled feedback.'},
   {value:'phaser',label:'Phaser',description:'Six moving phase stages for a liquid sweep.'},
-  {value:'saturation',label:'Saturation',description:'Soft harmonic drive with level compensation.'},
-  {value:'envelope-filter',label:'Envelope Filter',description:'A resonant filter that opens with the stem’s loudness.'},
-  {value:'formant-filter',label:'Vowels',description:'Move through A, E, I, O and U using three vocal resonances.'},
+  {value:'delay-pedal',label:'Echo',description:'Darkening repeats. Set the song BPM and beat interval separately from amount.'},
+  {value:'reverb',label:'Reverb',description:'A diffused stereo room, growing into a longer wash. Adjustments preserve the tail.'},
 ];
 const legacyLabels: Partial<Record<AudioEffectType,string>> = {'bass-boost':'Bass','bright':'Treble','warm':'Warm','lofi':'Lo-Fi','submerge':'Submerge','tilt-eq':'Tilt EQ','band-emphasis':'Band Emphasis'};
 export function getEffectOption(value: AudioEffectType): AudioEffectOption {
