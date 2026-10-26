@@ -1,3 +1,4 @@
+import { loadPlateArtwork, musicNoteArtwork } from './visuals/plateArtwork';
 import { CombinedVisualizerPanel } from './CombinedVisualizerPanel';
 import { settingsForTracks } from './mixerSettings';
 import { SpotifyRemoteObserver } from '../../local/spotifySync';
@@ -847,6 +848,18 @@ export default function Player({
     return () => canvases.forEach(canvas => { resetVisualizerState(canvas); resetSpectrogram(canvas); resetCombinedVisualizer(canvas); });
   }, [tracks, visualizerType]);
 
+  const plateArtwork = useRef(musicNoteArtwork);
+  const artworkSrc = typeof trackMetadata?.trackArtworkSrc === 'string' ? trackMetadata.trackArtworkSrc : '';
+  useEffect(() => {
+    const controller = new AbortController();
+    plateArtwork.current = musicNoteArtwork; visualRevision.current++;
+    if (visualizerType === 'resonance-plate') void loadPlateArtwork(artworkSrc, controller.signal).then(field => {
+      if (controller.signal.aborted) return;
+      plateArtwork.current = field; visualRevision.current++;
+    });
+    return () => controller.abort();
+  }, [artworkSrc, visualizerType]);
+
   useEffect(() => {
     const taps = new Map<string, StereoTap>();
     const canvases = [...Object.values(canvasRefs.current), combinedCanvas.current].filter((c): c is HTMLCanvasElement => !!c);
@@ -882,7 +895,7 @@ export default function Player({
         if (canvas && canDraw(canvas)) drawCombinedVisualizer(visualizerType, canvas, tracks.flatMap(track => {
           const analyser = analyserNodesRef.current[track.id];
           return analyser ? [{name: track.name, input: track.isInput, analyser, audible: getEffectiveVolumeFromRefs(track.id) > 0}] : [];
-        }), playbackTime, isPlaying);
+        }), playbackTime, isPlaying, plateArtwork.current);
         return;
       }
       const sampleRate = audioCtxRef.current?.sampleRate ?? 44100;

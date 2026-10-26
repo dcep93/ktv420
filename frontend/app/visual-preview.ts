@@ -1,3 +1,4 @@
+import { loadPlateArtwork, musicNoteArtwork } from './src/features/stems/player/visuals/plateArtwork';
 import './src/styles/theme.css';
 import './src/index.css';
 import { resizeVisualizer } from './src/features/stems/player/visuals/canvas';
@@ -16,6 +17,28 @@ document.querySelector('#expand')!.addEventListener('click', () => {
 });
 const picker = document.querySelector<HTMLSelectElement>('#scene')!;
 let scene: CombinedVisualizerType = 'night-city', started = false, offset = 0;
+let artwork = musicNoteArtwork;
+let artworkLoad = new AbortController();
+document.querySelector<HTMLInputElement>('#artwork')!.addEventListener('change', async event => {
+  artworkLoad.abort(); artworkLoad = new AbortController();
+  const signal = artworkLoad.signal;
+  const file = (event.target as HTMLInputElement).files?.[0];
+  const url = file ? URL.createObjectURL(file) : '';
+  const field = await loadPlateArtwork(url, signal);
+  if (!signal.aborted) artwork = field;
+  if (url) URL.revokeObjectURL(url);
+});
+document.querySelector('#sample-artwork')!.addEventListener('click', async () => {
+  artworkLoad.abort(); artworkLoad = new AbortController(); const signal = artworkLoad.signal;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512"><defs><linearGradient id="sky" x2="0" y2="1"><stop stop-color="#243d73"/><stop offset="1" stop-color="#edb8b0"/></linearGradient></defs><rect width="512" height="512" fill="url(#sky)"/><circle cx="340" cy="166" r="85" fill="#fff0b5"/><path d="M0 390L178 128L330 390Z" fill="#24364a"/><path d="M178 128L122 212L170 196L190 226L216 199Z" fill="#fff"/><path d="M150 410L382 250L512 410V512H0V410Z" fill="#547e80"/><path d="M0 440Q230 340 512 450V512H0Z" fill="#171e32"/><text x="35" y="75" fill="white" font-family="sans-serif" font-weight="bold" font-size="42">AFTERGLOW</text></svg>`;
+  const src = 'data:image/svg+xml,' + encodeURIComponent(svg);
+  const image = document.querySelector<HTMLImageElement>('#artwork-source')!; image.src = src; image.hidden = false;
+  const field = await loadPlateArtwork(src, signal); if (!signal.aborted) artwork = field;
+});
+document.querySelector('#clear-artwork')!.addEventListener('click', () => {
+  artworkLoad.abort(); artwork = musicNoteArtwork;
+  document.querySelector<HTMLImageElement>('#artwork-source')!.hidden = true;
+});
 const timings: number[] = [];
 for (const [value, option] of Object.entries(combinedVisualizers)) picker.add(new Option(option.label, value));
 picker.value = scene;
@@ -57,7 +80,7 @@ document.querySelector('#start')!.addEventListener('click', async () => {
   seek.addEventListener('click', () => { offset += 10; resetCombinedVisualizer(canvas); });
   const render = () => {
     const time = context.currentTime + offset, playing = context.state === 'running', start = performance.now();
-    drawCombinedVisualizer(scene, canvas, voices, time, playing);
+    drawCombinedVisualizer(scene, canvas, voices, time, playing, artwork);
     timings.push(performance.now() - start);
     if (timings.length === 120) {
       const mean = timings.reduce((a, b) => a + b, 0) / timings.length; timings.sort((a, b) => a - b);
