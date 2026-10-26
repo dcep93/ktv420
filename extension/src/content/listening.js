@@ -92,6 +92,9 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       const elapsed = last ? (now - last.observedAt) / 1000 : 0;
       const seeked = !!last && !changed && (delta < -0.5 || delta > elapsed * (last.playbackRate || 1) + 1.3);
       if (changed || seeked) { generation++; ignoreUntil = 0; }
+      // A later remote song choice can enter normal capture again. Failed local
+      // selection commands must not capture Spotify's unchanged, wrong song.
+      if (changed && dom.trackId !== last.trackId && !syncPending && now >= syncSettlesAt) customPlayback = false;
       const runner = getRunner();
       const batch = runner?.isActive();
       if (recording && recording.trackId === dom.trackId) {
