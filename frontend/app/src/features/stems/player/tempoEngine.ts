@@ -1,6 +1,7 @@
 import SignalsmithStretch, { type StretchNode } from 'signalsmith-stretch';
 import processorUrl from 'signalsmith-stretch?url';
 import { SongClock, validPitch, validTempo } from './tempo';
+import { PlaybackEnd } from './playbackEnd';
 // Use the immutable hosted module, never generated JS or a third-party runtime URL.
 SignalsmithStretch.moduleUrl = processorUrl;
 export class TempoEngine {
@@ -20,16 +21,18 @@ export class TempoEngine {
   private context: BaseAudioContext;
   private node: StretchNode;
   private duration: number;
-  private constructor(context: BaseAudioContext, node: StretchNode, duration: number) {
+  private completion: PlaybackEnd;
+  private constructor(context: BaseAudioContext, node: StretchNode, duration: number, ended: () => void) {
     this.context=context; this.node=node; this.duration=duration;
     this.clock = new SongClock(() => context.currentTime);
+    this.completion = new PlaybackEnd(context, ended);
   }
-  static async create(context: BaseAudioContext, buffers: AudioBuffer[], destinations: AudioNode[], fail: (message: string) => void) {
+  static async create(context: BaseAudioContext, buffers: AudioBuffer[], destinations: AudioNode[], fail: (message: string) => void, ended = () => {}) {
     if (!buffers.length || buffers.length !== destinations.length) throw new Error('Incomplete stem buffers.');
     const length = buffers[0].length;
     if (buffers.some(b => b.sampleRate !== context.sampleRate || b.length !== length)) throw new Error('Stem lengths or sample rates do not match.');
     const node = await SignalsmithStretch(context, { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [buffers.length * 2], channelInterpretation: 'discrete' });
-    const engine = new TempoEngine(context, node, buffers[0].duration);
+    const engine = new TempoEngine(context, node, buffers[0].duration, ended);
     node.onprocessorerror = () => { engine.failed = true; engine.pause(); fail('Audio processing stopped. Reload the player to retry.'); };
     // One multichannel processor shares its time map across every stereo stem.
     const splitter = context.createChannelSplitter(buffers.length * 2);
@@ -58,6 +61,7 @@ export class TempoEngine {
     this.stopNative();
     const when = this.context.currentTime + .02;
     this.clock.start(position, this.tempo, when); this.running=true;
+    this.completion.schedule(this.clock.endTime(this.duration));
     if (this.neutral) { this.node.disconnect(); this.connected=false; this.startNative(position,when); return; }
     this.connectProcessor(); this.gate(0,this.context.currentTime);this.gate(1,when);
     await this.node.schedule({ output: when, input: position, rate: this.tempo, semitones: this.pitch, active: true });
@@ -68,6 +72,7 @@ export class TempoEngine {
     const wasNeutral=this.neutral, position=this.clock.position;
     this.clock.changeRate(tempo); this.tempo=tempo; this.pitch=pitch;
     if (!this.running) return;
+    this.completion.schedule(this.clock.endTime(this.duration));
     if (this.neutral) {
       const update = this.node.schedule({ active:false }); this.gate(0,this.context.currentTime);
       this.node.disconnect();this.connected=false;this.startNative(position,this.context.currentTime);
@@ -79,6 +84,7 @@ export class TempoEngine {
     }
   }
   pause() {
+    this.completion.cancel();
     const position=this.clock.pause();this.running=false;this.stopNative();
     if (!this.disposed) { void this.node.schedule({ active:false,output:this.context.currentTime });this.gate(0,this.context.currentTime);this.node.disconnect();this.connected=false; }
     return Math.min(this.duration,position);

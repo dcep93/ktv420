@@ -104,6 +104,7 @@ export default function Player({
   const playbackEpoch = useRef(0);
   const masterGain = useRef<GainNode | null>(null);
   const engine = useRef<TempoEngine | null>(null);
+  const playbackEnded = useRef<() => void>(() => {});
   const [engineReady, setEngineReady] = useState(false);
   const [tempo, setTempo] = useState(initialSettings?.tempo ?? 1);
   const [pitch, setPitch] = useState(initialSettings?.pitch ?? 0);
@@ -822,7 +823,7 @@ export default function Player({
       try {
         const next = await TempoEngine.create(context, tracks.map(t => buffersRef.current[t.id]), tracks.map(t => gainNodesRef.current[t.id]), message => {
           setTransportError(message); setIsPlaying(false); playbackErrorRef.current?.(message);
-        });
+        }, () => playbackEnded.current());
         if (isCancelled) { next.dispose(); return; }
         engine.current = next; next.set(tempoRef.current, pitchRef.current); setEngineReady(true);
       } catch (reason) { if (!isCancelled) setTransportError(`Could not prepare tempo processing: ${String(reason)}`); }
@@ -941,6 +942,20 @@ export default function Player({
     };
   }, [amplitudeEnvelopes, amplitudeMaximums, currentPlaybackTime, duration, getEffectiveVolumeFromRefs, isPlaying, tracks, visualizerType]);
 
+  useLayoutEffect(() => {
+    playbackEnded.current = () => {
+      if (hasHandledPlaybackEndRef.current) return;
+      hasHandledPlaybackEndRef.current = true;
+      stopAllSources();
+      const position = hasNextTrack && onTrackEnd ? 0 : duration;
+      startOffsetRef.current = position;
+      setCurrentTime(position);
+      setIsPlaying(false);
+      if (hasNextTrack && onTrackEnd) onTrackEnd();
+    };
+    return () => { playbackEnded.current = () => {}; };
+  }, [duration, hasNextTrack, onTrackEnd, stopAllSources]);
+
   useEffect(() => {
     const updateTime = () => {
       const playbackTime = currentPlaybackTime();
@@ -952,22 +967,6 @@ export default function Player({
         }
       } else {
         setCurrentTime(Math.min(duration || playbackTime, playbackTime));
-      }
-
-      if (isPlaying && duration && playbackTime >= duration) {
-        if (hasHandledPlaybackEndRef.current) {
-          timeAnimationFrameRef.current = requestAnimationFrame(updateTime);
-          return;
-        }
-
-        hasHandledPlaybackEndRef.current = true;
-        stopAllSources();
-        startOffsetRef.current = hasNextTrack && onTrackEnd ? 0 : duration;
-        setCurrentTime(hasNextTrack && onTrackEnd ? 0 : duration);
-        setIsPlaying(false);
-        if (hasNextTrack && onTrackEnd) {
-          onTrackEnd();
-        }
       }
 
       timeAnimationFrameRef.current = requestAnimationFrame(updateTime);
@@ -983,10 +982,6 @@ export default function Player({
   }, [
     currentPlaybackTime,
     duration,
-    hasNextTrack,
-    isPlaying,
-    onTrackEnd,
-    stopAllSources,
   ]);
 
   const handleHarmonicAnalyze = useCallback(async (force = false) => {

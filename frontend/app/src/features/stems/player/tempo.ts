@@ -17,6 +17,7 @@ export class SongClock {
   private now: () => number;
   constructor(now: () => number) { this.now = now; }
   get position() { return this.offset + (this.active ? Math.max(0, this.now() - this.anchor) * this.rate : 0); }
+  endTime(duration: number) { return this.anchor + Math.max(0, duration - this.offset) / this.rate; }
   start(position: number, rate: number, when = this.now()) { this.offset = position; this.rate = rate; this.anchor = when; this.active = true; }
   changeRate(rate: number) { this.offset = this.position; this.anchor = Math.max(this.anchor, this.now()); this.rate = rate; }
   pause() { this.offset = this.position; this.active = false; return this.offset; }
