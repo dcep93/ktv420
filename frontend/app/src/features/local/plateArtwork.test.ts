@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { analyzePlateArtwork, loadPlateArtwork, musicNoteArtwork } from '../stems/player/visuals/plateArtwork';
 
-test('artwork grains preserve geometry, emphasize edges and use deterministic noise', () => {
+test('artwork grains preserve geometry, emphasize edges and use deterministic balanced colors', () => {
   const size = 16, pixels = new Uint8ClampedArray(size * size * 4);
   for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
     const i = (y * size + x) * 4;
@@ -16,7 +16,7 @@ test('artwork grains preserve geometry, emphasize edges and use deterministic no
     assert.ok(x >= 7, 'no grains in unrelated empty space');
     if (x === 8) edge = Math.max(edge, field.grains[i + 2]);
     if (x === 12) body = Math.max(body, field.grains[i + 2]);
-    assert.ok(field.grains[i + 3] >= 0 && field.grains[i + 3] < 4);
+    assert.ok(Number.isInteger(field.grains[i + 3]) && field.grains[i + 3] >= 0 && field.grains[i + 3] < 4);
   }
   assert.ok(edge > body * 1.5);
 });
@@ -71,7 +71,7 @@ test('fully lit artwork remains bounded, pause-stable and independent of Origina
   const c = { set fillStyle(value: string) { colors.push(value); }, beginPath() {}, fill() {},
     rect(...args: number[]) { args.forEach(value => assert.ok(Number.isFinite(value))); marks.push(args); } } as unknown as CanvasRenderingContext2D;
   drawPlate({ c, w: 2400, h: 1200, state }, field);
-  assert.ok(colors.length <= 128); assert.equal(marks.length, 128 * 128);
+  assert.equal(colors.length, 4); assert.equal(marks.length, 128 * 128);
   const before = structuredClone(marks); marks.length = 0;
   drawPlate({ c, w: 2400, h: 1200, state }, field); assert.deepEqual(marks, before);
   // The original must neither brighten active stems nor resurrect muted colors.
@@ -104,7 +104,7 @@ test('plate has no brightness floor, suppresses averages, and preserves peaks wi
   }
 });
 
-async function renderGrain(phase: number, levels: number[], time = 0) {
+async function renderGrain(role: number, levels: number[], time = 0) {
   const { drawPlate } = await import('../stems/player/visuals/resonancePlate');
   const { createArtState } = await import('../stems/player/visuals/artSceneState');
   const state = createArtState(); state.time = time;
@@ -114,35 +114,43 @@ async function renderGrain(phase: number, levels: number[], time = 0) {
   let style = '', rectangles = 0;
   const c = { set fillStyle(value: string) { style = value; }, beginPath() { rectangles = 0; }, rect() { rectangles++; },
     fill() { for (let i = 0; i < rectangles; i++) paints.push(style.match(/[+-]?(?:\d*\.?\d+)(?:e[+-]?\d+)?/gi)!.map(Number)); } } as unknown as CanvasRenderingContext2D;
-  drawPlate({ c, w: 100, h: 100, state }, { width: 1, height: 1, grains: new Float32Array([.5, .5, 1, phase]) });
+  drawPlate({ c, w: 100, h: 100, state }, { width: 1, height: 1, grains: new Float32Array([.5, .5, 1, role]) });
   return paints;
 }
 
-test('each halfway grain is painted once with both neighboring palette colors, including wraparound', async () => {
-  const palette = [[230, 181, 115], [190, 144, 93], [255, 123, 195], [130, 192, 190]];
-  for (let role = 0; role < 4; role++) {
-    const paints = await renderGrain(role + .5, [1, 1, 1, 1]);
-    assert.equal(paints.length, 1, 'one color must not overwrite the other');
-    palette[role].forEach((channel, i) => assert.ok(Math.abs(paints[0][i] - (channel + palette[(role + 1) % 4][i]) / 2) < .001));
-    assert.equal(paints[0][3], 1);
+test('every grain keeps one exact palette color at all times and levels', async () => {
+  const palette = [[230,181,115], [190,144,93], [255,123,195], [130,192,190]];
+  for (let role = 0; role < 4; role++) for (const time of [0,7,21,56,1000]) {
+    const paints = await renderGrain(role, [1,.8,.5,.1], time);
+    assert.equal(paints.length, 1);
+    assert.deepEqual(paints[0].slice(0,3), palette[role]);
+    assert.equal(paints[0][3], [1,.8,.5,.1][role] ** 3);
   }
 });
 
-test('muted colors disappear without boosting their neighbors and unequal levels weight color by cubic energy', async () => {
-  assert.deepEqual(await renderGrain(.5, [1, 0, 0, 0]), [[230, 181, 115, .5]]);
-  assert.deepEqual(await renderGrain(.5, [0, 1, 0, 0]), [[190, 144, 93, .5]]);
-  assert.deepEqual(await renderGrain(.5, [0, 0, 1, 1]), []);
-  const [color] = await renderGrain(.5, [1, .5, 0, 0]);
-  assert.equal(color[3], .5625);
-  [230,181,115].forEach((channel,i) => assert.ok(Math.abs(color[i] - (channel * .5 + [190,144,93][i] * .0625) / .5625) < .001));
+test('muted pixels disappear without changing or reallocating neighboring colors', async () => {
+  assert.deepEqual(await renderGrain(0, [0,1,1,1]), []);
+  assert.deepEqual(await renderGrain(1, [0,1,1,1]), [[190,144,93,1]]);
+  assert.deepEqual(await renderGrain(2, [0,0,.5,0]), [[255,123,195,.125]]);
 });
 
-test('phase wrap is continuous and equal neighboring levels retain the cubic brightness curve', async () => {
-  const before = await renderGrain(0, [1,1,1,1], 14 * (4 - .00001));
-  const after = await renderGrain(0, [1,1,1,1], 14 * (4 + .00001));
-  before[0].forEach((value,i) => assert.ok(Math.abs(value-after[0][i]) < .001));
-  for (const level of [.01, .1, .5, .8, 1]) {
-    const [color] = await renderGrain(.5, [level,level,level,level]);
-    assert.ok(Math.abs(color[3] - level ** 3) < 1e-12);
+test('balanced image pixels stay within their own cells at full brightness', async () => {
+  const { drawPlate } = await import('../stems/player/visuals/resonancePlate');
+  const { createArtState } = await import('../stems/player/visuals/artSceneState');
+  const artwork = analyzePlateArtwork(new Uint8ClampedArray(16*16*4).fill(255),16,16);
+  const state = createArtState(); Object.assign(state.audio.levels,{drums:1,bass:1,vocals:1,other:1});
+  const shares = [0,0,0,0];
+  for(let i=3;i<artwork.grains.length;i+=4) shares[artwork.grains[i]]++;
+  assert.deepEqual(shares,[64,64,64,64]);
+  const marks:number[][]=[];
+  const c={beginPath(){},fill(){},rect(...args:number[]){marks.push(args);}} as unknown as CanvasRenderingContext2D;
+  drawPlate({c,w:160,h:160,state},artwork);
+  const scale=9,left=8,top=8;
+  for(const [x,y,w,h] of marks){
+    const col=Math.floor((x+w/2-left)/scale),row=Math.floor((y+h/2-top)/scale);
+    assert.ok(x>=left+col*scale && x+w<=left+(col+1)*scale);
+    assert.ok(y>=top+row*scale && y+h<=top+(row+1)*scale);
   }
+  const before=structuredClone(marks);marks.length=0;state.time=100;
+  drawPlate({c,w:160,h:160,state},artwork);assert.deepEqual(marks,before);
 });

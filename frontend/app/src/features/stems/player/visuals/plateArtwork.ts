@@ -1,18 +1,17 @@
-import { seed } from './stemScene';
+import { balancedPlatePalette } from './platePalette';
 
 export const PLATE_SIZE = 128;
 export type PlateArtwork = { width: number; height: number; grains: Float32Array };
 
-// Four values per grain: anchored x/y, visual weight, seeded color phase.
+// Four values per grain: anchored x/y, visual weight, fixed palette index.
 // RGB gradients preserve boundaries even between colors of equal luminance.
 export function analyzePlateArtwork(data: Uint8ClampedArray, width: number, height: number): PlateArtwork {
-  const grains: number[] = [];
+  const grains: number[] = [], colors: number[] = [];
   const sample = (x: number, y: number, channel: number) => {
     const i = (Math.max(0, Math.min(height - 1, y)) * width + Math.max(0, Math.min(width - 1, x))) * 4;
     return data[i + channel] / 255 * data[i + 3] / 255;
   };
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
-    const i = y * width + x;
     const luminance = .2126 * sample(x, y, 0) + .7152 * sample(x, y, 1) + .0722 * sample(x, y, 2);
     let edge = 0;
     for (let channel = 0; channel < 3; channel++) {
@@ -22,9 +21,11 @@ export function analyzePlateArtwork(data: Uint8ClampedArray, width: number, heig
     }
     const weight = Math.min(1, .8 * Math.pow(luminance, .85) + .85 * edge);
     if (weight < .035) continue;
-    grains.push((x + .5 + (seed(i * 3) - .5) * .28) / width,
-      (y + .5 + (seed(i * 3 + 1) - .5) * .28) / height, weight, seed(i * 3 + 2) * 4);
+    grains.push((x + .5) / width, (y + .5) / height, weight, 0);
+    colors.push(sample(x, y, 0) * 255, sample(x, y, 1) * 255, sample(x, y, 2) * 255);
   }
+  const assignments = balancedPlatePalette(colors);
+  assignments.forEach((role, i) => { grains[i * 4 + 3] = role; });
   return { width, height, grains: new Float32Array(grains) };
 }
 
