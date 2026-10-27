@@ -6,6 +6,7 @@ import OverlayIcon from './OverlayIcon';
 import './saved.css';
 
 export default function SavedPage() {
+  const transferLink = (path?: string) => { const params = new URLSearchParams(); const extension = new URLSearchParams(location.search).get('extension'); if (extension) params.set('extension', extension); if (path) params.set('export', path.replace('/', '.')); return `/transfer${params.size ? `?${params}` : ''}`; };
   const [collections, setCollections] = useState<SavedCollectionSummary[] | null>(null);
   const [error, setError] = useState('');
   const [confirmDelete, setConfirmDelete] = useState('');
@@ -38,15 +39,15 @@ export default function SavedPage() {
     return () => { clearTimeout(timer); clearInterval(poll); window.removeEventListener('focus', visible); };
   }, [refresh]);
   return <main className="iframe-page saved-page"><section className="saved-content">
-    <header><a className="app-title" href="/">ktv420</a><h1>Catalog</h1><p>Playlists and albums on this computer.</p></header>
+    <header><a className="app-title" href="/">ktv420</a><h1>Catalog</h1><p>Playlists and albums on this computer.</p><a className="transfer-import" href={transferLink()}>Import playlist</a></header>
     {error ? <div className="saved-empty"><p role="status">{error}</p><nav><a href={STORE_URL} target="_blank" rel="noreferrer">Install / update extension</a><button onClick={() => void refresh()}>Refresh</button></nav></div>
-      : collections === null ? <p role="status">Loading…</p> : collections.length === 0 ? <div className="saved-empty"><p>Start capturing a playlist or album to add it here.</p><a href="https://open.spotify.com/">Open Spotify</a></div>
+      : collections === null ? <p role="status">Loading…</p> : collections.length === 0 ? <div className="saved-empty"><p>Capture or import a playlist or album to add it here.</p><a href="https://open.spotify.com/">Open Spotify</a></div>
       : <ol className="saved-collections">{collections.map(collection => <li key={collection.path}><div className="saved-row"><a href={collectionLink(collection.path)}>
         {collection.artwork ? <img src={collection.artwork} alt="" /> : <span className="saved-artwork"><OverlayIcon name="music" /></span>}
         <span className="saved-copy"><strong>{collection.title || (collection.path.startsWith('album/') ? 'Saved album' : 'Saved playlist')}</strong>
           <span>{collection.captured} of {collection.total} captured · {collection.ready} ready</span></span>
         <span className="saved-arrow" aria-hidden="true">↗</span>
-      </a><a className="saved-local-link" href={localPlaylistLink(collection.path, new URLSearchParams(location.search).get('extension'))} aria-label={`Open ${collection.title || 'collection'} in ktv420`}>ktv420</a><button className="saved-delete" aria-label={`Delete local audio for ${collection.title || 'this collection'}`} title="Delete local audio"
+      </a><a className="saved-local-link" href={localPlaylistLink(collection.path, new URLSearchParams(location.search).get('extension'))} aria-label={`Open ${collection.title || 'collection'} in ktv420`}>ktv420</a><a className="saved-local-link" href={transferLink(collection.path)} aria-label={`Export ${collection.title || 'collection'}`}>Export</a><button className="saved-delete" aria-label={`Delete local audio for ${collection.title || 'this collection'}`} title="Delete local audio"
         disabled={!collection.captured || !!deleting} onClick={() => { setConfirmDelete(collection.path); setDeleteError(''); }}><OverlayIcon name="trash" /></button></div>
       {confirmDelete === collection.path && <div className="saved-confirm">
         <p>Delete this collection’s local originals and stems? Shared songs will also be unavailable in other playlists. The catalog link stays.</p>

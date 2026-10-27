@@ -1,3 +1,4 @@
+import { mountTransferBridge } from './transferBridge';
 import { parseOverlayNavigation } from '../features/local/overlayNavigation';
 import { parseRecording, spotifyContext } from '../features/local/recording';
 import { parseListeningState, parseTransportCommand } from '../features/local/listeningProtocol';
@@ -179,4 +180,7 @@ function mountBroker() {
   startTimeout();
 }
 
-if (typeof document !== 'undefined') mountBroker();
+if (typeof document !== 'undefined') {
+  if (new URLSearchParams(location.search).get('transfer') === '1') mountTransferBridge();
+  else mountBroker();
+}

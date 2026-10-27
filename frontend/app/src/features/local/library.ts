@@ -68,7 +68,7 @@ export function getPlaybackRecord(id: string): Promise<PlaybackRecord> {
   return transaction(['audio', 'tracks'], 'readonly', (tx, done) => {
     const track = tx.objectStore('tracks').get(id);
     const request = tx.objectStore('audio').index('trackId').getAll(id);
-    request.onsuccess = () => done({ md5: id, playbackGain: track.result?.playbackGain, files: (request.result as StoredAudio[]).map((file): PlaybackFile => ({
+    request.onsuccess = () => done({ md5: id, playbackGain: track.result?.playbackGain, artwork: (request.result as StoredAudio[]).find(file => file.name === 'artwork')?.blob, files: (request.result as StoredAudio[]).filter(file => file.name !== 'artwork').map((file): PlaybackFile => ({
       name: file.name, path: `${id}/${(file.name === 'input.wav' || file.name === 'input.mp3') ? 'input' : 'output'}/${file.name}`, blob: file.blob,
     })) });
   });

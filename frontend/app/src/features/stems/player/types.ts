@@ -6,6 +6,7 @@ export type PlaybackFile = {
 };
 
 export type PlaybackRecord = {
+  artwork?: Blob;
   playbackGain?: number;
   md5: string;
   files: PlaybackFile[];

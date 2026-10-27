@@ -32,3 +32,14 @@
 .playlist-host { width: 100%; height: 100dvh; border: 0; display: block; }
 .playlist-loading { position: fixed; inset: 0; display: grid; place-content: center; gap: 16px; text-align: center; background: var(--ww-bg, #0c0907); }
 .playlist-loading nav { display: flex; gap: 24px; justify-content: center; }
+
+.transfer-actions { display:flex; flex-wrap:wrap; gap:16px; align-items:center; margin:24px 0; }
+.transfer-actions button, .transfer-actions a, .transfer-import { font:inherit; padding:12px 20px; border:1px solid var(--ww-border); border-radius:12px; background:var(--ww-panel-soft); color:var(--ww-title-pink); text-decoration:none; cursor:pointer; }
+.transfer-actions button:disabled { opacity:.4; cursor:default; }
+.transfer-actions button:focus-visible, .transfer-actions a:focus-visible { outline:2px solid var(--ww-title-pink); outline-offset:4px; }
+.transfer-import { display:inline-block; margin-top:12px; }
+.transfer-page { max-width:900px; }
+.transfer-progress { margin:32px 0; padding:24px; border:1px solid var(--ww-border); border-radius:16px; background:var(--ww-panel-soft); }
+.transfer-progress progress { width:100%; height:10px; accent-color:var(--ww-title-pink); }
+.transfer-note { font-size:.9rem; }
+.transfer-page [role=alert] { color:#ff9fae; }

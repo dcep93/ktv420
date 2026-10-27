@@ -10,6 +10,10 @@
     ],
     "rewrites": [
       {
+        "source": "/transfer{,/**}",
+        "destination": "/player/index.html"
+      },
+      {
         "source": "/playlist{,/**}",
         "destination": "/player/index.html"
       },
@@ -139,6 +143,15 @@
       },
       {
         "source": "/playlist{,/**}",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      },
+      {
+        "source": "/transfer{,/**}",
         "headers": [
           {
             "key": "Cache-Control",

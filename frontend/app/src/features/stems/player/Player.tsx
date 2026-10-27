@@ -866,15 +866,17 @@ export default function Player({
 
   const plateArtwork = useRef(musicNoteArtwork);
   const artworkSrc = typeof trackMetadata?.trackArtworkSrc === 'string' ? trackMetadata.trackArtworkSrc : '';
+  const localArtwork = record.artwork;
   useEffect(() => {
     const controller = new AbortController();
     plateArtwork.current = musicNoteArtwork; visualRevision.current++;
-    if (visualizerType === 'resonance-plate') void loadPlateArtwork(artworkSrc, controller.signal).then(field => {
+    const localUrl = localArtwork ? URL.createObjectURL(localArtwork) : '';
+    if (visualizerType === 'resonance-plate') void loadPlateArtwork(localUrl || artworkSrc, controller.signal).then(field => {
       if (controller.signal.aborted) return;
       plateArtwork.current = field; visualRevision.current++;
     });
-    return () => controller.abort();
-  }, [artworkSrc, visualizerType]);
+    return () => { controller.abort(); if (localUrl) URL.revokeObjectURL(localUrl); };
+  }, [artworkSrc, localArtwork, visualizerType]);
 
   useEffect(() => {
     const taps = new Map<string, StereoTap>();
