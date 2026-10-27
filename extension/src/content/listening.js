@@ -106,9 +106,13 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
       if (changed && dom.trackId !== last.trackId && !syncPending && now >= syncSettlesAt) customPlayback = false;
       const runner = getRunner();
       const batch = runner?.isActive();
-      // The hosted controller is gone. Never leave a capture running unattended.
-      if (batch && now - frameHeartbeat >= 4000) {
-        halted = true; armed = false; await policy(0); await runner.requestStop();
+      // A background/throttled iframe can miss heartbeats while its authorized
+      // single-song capture is healthy. Let that bounded request finish; the
+      // hosted queue must explicitly request the next song. Close/Stop still
+      // cancel immediately. Only legacy multi-song runs need this watchdog.
+      if (batch && !(hosted && runner.singleTrack) && now - frameHeartbeat >= 4000) {
+        halted = true; armed = false; await policy(0);
+        await runner.requestStop('Capture stopped because the player stopped responding. Reload Spotify and retry.');
       }
       if (recording && recording.trackId === dom.trackId) {
         recording = withTrackMetadata({ ...recording,

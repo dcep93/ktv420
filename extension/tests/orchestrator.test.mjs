@@ -259,3 +259,11 @@ test('stopping during storage saves the completed track but never starts the nex
  assert.equal(stored,1);assert.deepEqual(page.selections,[page.ids[0]]);
  assert.equal(runner.captureProgress,null);assert.equal(runner.isActive(),false);
 });
+
+test('explicit Stop still cancels a single-song request and watchdog reasons are preserved', async t => {
+  mockPage(t);
+  const {runner}=recorder();runner.singleTrack=true;runner.active=true;
+  await runner.requestStop();assert.throws(()=>runner.throwIfStopped(),/stopped by user/);
+  await runner.requestStop('Capture stopped because the player stopped responding.');
+  assert.throws(()=>runner.throwIfStopped(),/player stopped responding/);
+});

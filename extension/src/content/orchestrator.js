@@ -27,6 +27,8 @@ export class CaptureOrchestrator extends EventTarget {
     this.bridge = bridge;
     this.active = false;
     this.stopRequested = false;
+    this.stopReason = 'Capture run stopped by user.';
+    this.singleTrack = false;
     this.captureProgress = null;
     this.lastProgressAt = -Infinity;
     this.overallProgress = new CaptureRunProgress(fraction => this.dispatchEvent(new CustomEvent("captureoverallprogress", { detail: fraction })));
@@ -47,8 +49,9 @@ export class CaptureOrchestrator extends EventTarget {
 
   handoff() { if (this.active) { this.stopRequested = true; this.handingOff = true; this.clearCaptureProgress(); this.overallProgress.reset(); } }
 
-  async requestStop() {
+  async requestStop(reason = 'Capture run stopped by user.') {
     this.stopRequested = true;
+    this.stopReason = reason;
     this.overallProgress.reset();
     this.clearCaptureProgress();
     pausePlaybackCleanly();
@@ -67,6 +70,8 @@ export class CaptureOrchestrator extends EventTarget {
     this.active = true;
     this.handingOff = false;
     this.stopRequested = false;
+    this.stopReason = 'Capture run stopped by user.';
+    this.singleTrack = Array.isArray(trackIds) && trackIds.length === 1;
     this.clearCaptureProgress();
     this.dispatchEvent(new Event("activechange"));
 
@@ -240,6 +245,7 @@ export class CaptureOrchestrator extends EventTarget {
       this.clearCaptureProgress();
       await this.bridge.command("capture-abort").catch(() => {});
       this.active = false;
+      this.singleTrack = false;
       this.stopRequested = false;
       this.dispatchEvent(new Event("activechange"));
     }
@@ -588,7 +594,7 @@ export class CaptureOrchestrator extends EventTarget {
 
   throwIfStopped() {
     if (this.stopRequested) {
-      throw new Error("Capture run stopped by user.");
+      throw new Error(this.stopReason);
     }
   }
 }

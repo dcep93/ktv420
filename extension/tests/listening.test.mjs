@@ -443,3 +443,34 @@ test('batch capture ignores stale DOM clock jumps but still hands off actual med
   assert.equal(handoffs,1,'a real same-song seek still hands off the capture');
   await controller.setEnabled(false);controller.dispose();
 });
+
+test('hosted single-song captures survive delayed background heartbeats; legacy runs still time out honestly', async t => {
+  const ticks = [], stopped = [];
+  let now = 10000, active = true;
+  t.mock.method(Date, 'now', () => now);
+  for (const [key, value] of Object.entries({
+    document: { hidden:true, querySelector:()=>null, querySelectorAll:()=>[] },
+    chrome: {runtime:{async sendMessage(){return {ok:true,result:[]};}}},
+    setInterval(callback){ticks.push(callback);return 0;}, clearInterval(){},
+  })) {
+    const previous=Object.getOwnPropertyDescriptor(globalThis,key);
+    Object.defineProperty(globalThis,key,{value,writable:true,configurable:true});
+    t.after(()=>previous?Object.defineProperty(globalThis,key,previous):delete globalThis[key]);
+  }
+  const runner={isActive:()=>active,singleTrack:true,async requestStop(reason){stopped.push(reason);active=false;}};
+  const controller=createListeningController({
+    bridge:{async command(command){return command==='listening-state'?{media:null}:{};}},
+    emit(){},ensurePlayer(){},getRunner:()=>runner,
+  });
+  const settle=()=>new Promise(resolve=>setImmediate(resolve));
+  await controller.command({action:'hosted-control'});
+  controller.heartbeat();await controller.setEnabled(true);await settle();
+  for(const delay of [5000,65000,180000]){now+=delay;ticks[0]();await settle();}
+  assert.deepEqual(stopped,[],'missing timer heartbeats cannot revoke one already-authorized song');
+  assert.equal(active,true);
+  runner.singleTrack=false;ticks[0]();await settle();
+  assert.equal(stopped.length,1);
+  assert.match(stopped[0],/player stopped responding/);
+  assert.doesNotMatch(stopped[0],/by user/);
+  await controller.setEnabled(false);controller.dispose();
+});
