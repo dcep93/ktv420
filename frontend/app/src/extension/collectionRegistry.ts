@@ -45,3 +45,17 @@ export async function savedCollections() {
   }) : collections;
   return summarizeCollections(repaired || [], tracks);
 }
+
+/** Collection membership is metadata only; audio remains in the iframe broker. */
+export async function savedCollection(path: unknown) {
+  if (typeof path !== 'string' || !/^(album|playlist)\/[A-Za-z0-9]{22}$/.test(path)) throw new Error('Invalid playlist link.');
+  await savedCollections(); // Apply the same legacy registry repair as the catalog.
+  const collection = (await readState('collections'))?.find(item => item.path === path);
+  if (!collection) throw new Error('This playlist is not in this computer’s catalog.');
+  const tracks = new Map((await listTracks()).map(track => [track.id, track]));
+  return { ...collection, tracks: collection.trackIds.map((trackId, rowIndex) => {
+    const track = tracks.get(`spotify-${trackId}`);
+    return { trackId, rowIndex, trackName: track?.title || `Track ${rowIndex + 1}`, trackArtist: track?.artist || '',
+      trackArtworkSrc: typeof track?.metadata?.trackArtworkSrc === 'string' ? track.metadata.trackArtworkSrc : collection.artwork };
+  }) };
+}

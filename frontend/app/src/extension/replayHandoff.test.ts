@@ -39,6 +39,10 @@ test('external handoff restricts origin/frame, validates files, persists before 
  const summary=await new Promise(resolve=>external!(listSaved,savedSender,resolve));
  assert.deepEqual(summary,{ok:true,collections:[]});
  assert.deepEqual(await new Promise(resolve=>external!(listSaved,{...savedSender,url:'https://ktv420.web.app/saved'},resolve)),{ok:true,collections:[]});
+ const playlistSender={url:'https://ktv420.web.app/playlist?id=album.1111111111111111111111',frameId:0};
+ for(const type of ['read-audio','ktv420:open-replay','ktv420:delete-collection-audio','ktv420:capture-begin']) assert.equal(external!({type},playlistSender,()=>assert.fail('playlist gained an unrelated capability')),false);
+ for(const source of [{...playlistSender,frameId:1},{...playlistSender,url:'https://evil.example/playlist'},savedSender]) assert.equal(external!({type:'ktv420:collection',path:`album/${id}`},source,()=>assert.fail('collection disclosed to untrusted caller')),false);
+ assert.equal((await call(external!,{type:'ktv420:collection',path:'invalid'},playlistSender)).ok,false);
  const content={id:'self',url:`https://open.spotify.com/playlist/${id}`,tab:{id:44} as chrome.tabs.Tab};
  assert.deepEqual((await call(internal!,{type:'ktv420:pending-replay'},content)).result,recording);
  assert.equal((await call(internal!,{type:'ktv420:pending-replay'},{...content,tab:{id:45} as chrome.tabs.Tab})).result,null);

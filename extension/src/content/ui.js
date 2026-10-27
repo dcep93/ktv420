@@ -31,6 +31,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
   const icon = document.createElement('img'); icon.alt = ''; icon.src = chrome.runtime.getURL('assets/favicon.svg'); button.append(icon);
   const overlay = document.createElement('section');
   overlay.id = IFRAME_ID; overlay.setAttribute('aria-label', 'ktv420 Spotify overlay'); overlay.setAttribute('aria-hidden', 'true');
+  let connectionStartedAt = 0;
   let iframe; let tracks = []; let notice = ''; let error = ''; let starting = false; let route = ''; let refreshing = false;
   let usingDomTracks = false;
   let frameReady = false, lastTrackRefresh = 0, opening = false;
@@ -160,6 +161,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
       iframe = null;
     }
     if (!iframe) {
+      connectionStartedAt = Date.now();
       iframe = document.createElement('iframe');
       iframe.title = 'ktv420 Spotify player';
       iframe.src = frameUrl;
@@ -181,6 +183,9 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
   }
   async function show(fromButton = true) {
     if (!isSupportedRoute()) return;
+    if (fromButton && navigation.open && overlay.dataset.open !== 'true' && iframe) {
+      frameReady = false; iframe.remove(); iframe = null;
+    }
     if (fromButton) { writeView(true); navigation = { ...navigation, revision: navigation.revision + 1 }; }
     prepareRequestedView();
     await updateTracks();
@@ -235,7 +240,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
     button.dataset.active = String(isRunActive());
     button.disabled = !isSupportedRoute();
     button.setAttribute('aria-busy', String(navigation.open && overlay.dataset.open !== 'true'));
-    button.title = error || catalogError || (isRunActive() ? 'ktv420 capture active' : navigation.open && overlay.dataset.open !== 'true' ? 'Waiting for Spotify and ktv420' : 'Open ktv420');
+    button.title = error || catalogError || (isRunActive() ? 'ktv420 capture active' : navigation.open && overlay.dataset.open !== 'true' ? connectionStartedAt && Date.now() - connectionStartedAt > 15000 ? 'Player did not connect. Click k to retry, or reload the extension.' : 'Waiting for Spotify and ktv420' : 'Open ktv420');
     if (iframe && overlay.dataset.open === 'true') prepare();
     if (collection && route === location.pathname && (!collection.title || !collection.artwork)) {
       // Spotify's title and cover hydrate independently. Keep looking for either

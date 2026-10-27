@@ -64,3 +64,17 @@ test('catalog repairs absent registry entries from matching saved audio and pers
   assert.deepEqual(await savedCollections(), [{...repaired[0],ready:1}], 'recovery persists after old tab contexts are evicted');
   await deleteTrack('spotify-recovered');
 });
+
+test('standalone collection keeps registry order and missing rows, and includes saved names', async () => {
+  const { savedCollection } = await import('./collectionRegistry');
+  await updateState('collections', () => [{...collection, trackIds:['two','missing','one'],savedAt:1,startedAt:1}]);
+  await saveInput({id:'spotify-two',title:'Second title',artist:'Artist',createdAt:1,sampleRate:44100,frames:1,status:'captured',bytes:0,source:'spotify'},new Blob(['audio']));
+  const detail=await savedCollection(collection.path);
+  assert.deepEqual(detail.tracks.map(row=>row.trackId),['two','missing','one']);
+  assert.equal(detail.tracks[0].trackName,'Second title'); assert.equal(detail.tracks[0].trackArtist,'Artist');
+  assert.equal(detail.tracks[1].rowIndex,1); assert.equal(detail.tracks[1].trackName,'Track 2');
+  assert.equal('files' in detail,false);
+  await assert.rejects(savedCollection('album/invalid'),/Invalid playlist/);
+  await assert.rejects(savedCollection('album/9999999999999999999999'),/not in/);
+  await deleteTrack('spotify-two');
+});

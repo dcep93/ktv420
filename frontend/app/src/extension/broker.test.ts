@@ -205,3 +205,22 @@ test('single-song capture RPC is bounded, authenticated and reports sanitized re
   assert.deepEqual(replies.at(-1),{source:'ktv420-parent',version:2,type:'capture-result',id:request.id,ok:false,error:'Stopped'});
   await bridge.dispose();
 });
+
+test('standalone bridge allows local audio and navigation but blocks capture and all Spotify control', async () => {
+  const sent: Record<string,unknown>[] = [], replies:unknown[]=[];
+  const parent={postMessage:(value:Record<string,unknown>,origin:string)=>{assert.equal(origin,'https://ktv420.web.app');sent.push(value);}} as unknown as Window;
+  const player={postMessage:(value:unknown)=>replies.push(value)} as unknown as Window;
+  let calls=0;
+  const bridge=createBrokerBridge({parent,player,parentOrigin:'https://ktv420.web.app',playerOrigin:'https://ktv420.web.app',standalone:true,showError(){},
+    createSession:()=>({dispose:async()=>{},handle:async()=>{calls++;return {source:'ktv420-library',version:2,id:'read',ok:true};}}) as ReturnType<typeof createLibraryBrokerSession>});
+  const send=(type:string,other={})=>bridge.receive({source:player,origin:'https://ktv420.web.app',data:{source:'ktv420-overlay',version:2,type,...other}});
+  await send('ready');
+  for(const type of ['capture-one','capture-cancel','toggle-capture','listening-heartbeat','transport']) await send(type,{id:'test',trackId:'1'.repeat(22),command:{action:'play'}});
+  assert.deepEqual(sent.map(m=>m.type),['ready']);
+  await send('view',{revision:1,trackIndex:2}); await send('close');
+  assert.deepEqual(sent.map(m=>m.type),['ready','view','close']);
+  await bridge.receive({source:parent,origin:'https://ktv420.web.app',data:{source:'ktv420-library',version:2,id:'read',method:'getPlaybackRecord',args:['one']}});
+  assert.equal(calls,0,'parent webpage does not get direct library access');
+  await bridge.receive({source:player,origin:'https://ktv420.web.app',data:{source:'ktv420-library',version:2,id:'read',method:'getPlaybackRecord',args:['one']}});
+  assert.equal(calls,1); assert.equal(replies.length,1);
+});

@@ -27,3 +27,8 @@
 .saved-confirm button { padding: 10px 16px; border: 1px solid var(--ww-border); border-radius: 10px; background: var(--ww-panel-soft); color: inherit; font: inherit; cursor: pointer; }
 .saved-confirm .saved-delete-confirm, .saved-confirm [role="alert"] { color: var(--ww-title-pink); }
 .saved-confirm button:disabled { opacity: .5; cursor: wait; }
+
+.saved-row > .saved-local-link { flex: 0 0 auto; align-self: center; padding: 12px 16px; border-radius: 12px; color: var(--ww-title-pink); }
+.playlist-host { width: 100%; height: 100dvh; border: 0; display: block; }
+.playlist-loading { position: fixed; inset: 0; display: grid; place-content: center; gap: 16px; text-align: center; background: var(--ww-bg, #0c0907); }
+.playlist-loading nav { display: flex; gap: 24px; justify-content: center; }

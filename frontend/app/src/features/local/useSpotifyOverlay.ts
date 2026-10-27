@@ -9,9 +9,11 @@ export type SpotifyTrack = { trackId: string; trackName: string; trackArtist: st
 type SpotifyState = { navigation: OverlayNavigation | null; spotifyPath: string; listening: ListeningState | null; tracks: SpotifyTrack[]; active: boolean; starting: boolean; supported: boolean; notice: string; error: string; captureProgress: CaptureProgress | null; savingTrackIds: string[] };
 const initial: SpotifyState = { navigation: null, spotifyPath: '', listening: null, tracks: [], active: false, starting: false, supported: false, notice: '', error: '', captureProgress: null, savingTrackIds: [] };
 const embedded = window.parent !== window;
+const standalone = new URLSearchParams(window.location.search).get('standalone') === '1';
 // The extension broker authenticates Spotify and relays only overlay controls.
 const parentOrigin = embedded ? brokerOrigin() : '';
 function send(type: string, command?: TransportCommand) {
+  if (standalone && !['ready', 'view-ready', 'close', 'view'].includes(type)) return;
   if (embedded) window.parent.postMessage({ source: 'ktv420-overlay', version: 2, type, command, ...(type === 'ready' ? { controller: 'hosted' } : {}) }, parentOrigin);
 }
 export function useSpotifyOverlay(onClose?: () => void) {
@@ -29,6 +31,7 @@ export function useSpotifyOverlay(onClose?: () => void) {
     pending.reject(new Error('Capture stopped.'));
   }, []);
   const captureOne = useCallback((trackId:string) => new Promise<void>((resolve,reject) => {
+    if (standalone) { reject(new Error('Capture is only available on Spotify.')); return; }
     if (captureRequest.current) { reject(new Error('Capture is busy.')); return; }
     const id = crypto.randomUUID();
     const timer = setTimeout(() => cancelCapture(), 2 * 60 * 60 * 1000);
@@ -78,7 +81,7 @@ export function useSpotifyOverlay(onClose?: () => void) {
       }));
     };
     window.addEventListener('message', receive); send('ready');
-    const heartbeat = setInterval(() => window.parent.postMessage({source:'ktv420-overlay',version:2,type:'listening-heartbeat',captureFraction:hostedFraction.current},parentOrigin), 500);
+    const heartbeat = setInterval(() => { if (standalone) return; window.parent.postMessage({source:'ktv420-overlay',version:2,type:'listening-heartbeat',captureFraction:hostedFraction.current},parentOrigin); }, 500);
     send('listening-heartbeat');
     return () => { cancelCapture(); clearInterval(heartbeat); window.removeEventListener('message', receive); };
   }, [cancelCapture]);
@@ -95,7 +98,7 @@ export function useSpotifyOverlay(onClose?: () => void) {
       return savingTrackIds === previous.savingTrackIds ? previous : { ...previous, savingTrackIds };
     });
   }, []);
-  return { ...state, reportCaptureFraction, captureOne, cancelCapture, acknowledgeSaved, replay, embedded, setView: sendView, transport: sendTransport, dismissReplay: () => send('dismiss-replay'), toggleCapture: () => send('toggle-capture'), close: () => send('close') };
+  return { ...state, reportCaptureFraction, captureOne, cancelCapture, acknowledgeSaved, replay, embedded, standalone, setView: sendView, transport: sendTransport, dismissReplay: () => send('dismiss-replay'), toggleCapture: () => send('toggle-capture'), close: () => send('close') };
 }
 
 const sendTransport = (command: TransportCommand) => send('transport', command);

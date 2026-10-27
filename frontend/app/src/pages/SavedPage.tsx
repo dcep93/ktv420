@@ -1,3 +1,4 @@
+import { localPlaylistLink } from '../features/local/playlistPage';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { extensionMessage, STORE_URL } from '../features/local/extensionConnection';
 import { collectionLink, type SavedCollectionSummary } from '../features/local/savedCollections';
@@ -45,7 +46,7 @@ export default function SavedPage() {
         <span className="saved-copy"><strong>{collection.title || (collection.path.startsWith('album/') ? 'Saved album' : 'Saved playlist')}</strong>
           <span>{collection.captured} of {collection.total} captured · {collection.ready} ready</span></span>
         <span className="saved-arrow" aria-hidden="true">↗</span>
-      </a><button className="saved-delete" aria-label={`Delete local audio for ${collection.title || 'this collection'}`} title="Delete local audio"
+      </a><a className="saved-local-link" href={localPlaylistLink(collection.path, new URLSearchParams(location.search).get('extension'))} aria-label={`Open ${collection.title || 'collection'} in ktv420`}>ktv420</a><button className="saved-delete" aria-label={`Delete local audio for ${collection.title || 'this collection'}`} title="Delete local audio"
         disabled={!collection.captured || !!deleting} onClick={() => { setConfirmDelete(collection.path); setDeleteError(''); }}><OverlayIcon name="trash" /></button></div>
       {confirmDelete === collection.path && <div className="saved-confirm">
         <p>Delete this collection’s local originals and stems? Shared songs will also be unavailable in other playlists. The catalog link stays.</p>

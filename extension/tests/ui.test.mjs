@@ -299,6 +299,21 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
     assert.equal(transportRequests.length, commandsBefore, 'repair must not stop capture or change volume');
   }
 
+  overlay.dataset.open = 'false';
+  elements.find(element => element.id === 'ktv420-spotify-capture-button').onclick();
+  await new Promise(resolve => setImmediate(resolve));
+  const stalled = elements.filter(element => element.tag === 'iframe').at(-1);
+  elements.find(element => element.id === 'ktv420-spotify-capture-button').onclick();
+  await new Promise(resolve => setImmediate(resolve));
+  const retried = elements.filter(element => element.tag === 'iframe').at(-1);
+  assert.notEqual(retried, stalled, 'explicit k click retries an opening that never acknowledged readiness');
+  assert.equal(stalled.isConnected, false);
+  const beforeRetry = messages.length;
+  await listeners.message({...ready,source:stalled.contentWindow});
+  assert.equal(messages.length,beforeRetry,'stale broker cannot unlock retried player');
+  await listeners.message({...ready,source:retried.contentWindow});
+  assert.ok(messages.length>beforeRetry);
+
   listeners.pagehide();
   assert.equal(disconnected, true, 'page teardown disconnects the DOM observer');
 

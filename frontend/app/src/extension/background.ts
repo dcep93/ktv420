@@ -1,5 +1,5 @@
 import { deleteCollectionAudio } from './catalogDeletion';
-import { savedCollections, setCaptureContext } from './collectionRegistry';
+import { savedCollections, savedCollection, setCaptureContext } from './collectionRegistry';
 import { parseRecording } from '../features/local/recording';
 import { claimListeningLease } from './listeningLease';
 import { readState, updateState } from './state';
@@ -57,8 +57,14 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
 chrome.runtime.onMessageExternal.addListener((message: unknown, sender, respond) => {
   let url: URL;
   try { url = new URL(sender.url || ''); } catch { return false; }
-  if (url.origin !== 'https://ktv420.web.app' || !['/replay', '/catalog', '/saved'].includes(url.pathname.replace(/\/$/,'')) || (sender.frameId !== undefined && sender.frameId !== 0) ||
+  if (url.origin !== 'https://ktv420.web.app' || !['/replay', '/catalog', '/saved', '/playlist'].includes(url.pathname.replace(/\/$/,'')) || (sender.frameId !== undefined && sender.frameId !== 0) ||
     !message || typeof message !== 'object' || !('type' in message)) return false;
+  if (url.pathname.replace(/\/$/,'') === '/playlist') {
+    if (message.type !== 'ktv420:collection' || !('path' in message)) return false;
+    void savedCollection(message.path).then(collection => respond({ok:true,collection}),
+      error => respond({ok:false,error:error instanceof Error ? error.message : String(error)}));
+    return true;
+  }
   if (['/catalog', '/saved'].includes(url.pathname.replace(/\/$/,''))) {
     if (url.pathname.replace(/\/$/,'') === '/catalog' && message.type === 'ktv420:delete-collection-audio') {
       if (!('path' in message) || !('confirmed' in message) || message.confirmed !== true) return false;

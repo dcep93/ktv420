@@ -1,8 +1,11 @@
 export const STORE_ID = 'kmkbecinmhkfihahalgclomhcicmoiia';
 export const STORE_URL = `https://chromewebstore.google.com/detail/ktv420/${STORE_ID}`;
-export function extensionMessage<T extends { ok: boolean; error?: string; version?: string }>(message: unknown): Promise<T> {
+export function extensionId(): string {
   const requested = new URLSearchParams(location.search).get('extension');
-  const id = requested && /^[a-p]{32}$/.test(requested) ? requested : STORE_ID;
+  return requested && /^[a-p]{32}$/.test(requested) ? requested : STORE_ID;
+}
+export function extensionMessage<T extends { ok: boolean; error?: string; version?: string }>(message: unknown): Promise<T> {
+  const id = extensionId();
   return new Promise((resolve, reject) => {
     if (!globalThis.chrome?.runtime?.sendMessage) { reject(new Error('Install the extension, then refresh this page.')); return; }
     const timeout = setTimeout(() => reject(new Error('Update the extension, then refresh this page.')), 8000);

@@ -7,6 +7,7 @@ type MessageWindow = Pick<Window, 'postMessage'>;
 type Session = ReturnType<typeof createLibraryBrokerSession>;
 type BridgeOptions = {
   parent: MessageWindow; player: MessageWindow; parentOrigin: string; playerOrigin: string;
+  standalone?: boolean;
   createSession: () => Session; showError: (message: string) => void; onReady?: () => void;
 };
 function object(value: unknown): value is Record<string, unknown> {
@@ -86,6 +87,7 @@ export function createBrokerBridge(options: BridgeOptions) {
       return;
     }
     if (data.source !== 'ktv420-overlay') return;
+    if (options.standalone && !['ready', 'view', 'view-ready', 'close'].includes(String(data.type))) return;
     if (data.version !== LIBRARY_PROTOCOL_VERSION) {
       options.showError('Player bridge version mismatch. Update the extension and reload Spotify.'); return;
     }
@@ -144,8 +146,10 @@ export function createBrokerBridge(options: BridgeOptions) {
 function mountBroker() {
   const playerUrl = new URL(import.meta.env.DEV ? `http://127.0.0.1:${location.port}/` : 'https://ktv420.web.app/player/');
   const ownOrigin = location.origin;
+  const standalone = new URLSearchParams(location.search).get('standalone') === '1';
+  if (standalone) playerUrl.searchParams.set('standalone', '1');
   playerUrl.searchParams.set('brokerOrigin', ownOrigin);
-  const parentOrigin = import.meta.env.DEV ? ownOrigin : 'https://open.spotify.com';
+  const parentOrigin = import.meta.env.DEV ? ownOrigin : standalone ? 'https://ktv420.web.app' : 'https://open.spotify.com';
   const player = document.createElement('iframe');
   player.title = 'ktv420 player'; player.allow = 'autoplay'; player.src = playerUrl.href;
   const status = document.createElement('div'); status.className = 'status'; status.hidden = true;
@@ -157,7 +161,7 @@ function mountBroker() {
   const showError = (message: string) => { text.textContent = message; status.hidden = false; };
   const startTimeout = () => { clearTimeout(timer); timer = setTimeout(() => showError('The hosted player could not connect. Check your connection and retry.'), 12000); };
   const bridge = createBrokerBridge({
-    parent: window.parent, player: player.contentWindow!, parentOrigin, playerOrigin: playerUrl.origin,
+    standalone, parent: window.parent, player: player.contentWindow!, parentOrigin, playerOrigin: playerUrl.origin,
     createSession: () => createLibraryBrokerSession({ locks: navigator.locks, preferences: localStorage }),
     showError, onReady: () => { clearTimeout(timer); status.hidden = true; },
   });
