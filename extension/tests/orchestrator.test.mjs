@@ -103,6 +103,27 @@ test('run errors and cached completion reset progress', async t => {
   assert.equal(runner.isActive(), false);
 });
 
+test('the last capture failure survives refresh and unavailable diagnostic storage cannot mask it', async t => {
+  mockPage(t);
+  t.mock.method(console, 'log', () => {});
+  const stored = new Map();
+  window.sessionStorage = { setItem: (key, value) => stored.set(key, value) };
+  const runner = new CaptureOrchestrator({ bridge: { command: async () => ({}), getSnapshot: () => ({}) } });
+  runner.preflightQueue = async debug => {
+    debug.phase = 'recording'; debug.trackName = 'Unwritten';
+    debug.recentMediaStates.push({ currentTime: 90, previousPosition: 100 });
+    throw Error('Original capture failure');
+  };
+  await assert.rejects(runner.run(), /Original capture failure/);
+  const report = JSON.parse(stored.get('ktv420:last-capture-failure'));
+  assert.equal(report.error.message, 'Original capture failure');
+  assert.equal(report.phase, 'recording');
+  assert.equal(report.trackName, 'Unwritten');
+  assert.equal(report.recentMediaStates[0].previousPosition, 100);
+  window.sessionStorage.setItem = () => { throw Error('Storage unavailable'); };
+  await assert.rejects(runner.run(), /Original capture failure/);
+});
+
 test('remote handoff ends the batch without reporting a user stop', async t => {
   mockPage(t);
   const runner = new CaptureOrchestrator({ bridge: { command: async () => ({}), getSnapshot: () => ({}) } });
@@ -133,6 +154,56 @@ test('a mid-song source replacement still fails rather than saving mixed audio',
   ];
   const runner = new CaptureOrchestrator({ bridge: { command: async () => states.shift() } });
   await assert.rejects(runner.recordUntilBoundary(item, {}, { events: [] }), /media source changed/);
+});
+
+test('one regressed media-clock reading recovers without discarding a healthy recording', async t => {
+  mockPage(t);
+  window.setTimeout = callback => { queueMicrotask(callback); return 0; };
+  const states = [100, 0, 100.2, 180].map((currentTime, index) => ({
+    source: 'audio', currentTime, duration: 180, ended: index === 3,
+  }));
+  const runner = new CaptureOrchestrator({ bridge: { command: async () => states.shift(), getSnapshot: () => ({}) } });
+  const debug = { events: [] };
+  assert.equal((await runner.recordUntilBoundary(item, {}, debug)).reason, 'media-ended');
+  assert.equal(debug.recoveredClockReadings, 1);
+  assert.equal(debug.recentMediaStates[0].previousPosition, 100);
+  assert.equal(debug.recentMediaStates[0].currentTime, 0);
+});
+
+test('confirmed backward movement logs positions and stops instead of saving damaged audio', async t => {
+  mockPage(t);
+  window.setTimeout = callback => { queueMicrotask(callback); return 0; };
+  const states = [100, 90, 90.1].map(currentTime => ({ source: 'audio', currentTime, duration: 180 }));
+  const runner = new CaptureOrchestrator({ bridge: { command: async () => states.shift() } });
+  const debug = { events: [] };
+  await assert.rejects(runner.recordUntilBoundary(item, {}, debug), /100\.000s → 90\.100s/);
+  assert.equal(debug.phase, 'recording');
+  assert.deepEqual(debug.recentMediaStates.map(state => state.currentTime), [90, 90.1]);
+});
+
+test('an actual seek remains fatal immediately and retains its media evidence', async () => {
+  const states = [
+    { source: 'audio', currentTime: 100, duration: 180 },
+    { source: 'audio', currentTime: 90, duration: 180, invalid: true, invalidReason: 'Actual seek', invalidCode: 'seek' },
+  ];
+  const runner = new CaptureOrchestrator({ bridge: { command: async () => states.shift() } });
+  const debug = { events: [] };
+  await assert.rejects(runner.recordUntilBoundary(item, {}, debug), /Actual seek/);
+  assert.equal(states.length, 0);
+  assert.equal(debug.recentMediaStates[0].invalidCode, 'seek');
+});
+
+test('recording observations are bounded even for a long song', async t => {
+  mockPage(t);
+  window.setTimeout = callback => { queueMicrotask(callback); return 0; };
+  let time = 0;
+  const runner = new CaptureOrchestrator({ bridge: {
+    command: async () => ({ source: 'audio', currentTime: time++, duration: 100, ended: time > 100 }), getSnapshot: () => ({}),
+  } });
+  const debug = { events: [] };
+  await runner.recordUntilBoundary(item, {}, debug);
+  assert.equal(debug.recentMediaStates.length, 30);
+  assert.equal(debug.recentMediaStates.at(-1).currentTime, 100);
 });
 
 

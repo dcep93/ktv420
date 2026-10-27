@@ -70,7 +70,13 @@ const ui = mountButton({
         if (options.trackIds?.length === 1 && !(await readCachedTracks(options.trackIds)).has(options.trackIds[0])) throw new Error('Capture was interrupted. Nothing was saved.');
         if (!runner.handingOff) await listening?.stopCapture();
       }
-      catch (error) { if (!runner.handingOff) await listening?.stopCapture(); throw error; }
+      catch (error) {
+        if (!runner.handingOff) {
+          try { await listening?.stopCapture(); }
+          catch (cleanupError) { console.warn('[ktv420] Capture cleanup failed; preserving original error', cleanupError); }
+        }
+        throw error;
+      }
       finally { listening?.afterBatch(); }
       ui.refresh();
     } catch (error) {

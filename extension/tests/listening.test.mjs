@@ -2,6 +2,33 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createListeningController } from '../src/content/listening.js';
 
+test('a missing Spotify pause acknowledgement is logged without failing capture cleanup', async t => {
+  let clicks = 0;
+  const calls = [], warnings = [];
+  const button = { disabled: false, getAttribute: () => 'Pause', click() { clicks++; } };
+  for (const [key, value] of Object.entries({
+    document: {
+      querySelector: selector => selector.includes('control-button-playpause') ? button : null,
+      querySelectorAll: selector => selector.includes('input[type="range"]') ? [{ max: '180000', value: '91000', getAttribute: () => '1:31/3:00' }] : [],
+    },
+    setInterval() { return 0; }, clearInterval() {},
+  })) {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, key);
+    Object.defineProperty(globalThis, key, { value, writable: true, configurable: true });
+    t.after(() => previous ? Object.defineProperty(globalThis, key, previous) : delete globalThis[key]);
+  }
+  t.mock.method(globalThis, 'setTimeout', callback => { queueMicrotask(callback); return 0; });
+  t.mock.method(console, 'warn', (...args) => warnings.push(args));
+  const controller = createListeningController({ bridge: { async command(command, payload) { calls.push({ command, payload }); } },
+    emit() {}, ensurePlayer() {}, getRunner: () => null });
+  await assert.doesNotReject(controller.stopCapture());
+  assert.equal(clicks, 1, 'do not toggle repeatedly against a stale button');
+  assert.deepEqual(calls[0], { command: 'listening-output', payload: { gain: 0 } });
+  assert.equal(warnings[0][1].phase, 'cleanup-pause');
+  assert.equal(warnings[0][1].spotify.position, 91);
+  assert.match(warnings[0][1].error, /did not change playback state/);
+});
+
 test('listening does nothing until opened, and releases control when closed', async t => {
   const ticks = [], calls = [], updates = [];
   let reads = 0, storageReads = 0, prepares = 0;

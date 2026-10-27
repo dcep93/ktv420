@@ -81,7 +81,9 @@ export class CaptureOrchestrator extends EventTarget {
       route: window.location.href,
       storageVersion: STORAGE_VERSION,
       timingTrace: runTimingTrace,
-      events: []
+      events: [],
+      phase: 'preflight',
+      recentMediaStates: []
     };
 
     const summary = [];
@@ -156,6 +158,8 @@ export class CaptureOrchestrator extends EventTarget {
       for (let index = 0; index < queue.length; index += 1) {
         this.throwIfStopped();
         const item = queue[index];
+        debug.trackId = item.trackId;
+        debug.trackName = item.trackName;
         const nextItem = queue[index + 1] || null;
 
         if (!startInfo) {
@@ -185,6 +189,7 @@ export class CaptureOrchestrator extends EventTarget {
           // Save this complete track before preparing another, so a failed next
           // seek cannot discard good audio. Pause the new song while transferring.
           this.markSaving(pendingCapture.item.trackId);
+          debug.phase = 'saving';
           pausePlaybackCleanly();
           pendingCapture.capture = await this.finishPageCapture();
           const metadata = await this.storeCapturedTrack(pendingCapture.item, pendingCapture.capture, pendingCapture.captureEnd);
@@ -232,6 +237,11 @@ export class CaptureOrchestrator extends EventTarget {
         mediaSession: this.bridge.getSnapshot().mediaSession,
         routePathname: window.location.pathname
       };
+
+      // Keep the last failure through a Spotify refresh, without audio or any
+      // network upload. Storage denial must never replace the capture error.
+      try { window.sessionStorage.setItem('ktv420:last-capture-failure', JSON.stringify(report)); }
+      catch { /* Console diagnostics remain available if session storage is unavailable. */ }
 
       if (!hasTimingOutcome(runTimingTrace)) {
         markTiming(runTimingTrace, "spotify_first_track_start_failed", {
@@ -389,6 +399,7 @@ export class CaptureOrchestrator extends EventTarget {
 
   async beginAndAcceptItem(item, debug, { logFirstStartTiming = false } = {}) {
     try {
+      debug.phase = 'starting';
       // Identify the requested song first. The initial playhead may be anywhere;
       // exact start verification happens after pause + seek below.
       await this.waitForExpectedTrackStart(item, debug);
@@ -455,11 +466,13 @@ export class CaptureOrchestrator extends EventTarget {
   }
 
   async recordUntilBoundary(item, startInfo, debug) {
+    debug.phase = 'recording';
     const initialState = await this.bridge.command("capture-state");
     const sourceAtStart = initialState.source;
     const duration = safeDuration(initialState);
     let lastMediaTime = safeCurrentTime(initialState);
     let ignoredNetworkTrackId = null;
+    let backwardSample = null;
     this.updateCaptureProgress(item, initialState);
 
     debug.events.push({
@@ -475,6 +488,10 @@ export class CaptureOrchestrator extends EventTarget {
       this.throwIfStopped();
       const now = performance.now();
       const mediaState = await this.bridge.command("capture-state");
+      const observation = { at: Date.now(), previousPosition: lastMediaTime, ...mediaState };
+      const recent = debug.recentMediaStates ??= [];
+      recent.push(observation);
+      if (recent.length > 30) recent.shift();
       if (mediaState.invalid) {
         throw new Error(`Capture timing could not be verified: ${mediaState.invalidReason || 'The recording was interrupted.'} Nothing was saved.`);
       }
@@ -512,7 +529,20 @@ export class CaptureOrchestrator extends EventTarget {
           };
         }
 
-        throw new Error(`Spotify seeked backward unexpectedly during ${item.trackName}.`);
+        // A transient clock read is not a seek. Actual seeking invalidates the
+        // page recorder immediately; confirm polling-only regressions once.
+        if (!backwardSample) {
+          backwardSample = observation;
+          await delay(100);
+          continue;
+        }
+        throw new Error(`Spotify moved backward during ${item.trackName} (${lastMediaTime.toFixed(3)}s → ${currentTime.toFixed(3)}s). Nothing was saved.`);
+      }
+
+      if (backwardSample) {
+        debug.recoveredClockReadings = (debug.recoveredClockReadings || 0) + 1;
+        debug.lastRecoveredClockReading = { from: backwardSample, to: observation };
+        backwardSample = null;
       }
 
       if (currentTime > lastMediaTime) {

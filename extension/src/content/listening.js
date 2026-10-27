@@ -279,6 +279,14 @@ export function createListeningController({ bridge, emit, ensurePlayer, getRunne
         captureProgress: null, overallCaptureFraction: null });
       await policy(0);
       try { await commandTransport({ action: 'pause' }); }
+      catch (reason) {
+        // Audio is already silenced. Spotify's DOM acknowledgement is cleanup,
+        // not evidence that a saved capture failed (nor the original failure).
+        console.warn('[ktv420] Capture cleanup pause was not acknowledged', {
+          at: new Date().toISOString(), phase: 'cleanup-pause',
+          error: reason?.message || String(reason), spotify: readTransportDom(),
+        });
+      }
       finally {
         while (busy) await new Promise(resolve => setTimeout(resolve, 20));
         await finish(false);
