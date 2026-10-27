@@ -1,0 +1,7 @@
+# Resonance Plate fixed palette
+
+User correction supersedes the prior color-blending design: every visible artwork pixel has one permanent palette assignment. Gold, brown, pink and teal each receive one quarter of visible pixels, differing by at most one when indivisible. Match original source colors using perceptual OKLab distance under those quotas. Prioritize pixels with the strongest preference over their next-best color, then choose the nearest color with remaining capacity. Ties use source pixel order, never randomness. This deterministic greedy assignment is bounded and does not claim global optimality.
+
+Analyze once per artwork load. Store the integer palette index in each grain's fourth value, replacing random phase. Preserve luminance and edge-derived weights. Center grains on their image cells and constrain them to those cells so adjacent colors cannot paint over each other. Playback time never changes assignments or geometry. Only each assigned stem's cubic opacity changes; mute removes its pixels without reallocating them. Original remains excluded. Placeholder notes follow the same balanced mapping.
+
+Keep processing and storage local; no extension changes. Verify balanced counts, source-color fidelity, deterministic tie handling, fixed palette identity across time and stem levels, mute exclusion, cubic opacity, anchored non-overlapping geometry, and bounded rendering. Browser-check real artwork and fallback, run tests/lint/builds, and deploy.
