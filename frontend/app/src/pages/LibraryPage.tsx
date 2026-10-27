@@ -1,5 +1,6 @@
 import { usePlayerPreferences } from '../features/local/usePlayerPreferences';
 import { useHostedCapture } from '../features/local/useHostedCapture';
+import { capturedPlaylistStart } from '../features/local/playlistLogo';
 import { SpotifyDriftController } from '../features/local/spotifyDrift';
 import { catalogUrl } from '../features/local/extensionConnection';
 import { bestEffortSpotify } from '../features/local/spotifySync';
@@ -348,7 +349,7 @@ export default function LibraryPage() {
     }
     const row = spotify.tracks.find(track => track.rowIndex + 1 === navigation.trackIndex);
     const id = row && `spotify-${row.trackId}`;
-    if (capture.active || spotify.starting || !id || !tracks.some(track => track.id === id && track.status === 'ready')) return;
+    if (capture.active || spotify.starting || !id || !tracks.some(track => track.id === id)) return;
     appliedNavigation.current = navigation.revision;
     pauseForEntry();
     if (selected !== id || selectedRowIndex !== row.rowIndex) { loadedRevision.current = ''; setRecord(null); setSelected(id); setSelectedRowIndex(row.rowIndex); viewScroll.current.player = 0; }
@@ -404,29 +405,37 @@ export default function LibraryPage() {
     mixer.current?.pause(); setAutoPlay(false); setViewMode('tracks');
   };
   const close = useCallback(() => { closeRef.current(); spotify.close(); }, [spotify]);
-  const canCapture = !mp3Export.busy && !replay.active && !recording && spotify.embedded && !spotify.starting && !deletingAudio && (capture.active || (spotify.supported && spotify.tracks.length > 0));
+  const canCapture = !mp3Export.busy && !replay.active && !recording && spotify.embedded && !spotify.starting && !deletingAudio && (capture.active || (libraryReady && spotify.supported && spotify.tracks.length > 0));
   const audioBusy = mp3Export.busy || replay.active || !!active || recording || capture.active || spotify.starting || deletingAudio;
+  const firstCapturedTrack = viewMode === 'tracks' && !spotify.replay && !capture.active
+    ? capturedPlaylistStart(spotify.tracks, tracks, libraryReady) : null;
+  const openTrack = useCallback((id: string, rowIndex?: number, allowCaptured = false) => {
+    const track = tracks.find(track => track.id === id);
+    if (!track || (!allowCaptured && track.status !== 'ready') || deleting.current || (recording && selected !== id)) return;
+    if (selected !== id || selectedRowIndex !== rowIndex) { loadedRevision.current = ''; setRecord(null); setSelected(id); setSelectedRowIndex(rowIndex ?? null); viewScroll.current.player = 0; }
+    pauseForEntry(); syncTrackUrl(id, false, rowIndex);
+    setViewMode('player');
+  }, [tracks, recording, selected, selectedRowIndex, pauseForEntry, syncTrackUrl]);
+  const onLogoClick = useCallback(() => {
+    if (viewMode === 'player') {
+      setViewMode('tracks');
+      if (urlNavigation) setUrlView(null, urlNavigation.revision, false);
+      return;
+    }
+    if (!canCapture) return;
+    if (firstCapturedTrack) { openTrack(`spotify-${firstCapturedTrack.trackId}`, firstCapturedTrack.rowIndex, true); return; }
+    capture.toggle();
+  }, [viewMode, urlNavigation, setUrlView, canCapture, firstCapturedTrack, openTrack, capture]);
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if (event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
       if (event.key === 'Escape') { event.preventDefault(); close(); return; }
       if (event.target instanceof HTMLElement && event.target.closest('input,textarea,select,button,[contenteditable="true"]')) return;
-      if (event.key === 'Enter' && viewMode === 'tracks' && canCapture) { event.preventDefault(); capture.toggle(); }
+      if (event.key === 'Enter' && viewMode === 'tracks' && canCapture) { event.preventDefault(); onLogoClick(); }
     };
     window.addEventListener('keydown', keydown);
     return () => window.removeEventListener('keydown', keydown);
-  }, [close, spotify, viewMode, canCapture, capture]);
-  const onLogoClick = () => {
-    if (viewMode !== 'player') { capture.toggle(); return; }
-    setViewMode('tracks');
-    if (urlNavigation) setUrlView(null, urlNavigation.revision, false);
-  };
-  const openTrack = (id: string, rowIndex?: number) => {
-    if (tracks.find(track => track.id === id)?.status !== 'ready' || deleting.current || (recording && selected !== id)) return;
-    if (selected !== id || selectedRowIndex !== rowIndex) { loadedRevision.current = ''; setRecord(null); setSelected(id); setSelectedRowIndex(rowIndex ?? null); viewScroll.current.player = 0; }
-    pauseForEntry(); syncTrackUrl(id, false, rowIndex);
-    setViewMode('player');
-  };
+  }, [close, viewMode, canCapture, onLogoClick]);
   const startExport = (value: PerformanceRecording) => {
     if (running.current || deleting.current || modelBusy.current || mix.current || replay.active || capture.active || spotify.starting) { setError('Wait for capture, separation, or recording to finish before exporting.'); return; }
     void mp3Export.start(value);
@@ -446,10 +455,10 @@ export default function LibraryPage() {
     </div>
     <div className="iframe-actions-shell"><div className="iframe-actions">
       <button type="button" className="iframe-close-button" aria-label="Close" title="Close" onClick={close}><OverlayIcon name="close" /></button>
-      <button type="button" className="iframe-logo-button" aria-label={viewMode === 'player' ? 'Back to playlist' : 'Start or stop ktv420 capture'}
-        title={viewMode === 'player' ? 'Back to playlist' : capture.active ? 'Stop capture' : 'Start capture'}
+      <button type="button" className="iframe-logo-button" aria-label={viewMode === 'player' ? 'Back to playlist' : firstCapturedTrack ? 'Open first track' : 'Start or stop ktv420 capture'}
+        title={viewMode === 'player' ? 'Back to playlist' : firstCapturedTrack ? 'Open first track' : capture.active ? 'Stop capture' : 'Start capture'}
         aria-disabled={viewMode !== 'player' && !canCapture} disabled={viewMode !== 'player' && !canCapture}
-        aria-pressed={viewMode === 'player' ? undefined : capture.active} onClick={onLogoClick}><img alt="" src="./favicon.svg" /></button>
+        aria-pressed={viewMode === 'player' || firstCapturedTrack ? undefined : capture.active} onClick={onLogoClick}><img alt="" src="./favicon.svg" /></button>
       <button type="button" className="iframe-settings-button" aria-label="Toggle settings view" title={viewMode === 'settings' ? 'Back to music' : 'Settings'}
         aria-pressed={viewMode === 'settings'} onClick={toggleSettings}><OverlayIcon name="settings" /></button>
     </div>
