@@ -2,6 +2,7 @@ import { collectTrackRows, isSupportedRoute } from './dom.js';
 import { readOverlayUrl, writeOverlayUrl } from './overlayUrl.js';
 import { createCollectionRegistration } from './collectionRegistration.js';
 import { SELECTORS } from './constants.js';
+import { discoverTrackRows, hasAllRows, trackTotal } from './trackDiscovery.js';
 
 const PARENT = 'ktv420-parent';
 const FRAME = 'ktv420-overlay';
@@ -33,7 +34,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
   overlay.id = IFRAME_ID; overlay.setAttribute('aria-label', 'ktv420 Spotify overlay'); overlay.setAttribute('aria-hidden', 'true');
   let connectionStartedAt = 0;
   let iframe; let tracks = []; let notice = ''; let error = ''; let starting = false; let route = ''; let refreshing = false;
-  let usingDomTracks = false;
+  let usingDomTracks = false, tracksComplete = false, trackRefreshTask = null;
   let frameReady = false, lastTrackRefresh = 0, opening = false;
   let replay = null; let captureRequest = null;
   let urlKey = null;
@@ -52,6 +53,9 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
   });
   const registerCollection = (value = collection, started = false) => register(value, started);
   async function prepareCaptureCollection() {
+    if (trackRefreshTask) await trackRefreshTask;
+    if (!tracksComplete) await updateTracks();
+    if (!tracksComplete) throw new Error('Spotify’s track list is still loading. Please try again in a moment.');
     const value = collection, revision = navigation.revision;
     const snapshot = tracks;
     captureCollection = value;
@@ -108,26 +112,53 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
     const trackData = tracks.map(({ trackId, trackName, trackArtist, trackArtworkSrc, rowIndex }) => ({
       trackId, trackName, trackArtist, trackArtworkSrc, rowIndex,
     }));
-    sendToFrame({ source: PARENT, version: 2, type: 'state', spotifyPath: location.pathname.slice(1), navigation, tracks: route === location.pathname ? trackData : [],
+    sendToFrame({ source: PARENT, version: 2, type: 'state', tracksComplete, spotifyPath: location.pathname.slice(1), navigation, tracks: route === location.pathname ? trackData : [],
       active: isRunActive() || !!listening?.capturing, starting, notice, error: error || catalogError, captureProgress: captureProgress || listening?.captureProgress || null, listening, supported: isSupportedRoute() });
   }
-  async function updateTracks() {
-    if (refreshing || isRunActive()) return;
+  function updateTracks() {
+    if (trackRefreshTask) return trackRefreshTask;
+    if (isRunActive()) return Promise.resolve();
+    trackRefreshTask = refreshTracks().finally(() => { trackRefreshTask = null; });
+    return trackRefreshTask;
+  }
+  function updateCollection() {
+    collection = { path: route.slice(1).replace(/\/$/, ''), ...collectionHeader(),
+      trackIds: tracks.map(track => track.trackId), ...(tracksComplete ? { complete: true } : {}) };
+    registerCollection();
+  }
+  async function refreshTracks() {
     refreshing = true;
+    const path = location.pathname;
+    const cancelled = () => path !== location.pathname || !navigation.open || isRunActive();
     try {
-      const path = location.pathname;
-      const found = await loadSpotifyTracks();
-      if (path !== location.pathname) return;
-      const retainRows = usingDomTracks && route === path;
-      usingDomTracks = !found.length;
-      tracks = found.length ? found : retainRows ? tracks : [];
-      if (usingDomTracks) mergeDomRows();
-      route = location.pathname;
-      collection = { path: route.slice(1).replace(/\/$/, ''), ...collectionHeader(),
-        trackIds: tracks.map(track => track.trackId) };
-      registerCollection();
+      // Start a fresh observation: prior rows may belong to an older playlist
+      // revision, even when the URL is unchanged.
+      tracks = []; tracksComplete = false;
+      route = path;
+      usingDomTracks = true;
+      mergeDomRows();
+      tracksComplete = hasAllRows(tracks, trackTotal());
+      updateCollection(); prepareRequestedView(); post();
+      // Failure to observe Spotify's request must not discard DOM discoveries.
+      const result = tracksComplete ? null : await loadSpotifyTracks().catch(() => null);
+      if (cancelled()) return;
+      const found = Array.isArray(result) ? { tracks: result, complete: false } : result;
+      const total = trackTotal();
+      if (!tracksComplete && found?.complete && found.tracks?.length &&
+        (total === null || found.total === total)) {
+        // Visible links identify Spotify's currently playable/relinked versions.
+        const visible = new Map(collectTrackRows().map(track => [track.rowIndex, track]));
+        tracks = found.tracks.map(track => ({ ...track, ...visible.get(track.rowIndex) }));
+        tracksComplete = true; usingDomTracks = false;
+      } else if (!tracksComplete) {
+        const discovered = await discoverTrackRows({ initial: tracks, cancelled,
+          onRows(rows) { tracks = rows; post(); } });
+        if (cancelled()) return;
+        tracks = discovered.tracks; tracksComplete = discovered.complete;
+      }
+      updateCollection();
       error = '';
-    } catch (reason) { error = reason?.message || String(reason); }
+    } catch (reason) { if (!cancelled()) error = reason?.message || String(reason); }
     finally { refreshing = false; lastTrackRefresh = Date.now(); prepareRequestedView(); post(); }
   }
   function mergeDomRows() {
@@ -143,9 +174,10 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
     return changed;
   }
   function refreshDomTracks() {
-    if (!usingDomTracks || route !== location.pathname || !mergeDomRows()) return;
+    if (refreshing || !usingDomTracks || route !== location.pathname || !mergeDomRows()) return;
+    tracksComplete = hasAllRows(tracks, trackTotal());
     if (collection) {
-      collection = { ...collection, trackIds: tracks.map(track => track.trackId) };
+      collection = { ...collection, trackIds: tracks.map(track => track.trackId), complete: tracksComplete };
       if (captureCollection?.path === collection.path) captureCollection = collection;
       registerCollection();
     }
@@ -254,9 +286,9 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
       }
     }
     post();
-    const missingTracks = !tracks.length || (navigation.trackIndex !== null && !tracks.some(track => track.rowIndex + 1 === navigation.trackIndex)) || replay?.tracks.some(item => !tracks.some(t => t.trackId === item.id));
+    const missingTracks = !tracksComplete || !tracks.length || (navigation.trackIndex !== null && !tracks.some(track => track.rowIndex + 1 === navigation.trackIndex)) || replay?.tracks.some(item => !tracks.some(t => t.trackId === item.id));
     const rowsArrived = domChanged && missingTracks && collectTrackRows().length > 0;
-    if (navigation.open && !isRunActive() && (route !== location.pathname || (missingTracks && (rowsArrived || Date.now() - lastTrackRefresh > 1000)))) void updateTracks();
+    if (navigation.open && !isRunActive() && (route !== location.pathname || (missingTracks && (rowsArrived || Date.now() - lastTrackRefresh > 5000)))) void updateTracks();
     prepareRequestedView();
   }
   const handleMessage = async event => {
@@ -331,7 +363,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
   // frame, and stop reacting once the requested rows and logo are available.
   let domRefresh = null;
   const observer = new MutationObserver(() => {
-    const needsRows = navigation.open && (!hasCurrentTracks() ||
+    const needsRows = navigation.open && (!tracksComplete || !hasCurrentTracks() ||
       (navigation.trackIndex !== null && !tracks.some(track => track.rowIndex + 1 === navigation.trackIndex)));
     if (domRefresh !== null || (button.isConnected && !needsRows)) return;
     domRefresh = requestAnimationFrame(() => { domRefresh = null; refresh(true); });

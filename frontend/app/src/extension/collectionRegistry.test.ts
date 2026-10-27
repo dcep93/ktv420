@@ -78,3 +78,26 @@ test('standalone collection keeps registry order and missing rows, and includes 
   await assert.rejects(savedCollection('album/9999999999999999999999'),/not in/);
   await deleteTrack('spotify-two');
 });
+
+test('complete playlist replaces historical IDs and order without deleting old audio', async () => {
+  await updateState('collections', () => [{...collection, trackIds:['oldVersion','two','one'],savedAt:1,startedAt:1}]);
+  await saveInput({id:'spotify-oldVersion',title:'Old version',artist:'',createdAt:1,sampleRate:44100,frames:1,status:'captured',bytes:0,source:'spotify'},new Blob(['audio']));
+  await rememberCollection({...collection,trackIds:['one','newVersion','two'],complete:true});
+  const saved=(await readState('collections'))?.[0];
+  assert.deepEqual(saved?.trackIds,['one','newVersion','two']);
+  assert.equal(saved?.savedAt,1);
+  assert.equal((await savedCollections())[0].total,3);
+  const {listTracks}=await import('../features/local/library');
+  assert.ok((await listTracks()).some(track=>track.id==='spotify-oldVersion'));
+  await rememberCollection({...collection,trackIds:['oldVersion']});
+  assert.deepEqual((await readState('collections'))?.[0].trackIds,['one','newVersion','two'],'partial older tabs must not reintroduce stale IDs');
+  await rememberCollection({...collection,trackIds:['two','two','one'],complete:true});
+  assert.deepEqual((await readState('collections'))?.[0].trackIds,['two','one'],'repeated songs still share one stored audio entry');
+  await deleteTrack('spotify-oldVersion');
+});
+
+test('partial discovery can grow a legacy catalog but cannot remove unseen members', async () => {
+  await updateState('collections', () => [{...collection,savedAt:1,startedAt:1}]);
+  await rememberCollection({...collection,trackIds:['two','three']});
+  assert.deepEqual((await readState('collections'))?.[0].trackIds,['one','two','three']);
+});

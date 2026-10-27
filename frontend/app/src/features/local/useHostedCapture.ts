@@ -42,12 +42,13 @@ export function useHostedCapture(options:Options) {
     const {spotify,required} = latest.current;
     if (spotify.listening?.relayVersion !== 1) { spotify.toggleCapture(); return; }
     if (queue.current.active || spotify.active) { cancel(); return; }
+    if (!spotify.tracksComplete) return;
     if (required.length) spotify.transport({action:'volume',volume:0});
     void run(required.length ? required.map(t=>t.id) : spotify.tracks.map(t=>t.trackId), false, !required.length);
   }, [cancel,run]);
   useEffect(() => {
     const state = options.spotify.listening;
-    if (!supported || !options.libraryReady || !options.spotify.navigation?.open || options.replaying || options.spotify.replay || queue.current.active || options.spotify.active || !state?.playing || state.output !== 'muted' || !state.local || (!state.captureAllowed && autoContinue.current !== state.trackId) || state.syncing || state.error) return;
+    if (!supported || !options.spotify.tracksComplete || !options.libraryReady || !options.spotify.navigation?.open || options.replaying || options.spotify.replay || queue.current.active || options.spotify.active || !state?.playing || state.output !== 'muted' || !state.local || (!state.captureAllowed && autoContinue.current !== state.trackId) || state.syncing || state.error) return;
     if (options.tracks.some(t=>t.id===`spotify-${state.trackId}`) || successful.current.has(state.trackId)) return;
     if (autoAttempt.current === state.trackId) return;
     autoAttempt.current = state.trackId; autoContinue.current = '';

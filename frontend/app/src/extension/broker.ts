@@ -65,6 +65,7 @@ export function createBrokerBridge(options: BridgeOptions) {
             trackId: track.trackId, trackName: track.trackName, trackArtist: track.trackArtist,
             trackArtworkSrc: track.trackArtworkSrc, rowIndex: track.rowIndex,
           })) };
+        if (typeof data.tracksComplete === 'boolean') state.tracksComplete = data.tracksComplete;
         const navigation = parseOverlayNavigation(data.navigation);
         if (navigation) state.navigation = navigation;
         if (data.captureProgress !== undefined) {

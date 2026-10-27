@@ -14,7 +14,7 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
   let resolveTracks; const trackLoad = new Promise(resolve => { resolveTracks = resolve; });
   let pendingReply;const captureRequests=[],transportRequests=[],replayModes=[];
   const trackId = '5EGTNEoUpibGgMWf6ECe0X';
-  let rowsAvailable = true, runActive = false;
+  let rowsAvailable = false, runActive = false, expectedRows = 1;
   let visibleRows;
   let headerArtwork = '';
   let header = { querySelector: selector => selector === 'h1' ? {textContent:'Album title'} : {currentSrc:'',src:headerArtwork}, querySelectorAll: () => [] };
@@ -47,7 +47,7 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
       documentElement: makeElement('html'), body: makeElement('body'),
       querySelector: selector => selector.includes('logoSpotify')
         ? { closest: () => ({ parentElement: parent }) }
-        : selector.includes('entity-header') ? header : { querySelectorAll: () => rowsAvailable ? visibleRows : [] },
+        : selector.includes('entity-header') ? header : { querySelectorAll: () => rowsAvailable ? visibleRows : [], getAttribute: name => name === 'aria-rowcount' ? String(expectedRows + 1) : null },
     },
     window: { location: pageLocation,
       addEventListener(name, listener) { listeners[name] = listener; }, removeEventListener() {} },
@@ -88,6 +88,7 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
   assert.notEqual(elements.find(element => element.id === 'ktv420-prepared-iframe').dataset.open, 'true');
   earlyFrame.contentDocument = { URL: 'about:blank' }; ui.notifyListening(null);
   earlyFrame.contentDocument = null; messages.length = 0;
+  rowsAvailable = true;
   resolveTracks([]);
   await new Promise(resolve => setImmediate(resolve));
   const frame = elements.find(element => element.tag === 'iframe');
@@ -222,7 +223,12 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
     querySelector: () => ({getAttribute: () => `/track/${String(index).padStart(22, '0')}`, textContent: `Song ${index + 1}`}),
     querySelectorAll: () => [],
   }));
+  expectedRows = 11;
   visibleRows = albumRows.slice(0, 9); timers[0]();
+  const beforePartialCapture = captureRequests.length;
+  await listeners.message({...ready,data:{...ready.data,type:'capture-one',id:'partial-list',trackId:'0000000000000000000000'}});
+  assert.equal(captureRequests.length, beforePartialCapture, 'a known partial list cannot start a shortened capture run');
+  assert.match(messages.find(message => message.type === 'capture-result' && message.id === 'partial-list').error, /track list is still loading/);
   runActive = true;
   visibleRows = albumRows; timers[0]();
   assert.equal(messages.at(-1).tracks.length, 11, 'late rows join an open overlay even during capture');
@@ -233,6 +239,7 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
   assert.equal(messages.at(-1).tracks.length, 11, 'virtualized rows must not erase earlier songs');
   runActive = false;
   pageLocation.pathname = '/album/3333333333333333333333';
+  expectedRows = 1;
   visibleRows = [row]; ui.refresh();
   await new Promise(resolve=>setImmediate(resolve));
   assert.equal(messages.at(-1).tracks.length, 1, 'a new album must not inherit previous rows');

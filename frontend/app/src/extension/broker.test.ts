@@ -17,13 +17,14 @@ test('bridge requires exact origins/windows/version and relays only whitelisted 
   assert.equal(parentMessages.length, 0);
   await fromPlayer({ ...command, version: 1 }); assert.equal(errors.length, 1);
   await fromPlayer({ ...command, type: 'toggle-capture' }); assert.equal(parentMessages.length, 0);
-  const state = { source: 'ktv420-parent', version: 2, type: 'state', tracks: [], active: false, starting: false, supported: true };
+  const state = { source: 'ktv420-parent', version: 2, type: 'state', tracks: [], tracksComplete: false, active: false, starting: false, supported: true };
   await bridge.receive({ source: parent, origin: 'https://evil.example', data: state });
   await bridge.receive({ source: parent, origin: 'https://open.spotify.com', data: state });
   assert.equal(playerMessages.length, 0);
   await fromPlayer(command); assert.equal(parentMessages.length, 1); assert.equal(playerMessages.length, 1);
   assert.equal((parentMessages[0] as { version: number }).version, 2);
   assert.equal((playerMessages[0] as { version: number }).version, 2);
+  assert.equal((playerMessages[0] as { tracksComplete: boolean }).tracksComplete, false, 'partial discovery reaches the hosted capture gate');
   await bridge.receive({ source: parent, origin: 'https://open.spotify.com', data: { ...state, version: 1 } });
   await bridge.receive({ source: parent, origin: 'https://open.spotify.com', data: { ...state, version: undefined } });
   assert.equal(playerMessages.length, 1);

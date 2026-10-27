@@ -6,8 +6,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { brokerOrigin } from './libraryClient';
 
 export type SpotifyTrack = { trackId: string; trackName: string; trackArtist: string; trackArtworkSrc: string; rowIndex: number };
-type SpotifyState = { navigation: OverlayNavigation | null; spotifyPath: string; listening: ListeningState | null; tracks: SpotifyTrack[]; active: boolean; starting: boolean; supported: boolean; notice: string; error: string; captureProgress: CaptureProgress | null; savingTrackIds: string[] };
-const initial: SpotifyState = { navigation: null, spotifyPath: '', listening: null, tracks: [], active: false, starting: false, supported: false, notice: '', error: '', captureProgress: null, savingTrackIds: [] };
+type SpotifyState = { navigation: OverlayNavigation | null; spotifyPath: string; listening: ListeningState | null; tracks: SpotifyTrack[]; tracksComplete: boolean; active: boolean; starting: boolean; supported: boolean; notice: string; error: string; captureProgress: CaptureProgress | null; savingTrackIds: string[] };
+const initial: SpotifyState = { navigation: null, spotifyPath: '', listening: null, tracks: [], tracksComplete: false, active: false, starting: false, supported: false, notice: '', error: '', captureProgress: null, savingTrackIds: [] };
 const embedded = window.parent !== window;
 const standalone = new URLSearchParams(window.location.search).get('standalone') === '1';
 // The extension broker authenticates Spotify and relays only overlay controls.
@@ -75,7 +75,7 @@ export function useSpotifyOverlay(onClose?: () => void) {
       const captureProgress: CaptureProgress | null = data.active === true && capture && typeof capture.trackId === 'string' && /^[A-Za-z0-9]{1,100}$/.test(capture.trackId) &&
         (capture.fraction === null || (typeof capture.fraction === 'number' && Number.isFinite(capture.fraction) && capture.fraction >= 0 && capture.fraction <= 1))
         ? { trackId: capture.trackId, fraction: capture.fraction, ...(capture.phase === 'saving' ? { phase: 'saving' as const } : {}) } : null;
-      setState(previous => ({ navigation: parseOverlayNavigation(data.navigation), spotifyPath: spotifyContext(data.spotifyPath) ? data.spotifyPath : '', listening: parseListeningState(data.listening), tracks, active: data.active === true, starting: data.starting === true, supported: data.supported === true, captureProgress,
+      setState(previous => ({ navigation: parseOverlayNavigation(data.navigation), spotifyPath: spotifyContext(data.spotifyPath) ? data.spotifyPath : '', listening: parseListeningState(data.listening), tracks, tracksComplete: data.tracksComplete !== false, active: data.active === true, starting: data.starting === true, supported: data.supported === true, captureProgress,
         notice: typeof data.notice === 'string' ? data.notice : '', error: typeof data.error === 'string' ? data.error : '',
         savingTrackIds: pendingCaptureSaves(previous.savingTrackIds, captureProgress, data.error),
       }));

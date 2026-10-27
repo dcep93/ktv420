@@ -620,3 +620,16 @@ test('startup reset recovery clock starts at playback, not before a delayed Play
  h.elements[0].dispatch('seeking');
  assert.equal((await h.command('capture-state')).result.invalidCode,'startup-zero-seek');
 });
+
+test('playlist discovery marks truncated pagination incomplete and prefers the playable shared ID', async () => {
+  const oldId='1111111111111111111111', playable='2222222222222222222222';
+  const h=harness([],undefined,null,false,async (_url,init)=>{
+    const {offset}=JSON.parse(init.body).variables;
+    return new Response(JSON.stringify({data:{playlistV2:{content:{totalCount:45,items:offset===0 ? [{track:{id:oldId,sharingInfo:{shareUrl:`https://open.spotify.com/track/${playable}`},name:'Song'}}] : []}}}}));
+  });
+  await h.fetch('https://api-partner.spotify.com/pathfinder/v1/query',{method:'POST',body:JSON.stringify({operationName:'fetchPlaylistContents',variables:{uri:`spotify:playlist:${oldId}`,offset:0,limit:50}})});
+  await new Promise(resolve=>setImmediate(resolve));
+  const {result}=await h.command('playlist-tracks',{playlistUri:`spotify:playlist:${oldId}`});
+  assert.equal(result.complete,false); assert.equal(result.total,45);
+  assert.equal(result.tracks[0].trackId,playable);
+});

@@ -1020,6 +1020,7 @@
 
     return {
       ok: tracks.length > 0,
+      complete: Number.isFinite(expectedTotal) && offset >= expectedTotal,
       playlistUri: uri,
       total: Number.isFinite(expectedTotal) ? expectedTotal : null,
       tracks
@@ -1079,6 +1080,7 @@
     ];
 
     for (const candidate of candidates) {
+      if (candidate === null || candidate === undefined) continue;
       const value = Number(candidate);
       if (Number.isFinite(value) && value >= 0) {
         return value;
@@ -1090,7 +1092,8 @@
 
   function playlistItemToTrack(item, index) {
     const data = item?.itemV2?.data || item?.item?.data || item?.track || item;
-    const trackId = extractTrackId(firstString(data?.id, data?.uri, data?.sharingInfo?.shareUrl));
+    // Use the playable/share identity, matching Spotify’s visible track link.
+    const trackId = [data?.sharingInfo?.shareUrl, data?.uri, data?.id].map(extractTrackId).find(Boolean);
     if (!trackId) {
       return null;
     }

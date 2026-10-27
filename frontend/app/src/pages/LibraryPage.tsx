@@ -406,9 +406,9 @@ export default function LibraryPage() {
     mixer.current?.pause(); setAutoPlay(false); setViewMode('tracks');
   };
   const close = useCallback(() => { closeRef.current(); spotify.close(); }, [spotify]);
-  const canCapture = !mp3Export.busy && !replay.active && !recording && spotify.embedded && !spotify.standalone && !spotify.starting && !deletingAudio && (capture.active || (libraryReady && spotify.supported && spotify.tracks.length > 0));
+  const canCapture = !mp3Export.busy && !replay.active && !recording && spotify.embedded && !spotify.standalone && !spotify.starting && !deletingAudio && (capture.active || (libraryReady && spotify.supported && spotify.tracksComplete && spotify.tracks.length > 0));
   const audioBusy = mp3Export.busy || replay.active || !!active || recording || capture.active || spotify.starting || deletingAudio;
-  const firstCapturedTrack = viewMode === 'tracks' && !spotify.replay && !capture.active
+  const firstCapturedTrack = viewMode === 'tracks' && spotify.tracksComplete && !spotify.replay && !capture.active
     ? spotify.standalone ? spotify.tracks.find(row => tracks.some(track => track.id === `spotify-${row.trackId}` && track.status === 'ready')) ?? null
       : capturedPlaylistStart(spotify.tracks, tracks, libraryReady) : null;
   const canUseLogo = canCapture || (spotify.standalone && !mp3Export.busy && !recording && !deletingAudio && !!firstCapturedTrack);
@@ -458,7 +458,7 @@ export default function LibraryPage() {
   const stoppedByUser = !error && /^Capture run stopped by user\.?$/.test(spotify.error);
   const statusError = !!mp3Export.error || !!replay.error || !!listening?.error || !!error || (!!spotify.error && !stoppedByUser);
   const statusMessage = mp3Export.error || replay.error || error || listening?.error || (stoppedByUser ? 'Capture stopped.' : spotify.error) ||
-    (spotify.starting ? 'Starting capture…' : capture.active ? 'Capturing songs as they play…' :
+    (!spotify.tracksComplete ? 'Loading playlist…' : spotify.starting ? 'Starting capture…' : capture.active ? 'Capturing songs as they play…' :
       spotify.notice.replace(' Local separation is queued automatically.', '').replace(' Separation continues here automatically.', ''));
   return <main className={`iframe-page iframe-page--overlay${viewMode === 'player' ? ' iframe-page--player' : ''}`} aria-label="ktv420 iframe controls"
     ref={page} onScroll={event => { if (event.target === event.currentTarget) viewScroll.current[viewMode] = event.currentTarget.scrollTop; }}>

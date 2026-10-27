@@ -99,7 +99,7 @@ async function loadSpotifyPlaylistTracks() {
   }
 
   const result = await bridge.command("playlist-tracks", { playlistUri }, 15000);
-  return result?.ok && Array.isArray(result.tracks) ? result.tracks : [];
+  return result && Array.isArray(result.tracks) ? result : { tracks: [], complete: false };
 }
 
 function currentSpotifyPlaylistUri() {

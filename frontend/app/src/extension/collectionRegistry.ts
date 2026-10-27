@@ -10,10 +10,12 @@ export async function rememberCollection(value: unknown, started = false) {
   await updateState('collections', previous => {
     const found = previous?.find(item => item.path === collection.path);
     if (!started && !found?.startedAt && !hasAudio) return previous;
-    // Keep names/covers when Spotify is still loading its header; ordinary visits
-    // do not reorder an already saved collection.
+    // Only a verified full snapshot may replace membership. Partial/legacy
+    // observations cannot resurrect obsolete IDs in a reconciled collection.
+    // This updates metadata only: removed playlist members keep their audio.
     return [...(previous || []).filter(item => item.path !== collection.path), {
-      ...collection, trackIds: [...new Set([...(found?.trackIds || []), ...collection.trackIds])], title: collection.title || found?.title || '', artwork: collection.artwork || found?.artwork || '', savedAt: found?.savedAt ?? Date.now(),
+      ...collection, trackIds: collection.complete ? collection.trackIds : found?.complete ? found.trackIds : [...new Set([...(found?.trackIds || []), ...collection.trackIds])],
+      ...(collection.complete || found?.complete ? { complete: true } : {}), title: collection.title || found?.title || '', artwork: collection.artwork || found?.artwork || '', savedAt: found?.savedAt ?? Date.now(),
       ...(found?.startedAt || started ? { startedAt: found?.startedAt ?? Date.now() } : {}),
     }];
   });
