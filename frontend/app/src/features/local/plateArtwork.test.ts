@@ -61,7 +61,7 @@ test('a failed or canceled image load settles safely and detaches its callbacks'
   }
 });
 
-test('fully lit artwork remains bounded, pause-stable and uses only four colors', async () => {
+test('fully lit artwork remains bounded, pause-stable and independent of Original', async () => {
   const { drawPlate } = await import('../stems/player/visuals/resonancePlate');
   const { createArtState } = await import('../stems/player/visuals/artSceneState');
   const field = analyzePlateArtwork(new Uint8ClampedArray(128 * 128 * 4).fill(255), 128, 128);
@@ -71,14 +71,14 @@ test('fully lit artwork remains bounded, pause-stable and uses only four colors'
   const c = { set fillStyle(value: string) { colors.push(value); }, beginPath() {}, fill() {},
     rect(...args: number[]) { args.forEach(value => assert.ok(Number.isFinite(value))); marks.push(args); } } as unknown as CanvasRenderingContext2D;
   drawPlate({ c, w: 2400, h: 1200, state }, field);
-  assert.equal(colors.length, 4); assert.ok(marks.length <= 128 * 128 * 2);
+  assert.ok(colors.length <= 128); assert.equal(marks.length, 128 * 128);
   const before = structuredClone(marks); marks.length = 0;
   drawPlate({ c, w: 2400, h: 1200, state }, field); assert.deepEqual(marks, before);
   // The original must neither brighten active stems nor resurrect muted colors.
   state.audio.levels.original = 1; marks.length = 0;
   const beforeColors = [...colors]; colors.length = 0;
   drawPlate({ c, w: 2400, h: 1200, state }, field);
-  assert.deepEqual(marks, before); assert.deepEqual(colors, beforeColors.slice(0, 4));
+  assert.deepEqual(marks, before); assert.deepEqual(colors, beforeColors.slice(0, colors.length));
   Object.assign(state.audio.levels, { drums: 0, bass: 0, vocals: 0, other: 0 }); marks.length = colors.length = 0;
   drawPlate({ c, w: 2400, h: 1200, state }, field); assert.equal(marks.length, 0);
 });
@@ -93,7 +93,7 @@ test('plate has no brightness floor, suppresses averages, and preserves peaks wi
   let previous = 0;
   for (const level of [.01, .1, .5, .8, 1]) {
     state.audio.levels.vocals = level; state.audio.levels.original = 1; colors.length = 0;
-    drawPlate({ c, w: 800, h: 400, state });
+    drawPlate({ c, w: 800, h: 400, state }, { width: 1, height: 1, grains: new Float32Array([.5,.5,1,2]) });
     assert.equal(colors.length, 1, 'Original cannot enable the three silent stems');
     const after = alpha(colors[0]);
     assert.ok(after > previous); previous = after;
@@ -101,5 +101,48 @@ test('plate has no brightness floor, suppresses averages, and preserves peaks wi
     if (level === .5) assert.equal(after, .125);
     if (level === 1) assert.equal(after, 1);
     else assert.ok(after < level * level);
+  }
+});
+
+async function renderGrain(phase: number, levels: number[], time = 0) {
+  const { drawPlate } = await import('../stems/player/visuals/resonancePlate');
+  const { createArtState } = await import('../stems/player/visuals/artSceneState');
+  const state = createArtState(); state.time = time;
+  const roles = ['drums', 'bass', 'vocals', 'other'] as const;
+  roles.forEach((role, i) => { state.audio.levels[role] = levels[i]; });
+  const paints: number[][] = [];
+  let style = '', rectangles = 0;
+  const c = { set fillStyle(value: string) { style = value; }, beginPath() { rectangles = 0; }, rect() { rectangles++; },
+    fill() { for (let i = 0; i < rectangles; i++) paints.push(style.match(/[+-]?(?:\d*\.?\d+)(?:e[+-]?\d+)?/gi)!.map(Number)); } } as unknown as CanvasRenderingContext2D;
+  drawPlate({ c, w: 100, h: 100, state }, { width: 1, height: 1, grains: new Float32Array([.5, .5, 1, phase]) });
+  return paints;
+}
+
+test('each halfway grain is painted once with both neighboring palette colors, including wraparound', async () => {
+  const palette = [[230, 181, 115], [190, 144, 93], [255, 123, 195], [130, 192, 190]];
+  for (let role = 0; role < 4; role++) {
+    const paints = await renderGrain(role + .5, [1, 1, 1, 1]);
+    assert.equal(paints.length, 1, 'one color must not overwrite the other');
+    palette[role].forEach((channel, i) => assert.ok(Math.abs(paints[0][i] - (channel + palette[(role + 1) % 4][i]) / 2) < .001));
+    assert.equal(paints[0][3], 1);
+  }
+});
+
+test('muted colors disappear without boosting their neighbors and unequal levels weight color by cubic energy', async () => {
+  assert.deepEqual(await renderGrain(.5, [1, 0, 0, 0]), [[230, 181, 115, .5]]);
+  assert.deepEqual(await renderGrain(.5, [0, 1, 0, 0]), [[190, 144, 93, .5]]);
+  assert.deepEqual(await renderGrain(.5, [0, 0, 1, 1]), []);
+  const [color] = await renderGrain(.5, [1, .5, 0, 0]);
+  assert.equal(color[3], .5625);
+  [230,181,115].forEach((channel,i) => assert.ok(Math.abs(color[i] - (channel * .5 + [190,144,93][i] * .0625) / .5625) < .001));
+});
+
+test('phase wrap is continuous and equal neighboring levels retain the cubic brightness curve', async () => {
+  const before = await renderGrain(0, [1,1,1,1], 14 * (4 - .00001));
+  const after = await renderGrain(0, [1,1,1,1], 14 * (4 + .00001));
+  before[0].forEach((value,i) => assert.ok(Math.abs(value-after[0][i]) < .001));
+  for (const level of [.01, .1, .5, .8, 1]) {
+    const [color] = await renderGrain(.5, [level,level,level,level]);
+    assert.ok(Math.abs(color[3] - level ** 3) < 1e-12);
   }
 });
