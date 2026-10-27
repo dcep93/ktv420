@@ -1708,7 +1708,8 @@ export default function Player({
                 <button type="button" className="player-tuning-reset" aria-label="Reset pitch" disabled={replaying} onClick={() => applyTempoPitch(tempoRef.current,0)}>{pitch > 0 ? '+' : ''}{pitch} st</button>
               </div>
               {transportError && <p role="status">{transportError}</p>}
-              <h3 style={{ fontSize: "1em", margin: 0 }}>{playerTitle}</h3>
+              <div className="player-song-heading">
+              <h3>{playerTitle}</h3>
               <div
                 style={{
                   alignItems: "center",
@@ -1755,6 +1756,7 @@ export default function Player({
                       ? "Re-run harmony scan"
                       : "Analyze harmony"}
                 </button>
+              </div>
               </div>
             </>
           ) : (

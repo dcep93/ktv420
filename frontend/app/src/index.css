@@ -1007,6 +1007,9 @@
 .replay-import {max-width:38rem;margin:4rem auto;padding:2rem;border:1px solid #49392b;border-radius:24px;}
 .replay-import input {display:block;margin:.8rem 0;font:inherit;} .replay-import nav {display:flex;gap:1rem;flex-wrap:wrap;margin:1rem 0;} .replay-import small {display:block;margin-top:2rem;color:#bba99b;} .replay-import [role=alert] {color:#ff9da8;}
 
+.player-song-heading { display:flex; align-items:center; justify-content:space-between; flex:0 0 100%; gap:1rem; min-width:0; }
+.player-song-heading h3 { font-size:1em; margin:0; min-width:0; overflow-wrap:anywhere; }
+.player-song-heading > div { flex-shrink:0; }
 .player-tuning { display:flex; align-items:center; gap:.45rem; color:var(--ww-text-soft); font-size:.82rem; }
 .player-tuning label { display:flex; align-items:center; gap:.4rem; }
 .player-tuning input { width:90px; margin:0; }
