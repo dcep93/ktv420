@@ -16,6 +16,8 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
   const trackId = '5EGTNEoUpibGgMWf6ECe0X';
   let rowsAvailable = true, runActive = false;
   let visibleRows;
+  let headerArtwork = '';
+  let header = { querySelector: selector => selector === 'h1' ? {textContent:'Album title'} : {currentSrc:'',src:headerArtwork}, querySelectorAll: () => [] };
   const row = {
     querySelector: () => ({ getAttribute: () => `/track/${trackId}`, textContent: 'Common Enemy' }),
     querySelectorAll: () => [],
@@ -45,7 +47,7 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
       documentElement: makeElement('html'), body: makeElement('body'),
       querySelector: selector => selector.includes('logoSpotify')
         ? { closest: () => ({ parentElement: parent }) }
-        : selector.includes('entity-header') ? null : { querySelectorAll: () => rowsAvailable ? visibleRows : [] },
+        : selector.includes('entity-header') ? header : { querySelectorAll: () => rowsAvailable ? visibleRows : [] },
     },
     window: { location: pageLocation,
       addEventListener(name, listener) { listeners[name] = listener; }, removeEventListener() {} },
@@ -122,6 +124,18 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
   assert.equal(messages.at(-1).tracks.length, 1);
   assert.equal(messages.at(-1).captureProgress, null);
   assert.equal(registrations.some(item => item.started), false, 'opening alone does not start a catalog entry');
+  assert.equal(registrations.at(-1).collection.title, 'Album title');
+  assert.equal(registrations.at(-1).collection.artwork, '');
+  headerArtwork = 'https://i.scdn.co/image/late-album-cover';
+  timers[0](); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(registrations.at(-1).collection.artwork, headerArtwork, 'artwork arriving after the title must repair the catalog using src when currentSrc is empty');
+  const registrationsWithCover = registrations.length;
+  timers[0](); timers[0](); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(registrations.length, registrationsWithCover, 'complete metadata must not write on every refresh');
+  headerArtwork = ''; timers[0](); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(registrations.at(-1).collection.artwork, 'https://i.scdn.co/image/late-album-cover', 'temporary header unloading must not erase a known cover');
+  header = null;
+
   ui.notifyListening({ capturing: true });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(registrations.at(-1).started, true, 'passive capture registers before any song is saved');

@@ -15,3 +15,7 @@ Use the existing extension state database and message protocol. Keep origin/path
 ## Verification
 
 Tests cover retries, dropped replies, stale routes, surfaced errors and recovery, capture registration ordering, absent registry recovery, no visit-only entries, persistence after context eviction, idempotence, and existing security validation. Run the full test suite, lint, and both production builds. Install the compatible extension build, commit and push, verify deployment. Live browser recovery requires the user's extension reload; distinguish tested recovery logic from unverified recovery of their specific album.
+
+## Live verification follow-up: late artwork
+
+After the user's 6.5.3 reload, the Olivia Rodrigo album appeared with 13 captured and 13 ready tracks. DOM inspection confirmed the catalog row had no image while Spotify's header had a valid scdn cover. A regression reproduced the remaining defect: UI refresh checked only for a missing title, so an independently delayed cover never updated the catalog. Continue polling incomplete title/artwork independently, use currentSrc or src, accept the same scdn origins as registry validation, retain known fields, and register only changed metadata. Keep the active capture context current too. No audio writes or membership changes are needed.

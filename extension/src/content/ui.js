@@ -9,6 +9,17 @@ const BUTTON_ID = 'ktv420-spotify-capture-button';
 const IFRAME_ID = 'ktv420-prepared-iframe';
 const STYLE_ID = 'ktv420-spotify-capture-style';
 
+function collectionHeader() {
+  const header = document.querySelector('[data-testid="entity-header"]');
+  const image = header?.querySelector?.('img');
+  const artwork = image?.currentSrc || image?.src || '';
+  return {
+    title: header?.querySelector?.('h1')?.textContent?.trim() || '',
+    artwork: /^https:\/\/(?:i|mosaic)\.scdn\.co\//.test(artwork) ? artwork : '',
+  };
+}
+
+
 export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTransport, onHeartbeat, onOpenChange, onReplay, onCancelCapture }) {
   const origin = chrome.runtime.getURL('').replace(/\/$/, '');
   const frameUrl = chrome.runtime.getURL('build/index.html?overlay=1');
@@ -111,10 +122,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
       tracks = found.length ? found : retainRows ? tracks : [];
       if (usingDomTracks) mergeDomRows();
       route = location.pathname;
-      const header = document.querySelector('[data-testid="entity-header"]');
-      const title = header?.querySelector?.('h1')?.textContent?.trim();
-      collection = { path: route.slice(1).replace(/\/$/, ''), title: title || '',
-        artwork: header?.querySelector?.('img')?.currentSrc || header?.querySelector?.('img')?.src || '',
+      collection = { path: route.slice(1).replace(/\/$/, ''), ...collectionHeader(),
         trackIds: tracks.map(track => track.trackId) };
       registerCollection();
       error = '';
@@ -229,10 +237,16 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
     button.setAttribute('aria-busy', String(navigation.open && overlay.dataset.open !== 'true'));
     button.title = error || catalogError || (isRunActive() ? 'ktv420 capture active' : navigation.open && overlay.dataset.open !== 'true' ? 'Waiting for Spotify and ktv420' : 'Open ktv420');
     if (iframe && overlay.dataset.open === 'true') prepare();
-    if (collection && route === location.pathname && !collection.title) {
-      const header = document.querySelector('[data-testid="entity-header"]');
-      const title = header?.querySelector?.('h1')?.textContent?.trim();
-      if (title) { collection = { ...collection, title, artwork: header?.querySelector?.('img')?.currentSrc || collection.artwork }; registerCollection(); }
+    if (collection && route === location.pathname && (!collection.title || !collection.artwork)) {
+      // Spotify's title and cover hydrate independently. Keep looking for either
+      // missing field, without clearing known metadata or writing every tick.
+      const header = collectionHeader();
+      const title = header.title || collection.title, artwork = header.artwork || collection.artwork;
+      if (title !== collection.title || artwork !== collection.artwork) {
+        collection = { ...collection, title, artwork };
+        if (captureCollection?.path === collection.path) captureCollection = collection;
+        registerCollection();
+      }
     }
     post();
     const missingTracks = !tracks.length || (navigation.trackIndex !== null && !tracks.some(track => track.rowIndex + 1 === navigation.trackIndex)) || replay?.tracks.some(item => !tracks.some(t => t.trackId === item.id));
