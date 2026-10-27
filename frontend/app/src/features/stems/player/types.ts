@@ -91,6 +91,7 @@ export type PlayerProps = {
   initialSettings?: MixerSnapshot | null;
   onSettingsChange?: (settings: MixerSnapshot) => void;
   replaying?: boolean;
+  keyboardPlayback?: boolean;
   onControls?: (control: MixerControl | null) => void;
   masterVolume?: number;
   tempoSupported?: boolean;

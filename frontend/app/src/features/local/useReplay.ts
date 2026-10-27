@@ -121,15 +121,6 @@ export function useReplay(options: Options) {
       finally { current.busy=false; }
     }
   }
-  const toggleRef=useRef(togglePause);toggleRef.current=togglePause;
-  useEffect(() => {
-    const key=(event:KeyboardEvent) => {
-      if(!run.current || event.code!=='Space' || event.repeat || event.altKey || event.metaKey || event.ctrlKey || event.defaultPrevented ||
-        (event.target instanceof Element && event.target.closest('input,textarea,button,a,select,[contenteditable]'))) return;
-      event.preventDefault();void toggleRef.current();
-    };
-    window.addEventListener('keydown',key);return () => window.removeEventListener('keydown',key);
-  },[]);
   useEffect(() => {
     const current=run.current, state=options.listening;
     const change=remote.current.observe(state);

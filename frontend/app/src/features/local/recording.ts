@@ -92,6 +92,7 @@ export function dueEvents(events: PerformanceEvent[], cursor: number, seconds: n
 }
 
 export type MixerControl = {
+  togglePlayback?: () => Promise<void>;
   playing?: () => boolean;
   trackId: string; ready: boolean; position: () => number; snapshot: () => MixerSnapshot;
   play: () => Promise<void>; pause: () => number; seek: (position: number) => Promise<void>;

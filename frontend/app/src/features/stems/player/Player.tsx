@@ -1,3 +1,4 @@
+import { useSpacePlayback } from '../../local/useSpacePlayback';
 import { loadPlateArtwork, musicNoteArtwork } from './visuals/plateArtwork';
 import { CombinedVisualizerPanel } from './CombinedVisualizerPanel';
 import { settingsForTracks } from './mixerSettings';
@@ -75,7 +76,7 @@ type SpotlightState = {
 };
 
 export default function Player({
-  record, replaying = false, onControls, initialSettings, onSettingsChange,
+  record, replaying = false, keyboardPlayback = true, onControls, initialSettings, onSettingsChange,
   combinedVisualizerExpanded, onCombinedVisualizerExpandedChange,
   masterVolume = 1, tempoSupported = true, transport, onTransportCommand, onPlaybackError,
   title,
@@ -1191,6 +1192,8 @@ export default function Player({
     tracks.length, onTransportCommand,
   ]);
 
+  useSpacePlayback(() => { if (!replaying) void handlePlayPause(); }, keyboardPlayback);
+
   const selectVisualizerType = useCallback(
     (nextVisualizerType: VisualizerType | undefined) => {
       if (!nextVisualizerType || nextVisualizerType === visualizerType) {
@@ -1214,12 +1217,6 @@ export default function Player({
       if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey ||
           (target instanceof Element && target.closest('input,textarea,select,button,a,[contenteditable="true"],[role="slider"]'))) return;
       if (event.repeat) return;
-      if (event.code === "Space" || event.key === " ") {
-        event.preventDefault();
-        void handlePlayPause();
-        return;
-      }
-
       if (event.code === "ArrowRight" || event.key === "ArrowRight") {
         event.preventDefault();
         const currentIndex = visualizerOptions.findIndex(
@@ -1264,7 +1261,7 @@ export default function Player({
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [handlePlayPause, selectVisualizerType, visualizerType,replaying]);
+  }, [selectVisualizerType, visualizerType,replaying]);
 
   const handleVolumeChange = (trackId: string, value: number) => {
     const previous = volumesRef.current;
@@ -1423,6 +1420,7 @@ export default function Player({
   useEffect(() => {
     onControls?.({
       trackId:record.md5,ready:areTracksReady,position:currentPlaybackTime,snapshot,playing:()=>isPlaying,
+      togglePlayback:handlePlayPause,
       play:async () => { stopAllSources(); await schedulePlayback(startOffsetRef.current); },
       pause:pausePlayback,
       seek:async position => { Object.values(canvasRefs.current).forEach(canvas => { if (canvas) resetSpectrogram(canvas); }); const resume = isPlaying; stopAllSources(); startOffsetRef.current = Math.max(0,Math.min(duration,position)); setCurrentTime(startOffsetRef.current); if (resume) await schedulePlayback(startOffsetRef.current); },
@@ -1451,7 +1449,7 @@ export default function Player({
       },
     });
 
-  }, [onControls,applyTempoPitch,record.md5,areTracksReady,currentPlaybackTime,snapshot,stopAllSources,schedulePlayback,pausePlayback,isPlaying,duration,tracks,applyEffectValue,getEffectiveVolumeFromRefs]);
+  }, [onControls,handlePlayPause,applyTempoPitch,record.md5,areTracksReady,currentPlaybackTime,snapshot,stopAllSources,schedulePlayback,pausePlayback,isPlaying,duration,tracks,applyEffectValue,getEffectiveVolumeFromRefs]);
 
   const recordingButtonDisabled = isRecording
     ? !onStopRecording

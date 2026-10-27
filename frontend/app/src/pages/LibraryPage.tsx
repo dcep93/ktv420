@@ -1,3 +1,4 @@
+import { useSpacePlayback } from '../features/local/useSpacePlayback';
 import { usePlayerPreferences } from '../features/local/usePlayerPreferences';
 import { useHostedCapture } from '../features/local/useHostedCapture';
 import { capturedPlaylistStart } from '../features/local/playlistLogo';
@@ -436,6 +437,18 @@ export default function LibraryPage() {
     window.addEventListener('keydown', keydown);
     return () => window.removeEventListener('keydown', keydown);
   }, [close, viewMode, canCapture, onLogoClick]);
+  useSpacePlayback(() => {
+    if (mp3Export.busy) return;
+    if (replay.active) { void replay.togglePause(); return; }
+    if (spotify.replay) { if (replayReady && !capture.active && !active) replay.start(); return; }
+    if (!capture.active && mixer.current?.ready) {
+      void mixer.current.togglePlayback?.().catch(reason => setError(errorText(reason)));
+      return;
+    }
+    if (spotify.embedded && listening) {
+      transportCommand({ action: listening.playing ? 'pause' : 'play' });
+    }
+  });
   const startExport = (value: PerformanceRecording) => {
     if (running.current || deleting.current || modelBusy.current || mix.current || replay.active || capture.active || spotify.starting) { setError('Wait for capture, separation, or recording to finish before exporting.'); return; }
     void mp3Export.start(value);
@@ -556,7 +569,7 @@ export default function LibraryPage() {
     </ol>}
     <PlayerViewport contentKey={activeTrack && record && record.md5 === selected ? `${record.md5}/${selectedRowIndex}` : null} hidden={viewMode !== 'player'}>
     {activeTrack && record && record.md5 === selected && <>
-      <div className={replay.active ? "replay-mixer" : undefined} inert={!!spotify.replay || mp3Export.busy}><Player key={`${record.md5}/${selectedRowIndex}/${spotify.replay ? 'replay' : 'manual'}`} record={record} title={activeTrack.title} replaying={replay.active || mp3Export.busy} onControls={onControls}
+      <div className={replay.active ? "replay-mixer" : undefined} inert={!!spotify.replay || mp3Export.busy}><Player keyboardPlayback={false} key={`${record.md5}/${selectedRowIndex}/${spotify.replay ? 'replay' : 'manual'}`} record={record} title={activeTrack.title} replaying={replay.active || mp3Export.busy} onControls={onControls}
         combinedVisualizerExpanded={combinedVisualizerExpanded} onCombinedVisualizerExpandedChange={setCombinedVisualizerExpanded}
         initialSettings={spotify.replay ? undefined : mixerSettings.current} onSettingsChange={spotify.replay ? undefined : rememberMixerSettings}
         masterVolume={listening?.capturing ? 0 : masterVolume}
