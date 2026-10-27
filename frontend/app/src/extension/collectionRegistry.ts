@@ -28,6 +28,20 @@ export async function setCaptureContext(tabId: number, value: unknown, senderUrl
   return collection;
 }
 export async function savedCollections() {
-  const [collections, tracks] = await Promise.all([readState('collections'), listTracks()]);
-  return summarizeCollections(collections || [], tracks);
+  const [collections, tracks, contexts] = await Promise.all([readState('collections'), listTracks(), readState('captureContexts')]);
+  // Older captures may have saved their context/audio while losing the separate
+  // registry write. Recover only known membership with actual local audio.
+  const known = new Set(collections?.map(item => item.path));
+  const audio = new Set(tracks.map(track => track.id));
+  const recoverable = Object.values(contexts || {}).map(parseCollection).filter((item): item is Collection =>
+    !!item && !known.has(item.path) && item.trackIds.some(id => audio.has(`spotify-${id}`)));
+  const repaired = recoverable.length ? await updateState('collections', previous => {
+    const merged = [...(previous || [])];
+    for (const collection of recoverable) {
+      // A concurrent normal registration wins; never overwrite its metadata.
+      if (!merged.some(item => item.path === collection.path)) merged.push({ ...collection, savedAt: Date.now() });
+    }
+    return merged;
+  }) : collections;
+  return summarizeCollections(repaired || [], tracks);
 }

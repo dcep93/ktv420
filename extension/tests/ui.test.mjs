@@ -4,6 +4,7 @@ import { mountButton } from '../src/content/ui.js';
 
 test('overlay waits for a trusted ready message, then sends cloneable DOM track metadata', async t => {
   const registrations = [];
+  let holdRegistration = false; const registrationReplies = [];
   const elements = [];
   const messages = [];
   const timers = [];
@@ -50,7 +51,7 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
       addEventListener(name, listener) { listeners[name] = listener; }, removeEventListener() {} },
     location: pageLocation,
     history: { state: { spotify: true }, pushState(state, _title, href) { assert.deepEqual(state, {spotify:true}); pageLocation.href = href; }, replaceState(state, title, href) { this.pushState(state, title, href); } },
-    chrome: { runtime: { id: 'test', sendMessage(message, respond) { if (message.type === 'ktv420:register-collection') registrations.push(message); if (message.type === 'ktv420:pending-replay') pendingReply=respond; respond({ok:true,result:null}); }, getManifest: () => ({ version: '0.5.0' }), getURL: path => `chrome-extension://test/${path}`, onMessage: { addListener() {}, removeListener() {} } } },
+    chrome: { runtime: { id: 'test', sendMessage(message, respond) { if (message.type === 'ktv420:register-collection') { registrations.push(message); if (holdRegistration) { registrationReplies.push(respond); return; } } if (message.type === 'ktv420:pending-replay') pendingReply=respond; respond({ok:true,result:null}); }, getManifest: () => ({ version: '0.5.0' }), getURL: path => `chrome-extension://test/${path}`, onMessage: { addListener() {}, removeListener() {} } } },
     setInterval: callback => { timers.push(callback); return 1; },
     clearInterval() {},
     MutationObserver: class {
@@ -122,6 +123,7 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
   assert.equal(messages.at(-1).captureProgress, null);
   assert.equal(registrations.some(item => item.started), false, 'opening alone does not start a catalog entry');
   ui.notifyListening({ capturing: true });
+  await new Promise(resolve => setImmediate(resolve));
   assert.equal(registrations.at(-1).started, true, 'passive capture registers before any song is saved');
   const registrationsAtStart = registrations.length;
   ui.notifyListening({ capturing: true });
@@ -211,6 +213,7 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
   visibleRows = albumRows; timers[0]();
   assert.equal(messages.at(-1).tracks.length, 11, 'late rows join an open overlay even during capture');
   assert.equal(messages.at(-1).tracks.at(-1).trackName, 'Song 11');
+  await new Promise(resolve => setImmediate(resolve));
   assert.equal(registrations.at(-1).collection.trackIds.length, 11, 'catalog receives the expanded collection');
   visibleRows = albumRows.slice(9); timers[0]();
   assert.equal(messages.at(-1).tracks.length, 11, 'virtualized rows must not erase earlier songs');
@@ -219,6 +222,21 @@ test('overlay waits for a trusted ready message, then sends cloneable DOM track 
   visibleRows = [row]; ui.refresh();
   await new Promise(resolve=>setImmediate(resolve));
   assert.equal(messages.at(-1).tracks.length, 1, 'a new album must not inherit previous rows');
+
+  await renderView();
+  for (const cancel of ['capture-cancel', 'close']) {
+    holdRegistration = true;
+    const beforeCapture = captureRequests.length;
+    const captureStart = listeners.message({...ready,data:{...ready.data,type:'capture-one',id:'held-request',trackId}});
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(captureRequests.length, beforeCapture, 'capture must wait for catalog/context acknowledgement');
+    if (cancel === 'close') listeners.keydown({key:'Escape',preventDefault(){},stopPropagation(){}});
+    else await listeners.message({...ready,data:{...ready.data,type:cancel,id:'held-request'}});
+    holdRegistration = false;
+    for (const respond of registrationReplies.splice(0)) respond({ok:true,result:null});
+    await captureStart;
+    assert.equal(captureRequests.length, beforeCapture, `${cancel} during registration must not start capture later`);
+  }
 
   await listeners.message({...ready,data:{...ready.data,type:'close'}});
 

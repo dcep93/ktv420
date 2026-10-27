@@ -1,5 +1,6 @@
 import { collectTrackRows, isSupportedRoute } from './dom.js';
 import { readOverlayUrl, writeOverlayUrl } from './overlayUrl.js';
+import { createCollectionRegistration } from './collectionRegistration.js';
 import { SELECTORS } from './constants.js';
 
 const PARENT = 'ktv420-parent';
@@ -26,11 +27,28 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
   let urlKey = null;
   let navigation = { revision: 0, open: false, trackIndex: null };
   let collection = null, captureCollection = null;
-  function registerCollection(value = collection, started = false) {
-    if (!value) return;
-    chrome.runtime.sendMessage({ type: 'ktv420:register-collection', collection: value, started }, response => {
-      if (chrome.runtime.lastError || !response?.ok) return;
-    });
+  let catalogError = '';
+  const register = createCollectionRegistration({
+    getPath: () => location.pathname,
+    send(message, respond) {
+      chrome.runtime.sendMessage(message, response => {
+        const failure = chrome.runtime.lastError;
+        respond(failure ? { ok: false, error: failure.message } : response);
+      });
+    },
+    onError(message) { catalogError = message; post(); },
+  });
+  const registerCollection = (value = collection, started = false) => register(value, started);
+  async function prepareCaptureCollection() {
+    const value = collection, revision = navigation.revision;
+    const snapshot = tracks;
+    captureCollection = value;
+    await registerCollection(value, true);
+    if (!navigation.open || navigation.revision !== revision || !value ||
+      location.pathname.replace(/\/$/, '') !== `/${value.path}`) {
+      throw new Error('Capture cancelled because the Spotify view changed.');
+    }
+    return snapshot;
   }
   function writeView(open, trackIndex = null, replace = false) {
     const href = writeOverlayUrl(location.href, open, trackIndex);
@@ -41,7 +59,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
   function readView() {
     const view = readOverlayUrl(location.href);
     if (view.key === urlKey) return;
-    if (route !== location.pathname) close(false);
+    if (route !== location.pathname) { catalogError = ''; captureCollection = null; close(false); }
     urlKey = view.key;
     navigation = { revision: navigation.revision + 1, open: view.open, trackIndex: view.trackIndex };
     if (view.open) void show(false).catch(reason => { error = reason?.message || String(reason); post(); });
@@ -79,7 +97,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
       trackId, trackName, trackArtist, trackArtworkSrc, rowIndex,
     }));
     sendToFrame({ source: PARENT, version: 2, type: 'state', spotifyPath: location.pathname.slice(1), navigation, tracks: route === location.pathname ? trackData : [],
-      active: isRunActive() || !!listening?.capturing, starting, notice, error, captureProgress: captureProgress || listening?.captureProgress || null, listening, supported: isSupportedRoute() });
+      active: isRunActive() || !!listening?.capturing, starting, notice, error: error || catalogError, captureProgress: captureProgress || listening?.captureProgress || null, listening, supported: isSupportedRoute() });
   }
   async function updateTracks() {
     if (refreshing || isRunActive()) return;
@@ -209,7 +227,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
     button.dataset.active = String(isRunActive());
     button.disabled = !isSupportedRoute();
     button.setAttribute('aria-busy', String(navigation.open && overlay.dataset.open !== 'true'));
-    button.title = error || (isRunActive() ? 'ktv420 capture active' : navigation.open && overlay.dataset.open !== 'true' ? 'Waiting for Spotify and ktv420' : 'Open ktv420');
+    button.title = error || catalogError || (isRunActive() ? 'ktv420 capture active' : navigation.open && overlay.dataset.open !== 'true' ? 'Waiting for Spotify and ktv420' : 'Open ktv420');
     if (iframe && overlay.dataset.open === 'true') prepare();
     if (collection && route === location.pathname && !collection.title) {
       const header = document.querySelector('[data-testid="entity-header"]');
@@ -245,7 +263,7 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
     if (event.data.type === 'listening-heartbeat') { onHeartbeat?.(event.data.captureFraction); return; }
     if (event.data.type === 'transport') { await onTransport?.(event.data.command); return; }
     if (event.data.type === 'capture-cancel') {
-      if (captureRequest === event.data.id) await onCancelCapture?.();
+      if (captureRequest === event.data.id) { captureRequest = null; await onCancelCapture?.(); }
       return;
     }
     if (event.data.type === 'capture-one') {
@@ -255,8 +273,12 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
       if (captureRequest || starting || isRunActive() || overlay.dataset.open !== 'true' || !tracks.some(t => t.trackId === trackId)) {
         respond(false, 'Capture is busy or the requested song is unavailable.'); return;
       }
-      captureRequest = id; starting = true; error = ''; captureCollection = collection; registerCollection(captureCollection, true); post();
-      try { await onToggleRun({trackSnapshot:tracks,trackIds:[trackId]}); respond(true); }
+      captureRequest = id; starting = true; error = ''; post();
+      try {
+        const snapshot = await prepareCaptureCollection();
+        if (captureRequest !== id) throw new Error('Capture cancelled.');
+        await onToggleRun({trackSnapshot:snapshot,trackIds:[trackId]}); respond(true);
+      }
       catch (reason) { error = reason?.message || String(reason); respond(false,error); }
       finally { captureRequest = null; starting = false; refresh(); }
       return;
@@ -271,8 +293,8 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
         if (missing.length) throw new Error(`Find the required songs in this Spotify page first: ${missing.map(t => t.title).join(', ')}`);
         await onTransport?.({action:'volume',volume:0});
       }
-      if (!isRunActive()) { captureCollection = collection; registerCollection(captureCollection, true); }
-      const run = onToggleRun({ trackSnapshot: tracks, trackIds: replay ? replay.tracks.map(t => t.id) : null });
+      const snapshot = isRunActive() ? tracks : await prepareCaptureCollection();
+      const run = onToggleRun({ trackSnapshot: snapshot, trackIds: replay ? replay.tracks.map(t => t.id) : null });
       post();
       await run;
     } catch (reason) { error = reason?.message || String(reason); }
@@ -307,9 +329,9 @@ export function mountButton({ isRunActive, onToggleRun, loadSpotifyTracks, onTra
   }, { once: true });
   return { refresh, prepare, getTrackIds: () => tracks.map(track => track.trackId),
     getTrackMetadata: id => tracks.find(track => track.trackId === id),
-    notifyListening(state) { if (!listening?.capturing && state?.capturing) registerCollection(collection, true); if (listening?.capturing && !state?.capturing) registerCollection(); listening = state; post(); },
+    notifyListening(state) { if (!listening?.capturing && state?.capturing) { captureCollection = collection; void registerCollection(collection, true); } if (listening?.capturing && !state?.capturing) registerCollection(); listening = state; post(); },
     notifyCaptureProgress(progress) { captureProgress = progress; post(); },
-    async notifyTrackCaptured(_id, metadata) { registerCollection(captureCollection || collection); notice = `${metadata?.trackName || 'Track'} captured. Local separation is queued automatically.`; post(); },
+    async notifyTrackCaptured(_id, metadata) { void registerCollection(captureCollection || collection); notice = `${metadata?.trackName || 'Track'} captured. Local separation is queued automatically.`; post(); },
     async notifyCaptureComplete(trackIds) { notice = `${trackIds?.length || 0} tracks captured. Separation continues here automatically.`; refresh(); },
   };
 }

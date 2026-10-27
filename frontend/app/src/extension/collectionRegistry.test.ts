@@ -47,3 +47,20 @@ test('capture start appears before audio exists and remains visible through part
   assert.equal((await savedCollections())[0].captured, 0, 'started collection remains available for recapture');
   assert.equal((await savedCollections()).length, 1);
 });
+
+test('catalog repairs absent registry entries from matching saved audio and persisted contexts', async () => {
+  await updateState('collections', () => undefined);
+  const missing = {...collection,path:'album/3WZZF72ihlKPZBS4zSsNHl',title:'Recovered album',trackIds:['recovered','uncaptured']};
+  const visited = {...collection,path:'album/2222222222222222222222',trackIds:['never-captured']};
+  await updateState('captureContexts', () => ({8:missing,9:visited,10:missing,11:{...missing,path:'invalid'}}));
+  await saveInput({id:'spotify-recovered',title:'Recovered song',artist:'',createdAt:1,sampleRate:44100,frames:1,status:'captured',bytes:0,source:'spotify'},new Blob(['audio']));
+  const repaired = await savedCollections();
+  assert.equal(repaired.length, 1, 'duplicate contexts, invalid paths and visits without audio are excluded');
+  assert.equal(repaired[0].path, missing.path); assert.equal(repaired[0].title, missing.title);
+  assert.equal(repaired[0].captured, 1); assert.equal(repaired[0].total, 2);
+  assert.deepEqual(await savedCollections(), repaired, 'repeated reads are idempotent');
+  await updateState('captureContexts', () => undefined);
+  await setTrackStatus('spotify-recovered','ready');
+  assert.deepEqual(await savedCollections(), [{...repaired[0],ready:1}], 'recovery persists after old tab contexts are evicted');
+  await deleteTrack('spotify-recovered');
+});
