@@ -75,6 +75,6 @@ export default function TransferPage() {
     {progress&&<div className="transfer-progress" aria-live="polite"><progress aria-label="Transfer progress" max={Math.max(1,progress.total)} value={Math.min(progress.bytes,progress.total)} /><p>{progress.label}</p><p>{progress.song} / {progress.songs} songs · {size(progress.bytes)} / {size(progress.total)}</p></div>}
     {result&&<p role="status">{result}</p>}{error&&<p role="alert">{error}</p>}
     <nav className="transfer-actions">{imported&&<a href={localPlaylistLink(imported,extension)}>Open playlist</a>}<a href={catalog}>Catalog</a>{!connected&&error&&<a href={STORE_URL} target="_blank" rel="noreferrer">Update extension</a>}</nav>
-    <p className="transfer-note">{id?'Keep this tab open until the ZIP is saved. Upload it to Dropbox whenever you like.':'Keep this tab open while importing. If interrupted, select the same package to continue.'}</p>
+    {!id&&<p className="transfer-note">Keep this tab open while importing. If interrupted, select the same package to continue.</p>}
   </section></main>;
 }
