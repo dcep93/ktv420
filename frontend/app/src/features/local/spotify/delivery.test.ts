@@ -131,3 +131,21 @@ test('lost acknowledgment retries only acknowledgment and never resurrects delib
   assert.equal(reads, 2);
   assert.equal(await getTrack(`spotify-${capture.metadata.trackId}`), undefined);
 });
+
+test('website delivery never requests or acknowledges raw captures, including older extensions', async () => {
+  const { drainDeliveries } = await import('./delivery');
+  const previous = Object.getOwnPropertyDescriptor(navigator, 'locks');
+  Object.defineProperty(navigator, 'locks', { configurable: true, value: { request: async (_name: string, _options: unknown, fn: (lock: object) => unknown) => fn({}) } });
+  try {
+    for (const stagedAudio of [false, true]) {
+      const calls: string[] = [];
+      await drainDeliveries(async <T>(operation: string): Promise<T> => {
+        calls.push(operation);
+        if (operation === 'hello') return { stagedAudio } as T;
+        if (operation === 'collections' || operation === 'prepared') return [] as T;
+        throw new Error(`Unexpected raw delivery: ${operation}`);
+      });
+      assert.ok(!calls.some(op => ['pending', 'chunk', 'ack', 'claim-capture'].includes(op)));
+    }
+  } finally { if (previous) Object.defineProperty(navigator, 'locks', previous); else Reflect.deleteProperty(navigator, 'locks'); }
+});

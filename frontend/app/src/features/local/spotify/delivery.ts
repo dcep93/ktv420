@@ -1,3 +1,4 @@
+import { returnUnfinishedOriginals } from './returnOriginals';
 import { receivePrepared } from './preparedDelivery';
 import type { PreparedAudio } from '../../../shared/preparedAudio';
 import { SEPARATION_LOCK } from '../libraryClient';
@@ -154,25 +155,18 @@ export async function drainDeliveries(request = spotifyRequest, wait = false) {
         await request('ack-collection', { path: collection.path, requestId: collection.handoffId });
       } catch (error) { failures.push(error); }
     }
-    const capabilities = await request<{ stagedAudio?: boolean }>('hello');
+    const capabilities = await request<{ stagedAudio?: boolean; extensionQueue?: boolean }>('hello');
     if (capabilities.stagedAudio) {
       // A website separation must finish before a prepared result can replace its input.
       await navigator.locks.request(SEPARATION_LOCK, { ifAvailable: true }, async lock => {
         if (!lock) return;
+        if (capabilities.extensionQueue) {
+          try { await returnUnfinishedOriginals(request); } catch (error) { failures.push(error); }
+        }
         for (const prepared of await request<PreparedAudio[]>('prepared')) {
           try { await receivePrepared(prepared, request); } catch (error) { failures.push(error); }
         }
       });
-    }
-    for (const capture of await request<QueuedCapture[]>('pending')) {
-      try {
-        if (!capabilities.stagedAudio) { await receiveCapture(capture, request); continue; }
-        const token = await request<string | null>('claim-capture', { id: capture.id });
-        if (!token) continue;
-        const leased: typeof request = (operation, args) => request(operation, { ...args, token });
-        try { await receiveCapture(capture, leased); }
-        finally { await request('release-capture', { id: capture.id, token }).catch(() => {}); }
-      } catch (error) { failures.push(error); }
     }
     if (failures.length) throw new Error(`${failures.length} import${failures.length === 1 ? '' : 's'} pending: ${failures[0] instanceof Error ? failures[0].message : String(failures[0])}`);
   });

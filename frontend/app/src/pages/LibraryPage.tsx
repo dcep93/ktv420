@@ -1,3 +1,4 @@
+import { separationStatus } from '../features/local/separationStatus';
 import { useSpacePlayback } from '../features/local/useSpacePlayback';
 import { usePlayerPreferences } from '../features/local/usePlayerPreferences';
 import { useHostedCapture } from '../features/local/useHostedCapture';
@@ -65,11 +66,14 @@ export default function LibraryPage() {
     const row = spotifyRows.find(item => `spotify-${item.trackId}` === id && (rowIndex === undefined || item.rowIndex === rowIndex));
     if (row && urlNavigation) setUrlView(row.rowIndex + 1, urlNavigation.revision, replace);
   }, [spotifyRows, urlNavigation, setUrlView]);
-  const [autoProcessing, setAutoProcessing] = useState(false);
+  const [localProcessing, setAutoProcessing] = useState(false);
+  const autoProcessing = spotify.queueEnabled ?? localProcessing;
   const [active, setActive] = useState('');
   const [progress, setProgress] = useState<SeparationProgress | null>(null);
   const [separationFraction, setSeparationFraction] = useState<number | null>(null);
-  const [backend, setBackend] = useState<'auto' | 'wasm'>('auto');
+  const [localBackend, setBackend] = useState<'auto' | 'wasm'>('auto');
+  const backend = spotify.queueBackend ?? localBackend;
+  const queueBusy = spotify.librarySummary.some(row => row.location === 'extension' && row.status === 'processing');
   const [modelCached, setModelCached] = useState(false);
   const [modelAction, setModelAction] = useState<'download' | 'remove' | null>(null);
   const [modelDownload, setModelDownload] = useState(0);
@@ -179,24 +183,9 @@ export default function LibraryPage() {
     } catch (reason) { setError(errorText(reason)); }
     finally { separator.current?.dispose(); separator.current = null; running.current = false; setActive(''); setProgress(null); await refresh(); }
   }, [backend, refresh, exportController]);
-  useEffect(() => {
-    if (!autoProcessing) return;
-    let disposed = false;
-    const poll = async () => {
-      if (running.current || deleting.current || modelBusy.current || exportController.current || disposed) return;
-      try {
-        const pending = await listTracks();
-        if (!disposed && pending.some(track => track.source === 'spotify' && ['captured', 'processing'].includes(track.status))) {
-          await processTracks([], true);
-        }
-      } catch (reason) { if (!disposed) setError(errorText(reason)); }
-    };
-    void poll(); const timer = setInterval(() => { void poll(); }, 2500);
-    return () => { disposed = true; clearInterval(timer); };
-  }, [autoProcessing, processTracks, exportController]);
   const setProcessingEnabled = (enabled: boolean) => {
     if (!enabled) { cancelled.current = true; separator.current?.dispose(); }
-    void saveProcessingEnabled(enabled).then(() => { observedProcessingPreference.current = enabled; setAutoProcessing(enabled); }).catch(reason => setError(errorText(reason)));
+    void (spotify.queueEnabled === null ? saveProcessingEnabled(enabled) : spotify.configureQueue(enabled, enabled).then(() => saveProcessingEnabled(enabled))).then(() => { observedProcessingPreference.current = enabled; setAutoProcessing(enabled); }).catch(reason => setError(errorText(reason)));
   };
   const manageModel = async () => {
     if (modelBusy.current || running.current || deleting.current) return;
@@ -433,10 +422,11 @@ export default function LibraryPage() {
           <div><h3>Automatic separation</h3><p id="separation-help">Capture continues while paused. Unfinished songs restart on resume.</p></div>
           <button disabled={deletingAudio} aria-describedby="separation-help" onClick={() => setProcessingEnabled(!autoProcessing)}>{autoProcessing ? 'Pause separation' : 'Resume separation'}</button>
         </div>
+        {spotify.librarySummary.some(row => row.location === 'extension' && row.status === 'error') && <button onClick={() => void spotify.configureQueue(true, true).catch(reason => setError(errorText(reason)))}>Retry separation</button>}
         {active && <progress max={1} value={progress?.fraction || 0} aria-label="Separation progress" title={progress?.message} />}
         <div className="iframe-setting-row">
           <div><label htmlFor="separation-device">Processing device</label><p>Use CPU if GPU separation fails.</p></div>
-          <select id="separation-device" value={backend} disabled={!!active || deletingAudio} onChange={event => setBackend(event.target.value as 'auto' | 'wasm')}>
+          <select id="separation-device" value={backend} disabled={!!active || queueBusy || deletingAudio} onChange={event => { const value = event.target.value as 'auto' | 'wasm'; setBackend(value); if (spotify.queueEnabled !== null) void spotify.configureQueue(autoProcessing, false, value).catch(reason => setError(errorText(reason))); }}>
             <option value="auto">GPU preferred</option><option value="wasm">CPU compatibility</option>
           </select>
         </div>
@@ -462,7 +452,7 @@ export default function LibraryPage() {
         <ol className="iframe-settings-list">{tracks.map(track => <li key={track.id}>
           <div className="iframe-settings-row"><span className="iframe-settings-kind" data-ready={track.status === 'ready'} role="img" aria-label={track.status === 'ready' ? 'Original + 4 stems' : 'Original only'} title={track.status === 'ready' ? 'Original + 4 stems' : 'Original only'}><OverlayIcon name="music" /></span><span className="iframe-settings-path">{track.title}</span>
             <span className="iframe-settings-size">{size(track.bytes)}</span><span className="iframe-settings-row-actions">
-              {track.status === 'error' && <button className="iframe-settings-icon-button" disabled={!!active || deletingAudio} title="Retry separation" aria-label={`Retry ${track.title}`} onClick={() => void processTracks([track.id])}><OverlayIcon name="retry" /></button>}
+              {track.status === 'error' && <button className="iframe-settings-icon-button" disabled={!!active || deletingAudio} title="Retry separation" aria-label={`Retry ${track.title}`} onClick={() => { if (track.source === 'spotify' && spotify.queueEnabled !== null) void spotify.configureQueue(true, true).catch(reason => setError(errorText(reason))); else void processTracks([track.id]); }}><OverlayIcon name="retry" /></button>}
               {confirmDelete === track.id ? <><button disabled={audioBusy} onClick={() => void remove(track.id)}>Delete</button><button onClick={() => setConfirmDelete('')}>Cancel</button></> :
                 <button className="iframe-settings-icon-button" disabled={audioBusy} title="Delete audio" aria-label={`Delete ${track.title}`} onClick={() => { setConfirmDeleteAll(false); setConfirmDelete(track.id); }}><OverlayIcon name="trash" /></button>}
             </span></div>
@@ -471,28 +461,30 @@ export default function LibraryPage() {
     </section>}
     {viewMode === 'tracks' && <ol className="iframe-track-list" aria-label="Playlist tracks">
       {displayTracks.map((track, index) => {
+        const staged = spotify.librarySummary.find(row => row.id === track.id && row.location === 'extension');
+        const queueStatus = staged ? separationStatus(staged, autoProcessing, staged.error) : null;
         const ready = track.status === 'ready';
         const available = ready && !mp3Export.busy && !deletingAudio && (!recording || selected === track.id);
         const capture = spotify.captureProgress?.trackId === track.id.replace(/^spotify-/, '') ? spotify.captureProgress : null;
         const saving = capture?.phase === 'saving' || track.status === 'missing' && spotify.savingTrackIds.includes(track.id.replace(/^spotify-/, ''));
-        const separating = !ready && (active === track.id || autoProcessing && track.status === 'processing');
+        const separating = !ready && (active === track.id || !!queueStatus?.busy);
         const progressKind = !ready && (capture || saving) ? 'capture' : separating ? 'separation' : undefined;
-        const fraction = progressKind === 'capture' ? saving ? .99 : capture!.fraction : active === track.id ? separationFraction : null;
-        const label = ready ? 'Ready' : saving ? 'Saving…' : progressKind === 'capture' ? `Capturing${fraction === null ? '' : ` ${Math.floor(fraction * 100)}%`}`
+        const fraction = progressKind === 'capture' ? saving ? .99 : capture!.fraction : active === track.id ? separationFraction : staged?.progress?.fraction ?? null;
+        const label = ready ? 'Ready' : staged ? staged.status === 'ready' ? 'Importing finished stems…' : queueStatus!.label : saving ? 'Saving…' : progressKind === 'capture' ? `Capturing${fraction === null ? '' : ` ${Math.floor(fraction * 100)}%`}`
           : separating ? `${active === track.id && progress?.phase === 'encoding' ? 'Saving MP3' : active === track.id && progress?.phase === 'restoring' ? 'Restoring audio' : active === track.id && progress?.phase === 'resampling' ? 'Preparing audio' : 'Separating'}${fraction === null ? '' : ` ~${(fraction * 100).toFixed(1)}%`}`
           : track.status === 'error' ? 'Failed' : track.status === 'missing' ? 'Not captured' : !autoProcessing ? 'Separation paused' : 'Queued';
-        const icon = ready ? 'play' : track.status === 'error' ? 'alert' : progressKind ? 'processing' : 'clock';
+        const icon = ready ? 'play' : track.status === 'error' || queueStatus?.failed ? 'alert' : progressKind ? 'processing' : 'clock';
         const artwork = (typeof track.metadata?.trackArtworkSrc === 'string' ? track.metadata.trackArtworkSrc : '') ||
           spotify.tracks.find(item => `spotify-${item.trackId}` === track.id)?.trackArtworkSrc || '';
         return <li key={`${track.id}-${index}`}><button type="button" className="iframe-track-row" data-state={track.status} data-progress={progressKind}
           aria-label={`${track.title} — ${label}`} disabled={!available}
-          title={track.error || (active === track.id ? progress?.message : available ? 'Open stem mixer' : label)}
+          title={staged?.progress?.message || staged?.error || track.error || (active === track.id ? progress?.message : available ? 'Open stem mixer' : label)}
           onClick={() => openTrack(track.id, spotify.replay ? undefined : spotify.tracks[index]?.rowIndex)}>
           {progressKind && <span className="iframe-track-fill" data-indeterminate={fraction === null} style={{ width: fraction === null ? '35%' : `${fraction * 100}%` }} aria-hidden="true" />}
           <span className="iframe-track-state"><OverlayIcon name={icon} /></span>
           {artwork ? <img className="iframe-track-artwork" alt="" src={artwork} crossOrigin="anonymous" /> : <span className="iframe-track-artwork iframe-artwork-placeholder"><OverlayIcon name="music" /></span>}
           <span className="iframe-track-copy"><span className="iframe-track-name">{track.title}</span><span className="iframe-track-artist">{track.artist}</span></span>
-          <span className="iframe-track-status">{label}</span>
+          <span className="iframe-track-status">{label}{staged?.progress && !ready && <small className="iframe-separation-detail">{staged.progress.message}</small>}</span>
         </button></li>;
       })}
     </ol>}

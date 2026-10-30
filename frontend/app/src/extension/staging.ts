@@ -1,9 +1,10 @@
+import type { WorkerOwner } from './workQueue';
 import { queueTransaction, pendingCaptures } from './queue';
 import { CHUNK_BYTES, decodeChunk, type QueuedCapture } from '../shared/captureFormat';
 import { parsePrepared, validatePreparedFile, encodeBlobChunk, sha256, type PreparedAudio, type AudioName } from '../shared/preparedAudio';
 export const LEASE_MS = 120000;
-type Claim = { id: string; token: string; owner: number | 'website'; expires: number; progress?: { fraction: number; message: string } };
-export async function claimCapture(id: string, owner: number | 'website'): Promise<string | null> {
+type Claim = { id: string; token: string; owner: number | 'website' | WorkerOwner; expires: number; progress?: { fraction: number; message: string } };
+export async function claimCapture(id: string, owner: number | 'website' | WorkerOwner): Promise<string | null> {
   return queueTransaction(['captures', 'claims'], 'readwrite', (tx, done) => {
     const r = tx.objectStore('captures').get(id);
     r.onsuccess = () => {
@@ -18,7 +19,7 @@ export async function claimCapture(id: string, owner: number | 'website'): Promi
     };
   });
 }
-export function touchClaim(id: string, token: string, owner: number | 'website', progress?: Claim['progress']) {
+export function touchClaim(id: string, token: string, owner: number | 'website' | WorkerOwner, progress?: Claim['progress']) {
   return queueTransaction(['claims'], 'readwrite', (tx) => {
     const store = tx.objectStore('claims'), r = store.get(id);
     r.onsuccess = () => {
@@ -28,7 +29,7 @@ export function touchClaim(id: string, token: string, owner: number | 'website',
     };
   });
 }
-export function releaseClaim(id: string, token: string, owner: number | 'website') {
+export function releaseClaim(id: string, token: string, owner: number | 'website' | WorkerOwner) {
   return queueTransaction(['claims', 'uploads', 'chunks'], 'readwrite', tx => {
     const r = tx.objectStore('claims').get(id);
     r.onsuccess = () => {
@@ -45,13 +46,13 @@ export async function stagedSummary() {
   })]);
   return [...raw.map(c => {
     const claim = claims.find(l => l.id === c.id && l.owner !== 'website' && l.expires > Date.now());
-    return { id: `spotify-${c.metadata.trackId}`, status: claim ? 'processing' as const : 'captured' as const, progress: claim?.progress };
+    return { id: `spotify-${c.metadata.trackId}`, status: c.processingError ? 'error' as const : claim ? 'processing' as const : 'captured' as const, progress: claim?.progress, error: c.processingError };
   }), ...ready.map(p => ({ id: `spotify-${p.capture.metadata.trackId}`, status: 'ready' as const }))];
 }
 export function preparedCaptures(): Promise<PreparedAudio[]> {
   return queueTransaction(['prepared'], 'readonly', (tx, done) => { const r = tx.objectStore('prepared').getAll(); r.onsuccess = () => done(r.result); });
 }
-export async function beginPrepared(value: unknown, token: string, owner: number) {
+export async function beginPrepared(value: unknown, token: string, owner: number | WorkerOwner) {
   const p = parsePrepared(value);
   await touchClaim(p.id, token, owner);
   // Never accept source metadata supplied by the hosted worker over the verified capture.
@@ -71,7 +72,7 @@ export async function beginPrepared(value: unknown, token: string, owner: number
     };
   });
 }
-export async function appendPrepared(id: string, token: string, owner: number, name: AudioName, index: number, base64: string) {
+export async function appendPrepared(id: string, token: string, owner: number | WorkerOwner, name: AudioName, index: number, base64: string) {
   await touchClaim(id, token, owner);
   const bytes = decodeChunk(base64), blob = new Blob([bytes]), hash = await sha256(blob);
   return queueTransaction(['uploads', 'chunks', 'claims'], 'readwrite', tx => {
@@ -90,9 +91,9 @@ export async function appendPrepared(id: string, token: string, owner: number, n
     };
   });
 }
-export async function finishPrepared(id: string, token: string, owner: number) {
+export async function finishPrepared(id: string, token: string, owner: number | WorkerOwner) {
   const committed = (await preparedCaptures()).find(p => p.id === id);
-  if (committed?.capture.tabId === owner) return;
+  if (committed) return;
   await touchClaim(id, token, owner);
   const [upload, chunks] = await queueTransaction<[{ token: string; manifest: PreparedAudio }, { name: AudioName; index: number; blob: Blob }[]]>(['uploads', 'chunks'], 'readonly', (tx, done) => {
     const u = tx.objectStore('uploads').get(id), c = tx.objectStore('chunks').index('captureId').getAll(`output/${id}`);

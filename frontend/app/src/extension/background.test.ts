@@ -87,18 +87,23 @@ test('track handoff opens a one-based website link, never an embedded player or 
   assert.equal((await call(handoff, { ...sender, url: 'https://ktv420.web.app/', frameId: 0 }, external)).ok, false);
   assert.equal(opened.length, 1);
 });
-test('staged processing is overlay-only and prepared import/deletion is standalone-only', async () => {
+test('either trusted view can process the extension queue; old clients cannot import raw audio', async () => {
   const id = crypto.randomUUID(), token = crypto.randomUUID();
   const website = { ...sender, url: 'https://ktv420.web.app/catalog', frameId: 0 };
-  for (const operation of ['prepared', 'prepared-chunk', 'ack-prepared', 'claim-capture', 'release-capture']) {
+  for (const operation of ['prepared', 'prepared-chunk', 'ack-prepared']) {
     const r = await call({ type: 'ktv420:overlay-request', request: { ...request, operation, id, token, name: 'input', index: 0 } });
     assert.equal(r.ok, false, operation);
     assert.match(r.error || '', /Only the website/);
   }
-  for (const operation of ['work-pending', 'work-claim', 'work-touch', 'work-release', 'work-chunk', 'work-finish']) {
-    const r = await call({ ...request, operation, id, token, index: 0 }, website, external);
-    assert.equal(r.ok, false, operation);
-    assert.match(r.error || '', /Only the Spotify overlay/);
+  for (const operation of ['work-state', 'work-pending']) {
+    assert.equal((await call({ ...request, operation }, website, external)).ok, true);
+    assert.equal((await call({ type: 'ktv420:overlay-request', request: { ...request, operation } })).ok, true);
+    assert.equal((await call({ ...request, operation }, { ...website, url: 'https://evil.example/' }, external)).ok, false);
+  }
+  for (const operation of ['pending', 'chunk', 'ack', 'claim-capture', 'release-capture']) {
+    const result = await call({ ...request, operation, id, token, index: 0 }, website, external);
+    assert.equal(result.ok, false);
+    assert.match(result.error || '', /Raw captures stay in the extension/);
   }
 });
 

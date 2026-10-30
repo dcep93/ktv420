@@ -11,8 +11,9 @@ export async function queueTransaction<T>(
   options?: IDBTransactionOptions,
 ): Promise<T> {
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
-    const r = indexedDB.open(QUEUE_DB, 4);
+    const r = indexedDB.open(QUEUE_DB, 5);
     r.onupgradeneeded = () => {
+      if (!r.result.objectStoreNames.contains('settings')) r.result.createObjectStore('settings');
       for (const name of ['claims', 'prepared', 'preparedFiles', 'uploads']) if (!r.result.objectStoreNames.contains(name)) r.result.createObjectStore(name, { keyPath: 'id' });
       if (!r.result.objectStoreNames.contains('collections')) r.result.createObjectStore('collections', { keyPath: 'path' });
       if (!r.result.objectStoreNames.contains('library')) r.result.createObjectStore('library');

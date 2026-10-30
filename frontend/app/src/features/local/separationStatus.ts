@@ -15,10 +15,10 @@ export function separationStatus(track: LibrarySummary | undefined, enabled: boo
       busy: state === 'processing', failed: state === 'error',
     };
   }
-  if (failure || track.status === 'error') return { label: 'Needs retry', detail: failure || 'Open ktv420 to retry separation.', busy: false, failed: true };
+  if (failure || track.status === 'error') return { label: 'Needs retry', detail: failure || track.error || 'Retry separation in Settings.', busy: false, failed: true };
   if (track.location === 'extension') {
     // Another Spotify overlay may own the active claim, independently of this view's pause switch.
-    if (track.status === 'processing') return { label: 'Separating in another view', detail: 'Another Spotify view is separating this song.', busy: true, failed: false };
+    if (track.status === 'processing') return { label: `Separating${track.progress ? ` ~${Math.round(track.progress.fraction * 100)}%` : ''}`, detail: track.progress?.message || 'Separating from the extension queue.', busy: true, failed: false };
     return { label: enabled ? 'Queued for separation' : 'Separation paused', detail: enabled ? 'Waiting for the next available separation slot.' : 'Resume separation in Settings.', busy: false, failed: false };
   }
   return { label: 'Captured · open ktv420', detail: 'Open ktv420 to check separation. Reload the extension for live queue status.', busy: false, failed: false };

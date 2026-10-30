@@ -4,6 +4,8 @@ export type LibrarySummary = {
   separation?: 'paused' | 'queued' | 'processing' | 'error';
   location?: 'website' | 'extension';
   updatedAt?: number;
+  progress?: { fraction: number; message: string };
+  error?: string;
 };
 export function parseLibrarySummary(value: unknown): LibrarySummary[] {
   if (!Array.isArray(value) || value.length > 10000) throw new Error('Invalid library summary.');

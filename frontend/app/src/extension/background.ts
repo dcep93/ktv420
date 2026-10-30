@@ -1,5 +1,7 @@
+import { workState, configureWork, claimWork, failWork, type WorkerOwner } from './workQueue';
+import { beginReturnedCapture, appendReturnedCapture, finishReturnedCapture } from './returnedCapture';
 import { listStagedAudio, deleteStagedAudio } from './stagedLibrary';
-import { claimCapture, touchClaim, releaseClaim, stagedSummary, preparedCaptures, beginPrepared, appendPrepared, finishPrepared, preparedChunk, acknowledgePrepared } from './staging';
+import { touchClaim, releaseClaim, stagedSummary, preparedCaptures, beginPrepared, appendPrepared, finishPrepared, preparedChunk, acknowledgePrepared } from './staging';
 import type { AudioName } from '../shared/preparedAudio';
 import { APP_ORIGIN, parseRequest, websiteSender } from './protocol';
 import {
@@ -8,35 +10,46 @@ import {
   finishCapture,
   pendingCaptures,
   readChunk,
-  acknowledgeCapture,
   readLibrarySummary,
   publishLibrarySummary,
   rememberPlayerCollection,
   playerCollections,
   acknowledgePlayerCollection,
 } from './queue';
-async function request(message: unknown, tabId?: number) {
+async function request(message: unknown, tabId?: number, websiteTabId?: number) {
   const r = parseRequest(message);
   if (String(r.operation).startsWith('work-')) {
-    if (tabId === undefined) throw new Error('Only the Spotify overlay processes staged recordings.');
+    if (r.operation === 'work-state') return workState();
+    if (r.operation === 'work-config') return configureWork(r.enabled as boolean, r.retry === true, r.backend as 'auto' | 'wasm' | undefined);
+    const boundTab = tabId ?? websiteTabId;
+    if (boundTab === undefined) throw new Error('A ktv420 view must own the worker.');
+    const owner: WorkerOwner = `worker:${boundTab}`;
     const id = String(r.id), token = String(r.token);
     switch (r.operation) {
-      case 'work-pending': return (await pendingCaptures()).filter(c => c.tabId === tabId);
-      case 'work-claim': return claimCapture(id, tabId);
-      case 'work-touch': return touchClaim(id, token, tabId, r.progress as { fraction: number; message: string } | undefined);
-      case 'work-release': return releaseClaim(id, token, tabId);
-      case 'work-chunk': await touchClaim(id, token, tabId); return readChunk(id, Number(r.index), token);
-      case 'work-begin': return beginPrepared(r.manifest, token, tabId);
-      case 'work-append': return appendPrepared(id, token, tabId, r.name as AudioName, Number(r.index), String(r.base64));
-      case 'work-finish': return finishPrepared(id, token, tabId);
+      case 'work-failure': return failWork(id, token, owner, String(r.error));
+      case 'work-pending': return pendingCaptures();
+      case 'work-claim': return claimWork(id, owner);
+      case 'work-touch': return touchClaim(id, token, owner, r.progress as { fraction: number; message: string } | undefined);
+      case 'work-release': return releaseClaim(id, token, owner);
+      case 'work-chunk': await touchClaim(id, token, owner); return readChunk(id, Number(r.index), token);
+      case 'work-begin': return beginPrepared(r.manifest, token, owner);
+      case 'work-append': return appendPrepared(id, token, owner, r.name as AudioName, Number(r.index), String(r.base64));
+      case 'work-finish': return finishPrepared(id, token, owner);
     }
   }
   switch (r.operation) {
+    case 'return-begin':
+    case 'return-chunk':
+    case 'return-finish':
+      if (tabId !== undefined) throw new Error('Only the website returns imported originals.');
+      if (r.operation === 'return-begin') return beginReturnedCapture(String(r.id), r.metadata as Record<string, unknown>, Number(r.bytes));
+      if (r.operation === 'return-chunk') return appendReturnedCapture(String(r.id), Number(r.index), String(r.base64));
+      return finishReturnedCapture(String(r.id));
     case 'staging-list':
     case 'staging-delete':
       if (tabId === undefined) throw new Error('Only the Spotify overlay manages extension audio.');
       return r.operation === 'staging-list' ? listStagedAudio() : deleteStagedAudio(r.ids as string[]);
-    case 'hello': return { version: 1, extensionVersion: chrome.runtime.getManifest().version, extensionId: chrome.runtime.id, stagedAudio: true, stagedAudioControls: true };
+    case 'hello': return { version: 1, extensionVersion: chrome.runtime.getManifest().version, extensionId: chrome.runtime.id, stagedAudio: true, stagedAudioControls: true, extensionQueue: true };
     case 'ack-collection': {
       if (tabId !== undefined) throw new Error('Only the website receives playlist metadata.');
       return acknowledgePlayerCollection(String(r.path), String(r.requestId));
@@ -47,8 +60,11 @@ async function request(message: unknown, tabId?: number) {
       for (const t of await stagedSummary()) if (tracks.get(t.id)?.status !== 'ready') tracks.set(t.id, { ...t, location: 'extension' });
       return [...tracks.values()];
     }
-    case 'claim-capture': if (tabId !== undefined) throw new Error('Only the website imports audio.'); return claimCapture(String(r.id), 'website');
-    case 'release-capture': if (tabId !== undefined) throw new Error('Only the website imports audio.'); return releaseClaim(String(r.id), String(r.token), 'website');
+    case 'claim-capture':
+    case 'release-capture':
+    case 'pending':
+    case 'chunk':
+    case 'ack': throw new Error('Raw captures stay in the extension until separation finishes. Refresh ktv420.');
     case 'prepared': if (tabId !== undefined) throw new Error('Only the website imports audio.'); return preparedCaptures();
     case 'prepared-chunk': if (tabId !== undefined) throw new Error('Only the website imports audio.'); return preparedChunk(String(r.id), r.name as AudioName, Number(r.index));
     case 'ack-prepared': if (tabId !== undefined) throw new Error('Only the website imports audio.'); return acknowledgePrepared(String(r.id));
@@ -56,9 +72,6 @@ async function request(message: unknown, tabId?: number) {
       if (tabId !== undefined) throw new Error('Only the standalone website publishes library status.');
       return publishLibrarySummary(r.tracks);
     }
-    case 'pending': { if (tabId !== undefined) throw new Error('Open ktv420 to receive audio.'); return pendingCaptures(); }
-    case 'chunk': if (tabId !== undefined) throw new Error('Open ktv420 to receive audio.'); if (r.token) await touchClaim(String(r.id), String(r.token), 'website'); return readChunk(String(r.id), Number(r.index), r.token as string | undefined);
-    case 'ack': if (tabId !== undefined) throw new Error('Open ktv420 to receive audio.'); if (r.token) await touchClaim(String(r.id), String(r.token), 'website'); return acknowledgeCapture(String(r.id), r.token as string | undefined);
     default: {
       if (tabId === undefined) throw new Error('Open ktv420 over a Spotify playlist to capture.');
       const tab = await chrome.tabs.get(tabId);
@@ -129,7 +142,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
 chrome.runtime.onMessageExternal.addListener((message, sender, respond) => {
   if (!websiteSender(sender)) return false;
   const handle = async () => {
-    return request(message);
+    return request(message, undefined, sender.tab?.id);
   };
   void handle().then(
     (result) => respond({ ok: true, result }),

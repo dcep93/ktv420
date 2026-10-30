@@ -94,3 +94,24 @@ test('failed separation identifies the song and releases it without reporting co
     assert.deepEqual(updates.at(-1), ['failedSong', null]);
   } finally { stop(); }
 });
+test('shared queue worker respects pause and resumes without a website-owned raw import', async () => {
+  let enabled = false, claimed = 0, polls = 0, saved = false;
+  const processed = deferred<void>();
+  const stop = startStagedProcessing(() => {}, () => {}, {
+    request: async <T>(op: string): Promise<T> => {
+      if (op === 'hello') return { stagedAudio: true, extensionQueue: true } as T;
+      if (op === 'work-state') { polls++; return { enabled, backend: 'auto' } as T; }
+      if (op === 'work-pending') return (saved ? [] : [{ id: 'shared', metadata: { trackId: 'sharedSong' } }]) as T;
+      if (op === 'work-claim') { claimed++; return 'token' as T; }
+      if (op === 'work-release') { processed.resolve(); return undefined as T; }
+      throw new Error(op);
+    },
+    createSeparator: () => ({ dispose() {}, async separateStereo() { throw new Error('unused'); } }),
+    process: async () => { saved = true; },
+  });
+  try {
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.ok(polls > 0); assert.equal(claimed, 0);
+    enabled = true; await processed.promise; assert.equal(claimed, 1);
+  } finally { stop(); }
+});

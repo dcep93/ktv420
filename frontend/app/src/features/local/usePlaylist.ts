@@ -33,6 +33,8 @@ export function usePlaylist(onClose?: () => void) {
   const [replay, setReplay] = useState<PerformanceRecording | null>(null);
   const [librarySummary, setLibrarySummary] = useState<LibrarySummary[]>([]);
   const [summaryReady, setSummaryReady] = useState(false);
+  const [queueEnabled, setQueueEnabled] = useState<boolean | null>(null);
+  const [queueBackend, setQueueBackend] = useState<'auto' | 'wasm' | null>(null);
   const cancelled = useRef(false),
     closeRef = useRef(onClose);
   closeRef.current = onClose;
@@ -94,24 +96,27 @@ export function usePlaylist(onClose?: () => void) {
     };
   }, []);
   useEffect(() => {
-    if (!embeddedSpotify) return;
     let disposed = false,
       busy = false;
     const poll = async () => {
       if (busy) return;
       busy = true;
       try {
-        const revision = volumeRevision.current;
-        const next = await spotifyRequest<Status>('status');
-        if (!disposed) setStatus(previous => ({ ...next, volume: volumePending.current || revision !== volumeRevision.current ? previous?.volume ?? next.volume : next.volume }));
+        if (embeddedSpotify) {
+          const revision = volumeRevision.current;
+          const next = await spotifyRequest<Status>('status');
+          if (!disposed) setStatus(previous => ({ ...next, volume: volumePending.current || revision !== volumeRevision.current ? previous?.volume ?? next.volume : next.volume }));
+        }
         const summary = await spotifyRequest<LibrarySummary[]>('library-summary');
         if (!disposed) {
           setLibrarySummary(summary); setSummaryReady(true);
           const ids = new Set(summary.map(track => track.id.replace(/^spotify-/, '')));
           setSavingTrackIds(previous => previous.filter(id => !ids.has(id)));
         }
+        const state = await spotifyRequest<{ enabled: boolean; backend?: 'auto' | 'wasm' }>('work-state').catch(() => null);
+        if (!disposed && state) { setQueueEnabled(state.enabled); setQueueBackend(state.backend || 'auto'); }
       } catch (reason) {
-        if (!disposed) setError(reason instanceof Error ? reason.message : String(reason));
+        if (!disposed && embeddedSpotify) setError(reason instanceof Error ? reason.message : String(reason));
       } finally {
         busy = false;
       }
@@ -196,6 +201,9 @@ export function usePlaylist(onClose?: () => void) {
   return {
     tracks,
     librarySummary,
+    queueEnabled,
+    queueBackend,
+    configureQueue: async (enabled: boolean, retry = false, backend?: 'auto' | 'wasm') => { await spotifyRequest('work-config', { enabled, retry, ...(backend ? { backend } : {}) }); setQueueEnabled(enabled); if (backend) setQueueBackend(backend); },
     summaryReady,
     openPlayer: (trackIndex: number | null) => spotifyRequest('open-player', { path, trackIndex }),
     tracksComplete: complete,

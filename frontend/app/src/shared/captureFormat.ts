@@ -8,6 +8,7 @@ export type QueuedCapture = {
   nextChunk: number;
   createdAt: number;
   complete: boolean;
+  processingError?: string;
 };
 export function validateCapture(metadata: Record<string, unknown>, bytes: number) {
   if (

@@ -1,15 +1,12 @@
+import { startStagedProcessing } from '../features/local/spotify/stagedProcessing';
 import { useEffect, useState } from 'react';
 import { embeddedSpotify } from '../features/local/spotify/overlay';
 import { drainDeliveries } from '../features/local/spotify/delivery';
 import {
   getProcessingEnabled,
   requestPersistence,
-  withProcessingLock,
 } from '../features/local/libraryClient';
 import { listTracks } from '../features/local/library';
-import { processLocalTrack } from '../features/local/processing';
-import { LocalSeparator } from '../features/local/inference/client';
-import { drainSpotifyQueue } from '../features/local/spotifyQueue';
 /** Reconnect delivery on any website page; no installed extension is needed for the library. */
 export default function AppServices() {
   const [notice, setNotice] = useState('');
@@ -17,8 +14,7 @@ export default function AppServices() {
     if (embeddedSpotify) return;
     let cancelled = false,
       busy = false,
-      processingCancelled = false,
-      separator: LocalSeparator | null = null;
+      stopWorker: (() => void) | undefined;
     void requestPersistence()
       .then((persistent) => {
         if (!cancelled && !persistent)
@@ -28,27 +24,16 @@ export default function AppServices() {
       })
       .catch(() => {});
     const tick = async () => {
-      if (busy) {
-        // A settings page can pause the worker owned by a different website tab.
-        const current = separator;
-        if (current) {
-          try {
-            if (!(await getProcessingEnabled()) && separator === current) {
-              processingCancelled = true;
-              current.dispose();
-            }
-          } catch { /* The active operation reports storage failures. */ }
-        }
-        return;
-      }
+      if (busy || cancelled) return;
       busy = true;
       try {
         // A missing extension is normal. Only surface delivery failures after a successful hello.
         const { spotifyRequest } = await import('../features/local/spotify/client');
         let connected = false;
         try {
-          await spotifyRequest('hello');
+          const capability = await spotifyRequest<{ extensionQueue?: boolean }>('hello');
           connected = true;
+          if (capability.extensionQueue && !stopWorker && !cancelled) stopWorker = startStagedProcessing(message => { if (!cancelled) setNotice(message); }, () => {});
         } catch {
           /* website works independently */
         }
@@ -62,32 +47,6 @@ export default function AppServices() {
                 `Capture delivery paused: ${reason instanceof Error ? reason.message : String(reason)}`,
               );
           }
-        // PlaylistPage has its own progress UI; both paths share the same website lock.
-        if (location.pathname !== '/playlist' && (await getProcessingEnabled()) && !cancelled)
-          await withProcessingLock(async (acquired) => {
-            if (!acquired || cancelled) return;
-            processingCancelled = false;
-            separator = new LocalSeparator({ backend: 'gpu' in navigator ? 'webgpu' : 'wasm' });
-            try {
-              await drainSpotifyQueue({
-                list: listTracks,
-                cancelled: () => cancelled || processingCancelled,
-                process: (id) =>
-                  processLocalTrack(
-                    id,
-                    separator!,
-                    () => cancelled || processingCancelled,
-                    () => {},
-                  ),
-                onError: (reason) => {
-                  if (!cancelled) setNotice(String(reason));
-                },
-              });
-            } finally {
-              separator.dispose();
-              separator = null;
-            }
-          });
       } catch (reason) {
         if (!cancelled) setNotice(reason instanceof Error ? reason.message : String(reason));
       } finally {
@@ -112,7 +71,7 @@ export default function AppServices() {
       cancelled = true;
       clearInterval(timer);
       clearInterval(summaryTimer);
-      separator?.dispose();
+      stopWorker?.();
     };
   }, []);
   return notice ? (

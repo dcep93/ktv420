@@ -1,5 +1,5 @@
 import type { QueuedCapture } from './captureFormat';
-export function wavHeader(capture: QueuedCapture) {
+export function wavHeader(capture: Pick<QueuedCapture, 'metadata' | 'expectedBytes'>) {
   const header = new ArrayBuffer(58),
     view = new DataView(header),
     channels = Number(capture.metadata.audioChannelCount),

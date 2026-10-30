@@ -18,7 +18,7 @@ export function parseRequest(value: unknown) {
     r.version !== PROTOCOL_VERSION ||
     typeof r.operation !== 'string' ||
     ![
-      'hello', 'staging-list', 'staging-delete',
+      'hello', 'work-state', 'work-config', 'work-failure', 'return-begin', 'return-chunk', 'return-finish', 'staging-list', 'staging-delete',
       'claim-capture', 'release-capture', 'prepared', 'prepared-chunk', 'ack-prepared',
       'work-pending', 'work-claim', 'work-chunk', 'work-touch', 'work-release', 'work-begin', 'work-append', 'work-finish',
       'library-summary',
@@ -45,7 +45,18 @@ export function parseRequest(value: unknown) {
   if (r.operation === 'open-player' && (typeof r.path !== 'string' || !/^(album|playlist)\/[A-Za-z0-9]{22}$/.test(r.path) || (r.trackIndex !== null && (!Number.isSafeInteger(r.trackIndex) || Number(r.trackIndex) < 1 || Number(r.trackIndex) > 10000)))) throw new Error('Invalid player link.');
   if (r.operation === 'staging-delete' && (!Array.isArray(r.ids) || !r.ids.length || r.ids.length > 10000 ||
       r.ids.some(id => typeof id !== 'string' || !/^[a-f0-9-]{36}$/.test(id)))) throw new Error('Invalid staging deletion.');
-  const work = r.operation.startsWith('work-');
+  if (r.operation === 'work-config' && (typeof r.enabled !== 'boolean' || ('retry' in r && typeof r.retry !== 'boolean'))) throw new Error('Invalid queue preference.');
+  if ('backend' in r && !['auto', 'wasm'].includes(String(r.backend))) throw new Error('Invalid separation device.');
+  if (r.operation === 'work-failure' && (typeof r.error !== 'string' || !r.error.length || r.error.length > 500)) throw new Error('Invalid processing error.');
+  if (r.operation.startsWith('return-')) {
+    if (typeof r.id !== 'string' || !/^[a-f0-9-]{36}$/.test(r.id)) throw new Error('Invalid returned capture ID.');
+    if (r.operation === 'return-chunk') {
+      if (!Number.isSafeInteger(r.index) || Number(r.index) < 0 || Number(r.index) > 4096) throw new Error('Invalid returned chunk.');
+      decodeChunk(r.base64);
+    }
+    if (r.operation === 'return-begin' && (!r.metadata || typeof r.metadata !== 'object' || !Number.isSafeInteger(r.bytes))) throw new Error('Invalid returned capture.');
+  }
+  const work = r.operation.startsWith('work-') && !['work-state', 'work-config'].includes(r.operation);
   if ((work && r.operation !== 'work-pending') || ['claim-capture', 'release-capture', 'prepared-chunk', 'ack-prepared'].includes(r.operation)) {
     if (typeof r.id !== 'string' || !/^[a-f0-9-]{36}$/.test(r.id)) throw new Error('Invalid staging ID.');
   }
@@ -106,7 +117,7 @@ export function parseRequest(value: unknown) {
       'id',
       'index',
       'volume',
-      'ids', 'tracks', 'token', 'name', 'manifest', 'base64', 'progress',
+      'ids', 'tracks', 'token', 'name', 'manifest', 'base64', 'progress', 'enabled', 'retry', 'backend', 'error', 'metadata', 'bytes',
     ]
       .filter((key) => key in r)
       .map((key) => [key, r[key]]),
