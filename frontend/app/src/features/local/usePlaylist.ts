@@ -3,7 +3,7 @@ import { savedCollection, type TrackRow } from './collections';
 import { playlistPath, playlistIndex, playlistViewUrl } from './playlistPage';
 import { spotifyRequest } from './spotify/client';
 import { embeddedSpotify, overlayReady } from './spotify/overlay';
-import { drainDeliveries } from './spotify/delivery';
+import { loadPlaylistCollection } from './spotify/collectionDelivery';
 import type { LibrarySummary } from '../../shared/librarySummary';
 import { loadPerformance } from './performanceFiles';
 import type { PerformanceRecording } from './recording';
@@ -53,9 +53,9 @@ export function usePlaylist(onClose?: () => void) {
           // The overlay holds metadata only; the website registers delivered captures.
           collection = { ...snapshot.collection, tracks: snapshot.tracks };
         } else {
-          // Await any other website receiver before resolving a newly captured collection.
-          await drainDeliveries(undefined, true).catch(() => {});
-          collection = await savedCollection(path);
+          // Render cached rows (or just their small metadata handoff) immediately.
+          // AppServices imports audio in the background; ready tracks appear as it commits.
+          collection = await loadPlaylistCollection(path);
         }
         if (!disposed) {
           setTracks(collection.tracks);

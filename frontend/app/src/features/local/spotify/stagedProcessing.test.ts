@@ -9,6 +9,28 @@ import { claimCapture, touchClaim, releaseClaim, beginPrepared, appendPrepared, 
 import { encodeBlobChunk } from '../../../shared/preparedAudio';
 import type { SeparationResult } from '../inference/types';
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
+
+test('startup heals before claiming, and a stopped page releases a late claim without starting inference', async () => {
+  const entered = deferred<void>(), claim = deferred<string>(), released = deferred<void>();
+  const calls: string[] = [];
+  const stop = startStagedProcessing(() => {}, () => {}, {
+    request: async <T>(op: string): Promise<T> => {
+      calls.push(op);
+      if (op === 'hello') return { stagedAudio: true, extensionQueue: true, workRecovery: true } as T;
+      if (op === 'work-recover') return undefined as T;
+      if (op === 'work-state') return { enabled: true, backend: 'auto' } as T;
+      if (op === 'work-pending') return [{ id: 'pending', metadata: { trackId: 'song' } }] as T;
+      if (op === 'work-claim') { entered.resolve(); return await claim.promise as T; }
+      if (op === 'work-release') { released.resolve(); return undefined as T; }
+      throw new Error(op);
+    },
+    createSeparator: () => { throw new Error('Stopped view must never create a worker'); },
+    process: async () => assert.fail('Stopped view must not process'),
+  });
+  await entered.promise;
+  assert.ok(calls.indexOf('work-recover') < calls.indexOf('work-claim'));
+  stop(); claim.resolve('token'); await released.promise;
+});
 test('hosted worker separates extension-owned input while the next capture can finish, then commits staged MP3s', async () => {
   const frames = 6000, bytes = new Uint8Array(frames * 8), trackId = crypto.randomUUID().replaceAll('-', '');
   const metadata = { trackId, audioSampleRate: 44100, audioChannelCount: 2, audioSampleFormat: 'PCM_F32LE', audioByteLength: bytes.length, captureStartVerified: true, captureEndVerified: true };

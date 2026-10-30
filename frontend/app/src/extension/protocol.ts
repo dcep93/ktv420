@@ -18,7 +18,7 @@ export function parseRequest(value: unknown) {
     r.version !== PROTOCOL_VERSION ||
     typeof r.operation !== 'string' ||
     ![
-      'hello', 'work-state', 'work-config', 'work-failure', 'return-begin', 'return-chunk', 'return-finish', 'staging-list', 'staging-delete',
+      'hello', 'work-state', 'work-config', 'work-failure', 'work-recover', 'return-begin', 'return-chunk', 'return-finish', 'staging-list', 'staging-delete',
       'claim-capture', 'release-capture', 'prepared', 'prepared-chunk', 'ack-prepared',
       'work-pending', 'work-claim', 'work-chunk', 'work-touch', 'work-release', 'work-begin', 'work-append', 'work-finish',
       'library-summary',
@@ -48,6 +48,7 @@ export function parseRequest(value: unknown) {
   if (r.operation === 'work-config' && (typeof r.enabled !== 'boolean' || ('retry' in r && typeof r.retry !== 'boolean'))) throw new Error('Invalid queue preference.');
   if ('backend' in r && !['auto', 'wasm'].includes(String(r.backend))) throw new Error('Invalid separation device.');
   if (r.operation === 'work-failure' && (typeof r.error !== 'string' || !r.error.length || r.error.length > 500)) throw new Error('Invalid processing error.');
+  if ('recoverOnReload' in r && typeof r.recoverOnReload !== 'boolean') throw new Error('Invalid recovery flag.');
   if (r.operation.startsWith('return-')) {
     if (typeof r.id !== 'string' || !/^[a-f0-9-]{36}$/.test(r.id)) throw new Error('Invalid returned capture ID.');
     if (r.operation === 'return-chunk') {
@@ -56,7 +57,7 @@ export function parseRequest(value: unknown) {
     }
     if (r.operation === 'return-begin' && (!r.metadata || typeof r.metadata !== 'object' || !Number.isSafeInteger(r.bytes))) throw new Error('Invalid returned capture.');
   }
-  const work = r.operation.startsWith('work-') && !['work-state', 'work-config'].includes(r.operation);
+  const work = r.operation.startsWith('work-') && !['work-state', 'work-config', 'work-recover'].includes(r.operation);
   if ((work && r.operation !== 'work-pending') || ['claim-capture', 'release-capture', 'prepared-chunk', 'ack-prepared'].includes(r.operation)) {
     if (typeof r.id !== 'string' || !/^[a-f0-9-]{36}$/.test(r.id)) throw new Error('Invalid staging ID.');
   }
@@ -117,7 +118,7 @@ export function parseRequest(value: unknown) {
       'id',
       'index',
       'volume',
-      'ids', 'tracks', 'token', 'name', 'manifest', 'base64', 'progress', 'enabled', 'retry', 'backend', 'error', 'metadata', 'bytes',
+      'ids', 'tracks', 'token', 'name', 'manifest', 'base64', 'progress', 'enabled', 'retry', 'backend', 'error', 'metadata', 'bytes', 'recoverOnReload',
     ]
       .filter((key) => key in r)
       .map((key) => [key, r[key]]),

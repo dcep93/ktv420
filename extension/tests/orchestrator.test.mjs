@@ -21,6 +21,23 @@ function mockPage(t) {
   }
 }
 
+test('page teardown cancels capture without warning or overwriting a genuine failure', async t => {
+  mockPage(t);
+  const warnings = t.mock.method(console, 'warn', () => {});
+  const stored = new Map([['ktv420:last-capture-failure', 'existing diagnostic']]);
+  window.sessionStorage = { setItem: (key, value) => stored.set(key, value) };
+  const runner = new CaptureOrchestrator({ bridge: { command: async () => ({}), getSnapshot: () => ({}) } });
+  runner.preflightQueue = async () => {
+    await runner.requestStop('Spotify page is closing.', { teardown: true });
+    throw new Error('Media bridge disconnected');
+  };
+  await assert.rejects(runner.run({ trackIds: [item.trackId], trackSnapshot: [item] }), { name: 'AbortError' });
+  assert.equal(warnings.mock.callCount(), 0);
+  assert.equal(stored.get('ktv420:last-capture-failure'), 'existing diagnostic');
+  assert.equal(runner.isActive(), false);
+  await assert.rejects(runner.run({ trackIds: [item.trackId] }), { name: 'AbortError' });
+});
+
 test('capture progress uses the accepted item, throttles updates, and never announces persisted completion', () => {
   const { runner, events } = recorder();
   runner.updateCaptureProgress(item, { currentTime: 0, duration: 100 }, 0);

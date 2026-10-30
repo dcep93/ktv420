@@ -23,6 +23,7 @@ export class CaptureOrchestrator extends EventTarget {
     this.bridge = bridge;
     this.active = false;
     this.stopRequested = false;
+    this.tearingDown = false;
     this.stopReason = 'Capture run stopped by user.';
     this.singleTrack = false;
     this.captureProgress = null;
@@ -33,7 +34,8 @@ export class CaptureOrchestrator extends EventTarget {
     return this.active;
   }
 
-  async requestStop(reason = 'Capture run stopped by user.') {
+  async requestStop(reason = 'Capture run stopped by user.', { teardown = false } = {}) {
+    this.tearingDown ||= teardown;
     this.stopRequested = true;
     this.stopReason = reason;
     this.clearCaptureProgress();
@@ -41,6 +43,7 @@ export class CaptureOrchestrator extends EventTarget {
   }
 
   async run({ trackIds, trackSnapshot, collection = null, timingTrace = null } = {}) {
+    if (this.tearingDown) throw new DOMException('Spotify page is closing.', 'AbortError');
     if (this.active) throw new Error('Capture is already running.');
     if (!Array.isArray(trackIds) || trackIds.length !== 1) throw new Error('Capture requires exactly one track.');
     this.collection = collection;
@@ -75,9 +78,12 @@ export class CaptureOrchestrator extends EventTarget {
       this.dispatchCaptureComplete([item.trackId]);
     } catch(error) {
       pausePlaybackCleanly();
+      // Reload/navigation closes the media bridge. It is cancellation, not a
+      // recording defect, and must not overwrite the last genuine diagnostic.
+      if (this.tearingDown) throw new DOMException('Spotify page is closing.', 'AbortError');
       const report={...debug,failedAt:new Date().toISOString(),error:serializeError(error),mediaSession:this.bridge.getSnapshot().mediaSession};
       try {window.sessionStorage.setItem('ktv420:last-capture-failure',JSON.stringify(report));}catch{/* retain console evidence */}
-      console.warn('[ktv420] Capture failed',report);
+      console.warn(`[ktv420] Capture failed: ${report.error.message}\n${JSON.stringify(report)}`);
       throw error;
     } finally {
       this.clearCaptureProgress();

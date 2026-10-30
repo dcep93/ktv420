@@ -12,7 +12,7 @@ export function watchInference(onStall: (error: Error) => void) {
     timer = setTimeout(() => {
       stopped = true;
       const stage = previous?.message || 'Starting the separation worker';
-      onStall(new Error(`Separation stopped responding (${stage}). Your recording is saved. Retry separation in Settings.`));
+      onStall(new DOMException(`Separation stopped responding (${stage}). Your recording is saved. Reload to resume, or retry in Settings.`, 'TimeoutError'));
     }, Math.max(INFERENCE_SILENCE_MS, slowestSegment * 8));
   };
   arm();

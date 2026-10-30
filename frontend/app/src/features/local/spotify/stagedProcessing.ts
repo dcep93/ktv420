@@ -18,6 +18,7 @@ export function startStagedProcessing(onError: (error: string, trackId?: string)
   const process = dependencies.process || processLocalTrack;
   let stopped = false, busy = false, separator: Worker | undefined, queueEnabled = true, pausedRun = false, sharedQueue = false, stateBusy = false;
   let overall: number | null = null, queueBackend: 'auto' | 'wasm' = 'auto';
+  let recovered = false;
   const readState = async () => {
     if (!sharedQueue || stateBusy || stopped) return;
     stateBusy = true;
@@ -30,9 +31,12 @@ export function startStagedProcessing(onError: (error: string, trackId?: string)
     if (busy || stopped) return;
     busy = true;
     try {
-      const capability = await request<{ stagedAudio?: boolean; extensionQueue?: boolean }>('hello');
+      const capability = await request<{ stagedAudio?: boolean; extensionQueue?: boolean; workRecovery?: boolean }>('hello');
       if (!capability.stagedAudio) return;
       sharedQueue = !!capability.extensionQueue;
+      if (stopped) return;
+      if (capability.workRecovery && !recovered) { await request('work-recover'); recovered = true; }
+      if (stopped) return;
       await readState();
       if (!queueEnabled) return;
       for (const capture of await request<QueuedCapture[]>('work-pending')) {
@@ -40,6 +44,7 @@ export function startStagedProcessing(onError: (error: string, trackId?: string)
         if (capture.processingError || (!sharedQueue && attempted.has(capture.id))) continue;
         const token = await request<string | null>('work-claim', { id: capture.id });
         if (!token) continue;
+        if (stopped || !queueEnabled) { await request('work-release', { id: capture.id, token }); break; }
         attempted.add(capture.id); overall = null; pausedRun = false;
         let lost = false, finishing = false, latest: SeparationProgress | null = null, touchedAt = Date.now(), renewing = false;
         const args = { id: capture.id, token };
@@ -103,7 +108,7 @@ export function startStagedProcessing(onError: (error: string, trackId?: string)
         } catch (error) {
           if (!stopped && !lost && !pausedRun && queueEnabled) {
             const message = error instanceof Error ? error.message : String(error);
-            if (sharedQueue) await request('work-failure', { ...args, error: message.slice(0, 500) }).catch(() => {});
+            if (sharedQueue) await request('work-failure', { ...args, error: message.slice(0, 500), recoverOnReload: error instanceof Error && error.name === 'TimeoutError' }).catch(() => {});
             onError(message, String(capture.metadata.trackId));
           }
         }

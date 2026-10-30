@@ -1,4 +1,4 @@
-import { workState, configureWork, claimWork, failWork, type WorkerOwner } from './workQueue';
+import { workState, configureWork, claimWork, failWork, recoverWorker, type WorkerOwner } from './workQueue';
 import { beginReturnedCapture, appendReturnedCapture, finishReturnedCapture } from './returnedCapture';
 import { listStagedAudio, deleteStagedAudio } from './stagedLibrary';
 import { touchClaim, releaseClaim, stagedSummary, preparedCaptures, beginPrepared, appendPrepared, finishPrepared, preparedChunk, acknowledgePrepared } from './staging';
@@ -16,7 +16,7 @@ import {
   playerCollections,
   acknowledgePlayerCollection,
 } from './queue';
-async function request(message: unknown, tabId?: number, websiteTabId?: number) {
+async function request(message: unknown, tabId?: number, websiteTabId?: number, documentId?: string) {
   const r = parseRequest(message);
   if (String(r.operation).startsWith('work-')) {
     if (r.operation === 'work-state') return workState();
@@ -24,11 +24,15 @@ async function request(message: unknown, tabId?: number, websiteTabId?: number) 
     const boundTab = tabId ?? websiteTabId;
     if (boundTab === undefined) throw new Error('A ktv420 view must own the worker.');
     const owner: WorkerOwner = `worker:${boundTab}`;
+    if (r.operation === 'work-recover') {
+      if (!documentId) throw new Error('Reload this page to reconnect separation.');
+      return recoverWorker(owner, documentId);
+    }
     const id = String(r.id), token = String(r.token);
     switch (r.operation) {
-      case 'work-failure': return failWork(id, token, owner, String(r.error));
+      case 'work-failure': return failWork(id, token, owner, String(r.error), r.recoverOnReload === true);
       case 'work-pending': return pendingCaptures();
-      case 'work-claim': return claimWork(id, owner);
+      case 'work-claim': return claimWork(id, owner, documentId);
       case 'work-touch': return touchClaim(id, token, owner, r.progress as { fraction: number; message: string } | undefined);
       case 'work-release': return releaseClaim(id, token, owner);
       case 'work-chunk': await touchClaim(id, token, owner); return readChunk(id, Number(r.index), token);
@@ -49,7 +53,7 @@ async function request(message: unknown, tabId?: number, websiteTabId?: number) 
     case 'staging-delete':
       if (tabId === undefined) throw new Error('Only the Spotify overlay manages extension audio.');
       return r.operation === 'staging-list' ? listStagedAudio() : deleteStagedAudio(r.ids as string[]);
-    case 'hello': return { version: 1, extensionVersion: chrome.runtime.getManifest().version, extensionId: chrome.runtime.id, stagedAudio: true, stagedAudioControls: true, extensionQueue: true };
+    case 'hello': return { version: 1, extensionVersion: chrome.runtime.getManifest().version, extensionId: chrome.runtime.id, stagedAudio: true, stagedAudioControls: true, extensionQueue: true, workRecovery: true };
     case 'ack-collection': {
       if (tabId !== undefined) throw new Error('Only the website receives playlist metadata.');
       return acknowledgePlayerCollection(String(r.path), String(r.requestId));
@@ -100,10 +104,11 @@ chrome.action.onClicked.addListener((tab) => {
   else void chrome.tabs.create({ url: APP_ORIGIN });
 });
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
+  if (sender.documentLifecycle && sender.documentLifecycle !== 'active') return false;
   if (sender.id === chrome.runtime.id && typeof sender.tab?.id === 'number' &&
       (sender.frameId ?? 0) > 0 && sender.url?.split('?')[0] === chrome.runtime.getURL('src/overlay/index.html') &&
       message?.type === 'ktv420:overlay-request') {
-    void request(message.request, sender.tab.id).then(
+    void request(message.request, sender.tab.id, undefined, sender.documentId).then(
       result => respond({ ok: true, result }),
       error => respond({ ok: false, error: String(error.message || error) }),
     );
@@ -141,8 +146,9 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
 });
 chrome.runtime.onMessageExternal.addListener((message, sender, respond) => {
   if (!websiteSender(sender)) return false;
+  if (sender.documentLifecycle && sender.documentLifecycle !== 'active') return false;
   const handle = async () => {
-    return request(message, undefined, sender.tab?.id);
+    return request(message, undefined, sender.tab?.id, sender.documentId);
   };
   void handle().then(
     (result) => respond({ ok: true, result }),

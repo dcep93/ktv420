@@ -10,6 +10,7 @@ import { createOverlay } from './overlay.js';
 const bridge = createPageBridge(),
   runner = new CaptureOrchestrator({ bridge });
 let collection = null,
+  pageLeaving = false,
   tracks = [],
   progress = null,
   current = null,
@@ -19,14 +20,14 @@ const volume = createVolumeMonitor({
   read: () => readTransportDom().volume, write: setSpotifyVolume,
   apply: gain => bridge.command('listening-output', { gain }),
   active: () => monitoring,
-  onError: reason => { error = reason?.message || String(reason); },
+  onError: reason => { if (!pageLeaving) error = reason?.message || String(reason); },
 });
 const volumeTimer = setInterval(() => void volume.sync(), 250);
 const overlay = createOverlay({ onClose: async () => {
   await cancel();
   pausePlaybackCleanly();
 } });
-bridge.inject().catch((reason) => console.warn('[ktv420] Spotify hooks unavailable', reason));
+bridge.inject().catch((reason) => { if (!pageLeaving) console.warn('[ktv420] Spotify hooks unavailable', reason); });
 function header() {
   const element = document.querySelector('[data-testid="entity-header"]'),
     image = element?.querySelector('img');
@@ -119,6 +120,7 @@ async function capture(request) {
       if (current.stopped) throw new Error('Capture stopped.');
       await runner.run({ trackIds: [row.trackId], trackSnapshot: [row], collection });
     } catch (reason) {
+      if (pageLeaving) return;
       current.state = 'error';
       current.error = error = reason?.message || String(reason);
     } finally {
@@ -218,10 +220,11 @@ setInterval(() => {
 window.addEventListener(
   'pagehide',
   () => {
+    pageLeaving = true;
     clearInterval(volumeTimer);
     volume.dispose();
-    void runner.requestStop();
-    void bridge.command('listening-enable', { enabled: false });
+    void runner.requestStop('Spotify page is closing.', { teardown: true });
+    void bridge.command('listening-enable', { enabled: false }).catch(() => {});
   },
   { once: true },
 );

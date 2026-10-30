@@ -8,7 +8,7 @@ import { parseCollection } from '../savedCollections';
 import { decodeChunk, validateCapture, type QueuedCapture } from '../../../shared/captureFormat';
 import { spotifyRequest } from './client';
 import { embeddedSpotify } from './overlay';
-import { rememberCollection, type LibraryCollection } from '../collections';
+import { receiveCollectionMetadata } from './collectionDelivery';
 
 type Stage = { id: string; nextChunk: number; receivedBytes: number; expectedBytes: number };
 export async function receiveCapture(capture: QueuedCapture, request = spotifyRequest) {
@@ -146,15 +146,8 @@ export async function drainDeliveries(request = spotifyRequest, wait = false) {
   if (embeddedSpotify) return;
   return navigator.locks.request('ktv420-delivery', { ifAvailable: !wait }, async (lock) => {
     if (!lock) return;
-    const failures: unknown[] = [];
     // A new playlist made entirely of already saved songs still needs its membership.
-    const collections = await request<(LibraryCollection & { handoffId: string })[]>('collections').catch(() => []);
-    for (const collection of collections) {
-      try {
-        await rememberCollection(collection, collection.tracks);
-        await request('ack-collection', { path: collection.path, requestId: collection.handoffId });
-      } catch (error) { failures.push(error); }
-    }
+    const failures = await receiveCollectionMetadata(request);
     const capabilities = await request<{ stagedAudio?: boolean; extensionQueue?: boolean }>('hello');
     if (capabilities.stagedAudio) {
       // A website separation must finish before a prepared result can replace its input.

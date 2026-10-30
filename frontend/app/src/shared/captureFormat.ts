@@ -9,6 +9,7 @@ export type QueuedCapture = {
   createdAt: number;
   complete: boolean;
   processingError?: string;
+  retryAfterReload?: { owner: string; documentId: string };
 };
 export function validateCapture(metadata: Record<string, unknown>, bytes: number) {
   if (

@@ -48,3 +48,37 @@ test('bypassed and empty resampling still report completion', () => {
     assert.deepEqual(progress, [0, 1])
   }
 })
+
+/** Independent direct implementation of the original sinc filter, for numerical parity. */
+function directReference(input: Float32Array, inputRate: number, outputRate: number, frames: number) {
+  const ratio = inputRate / outputRate, cutoff = Math.min(1, 1 / ratio) * .95, radius = 64 / cutoff
+  const output = new Float32Array(frames)
+  for (let i = 0; i < frames; i++) {
+    const center = i * ratio
+    let value = 0, weight = 0
+    for (let j = Math.ceil(center - radius); j <= Math.floor(center + radius); j++) {
+      const distance = j - center, x = Math.PI * cutoff * distance
+      const sinc = Math.abs(x) < 1e-12 ? 1 : Math.sin(x) / x
+      const coefficient = cutoff * sinc * (.42 + .5 * Math.cos(Math.PI * distance / radius) + .08 * Math.cos(2 * Math.PI * distance / radius))
+      const period = 2 * (input.length - 1), wrapped = ((j % period) + period) % period
+      const index = input.length <= 1 ? 0 : wrapped < input.length ? wrapped : period - wrapped
+      value += input[index] * coefficient; weight += coefficient
+    }
+    output[i] = value / weight
+  }
+  return output
+}
+
+test('cached phases preserve the original filter across stereo, boundaries, tails and uncommon rates', () => {
+  for (const [inputRate, outputRate, length] of [[48000, 44100, 12000], [44100, 48000, 12000], [96000, 44100, 3000], [48001, 44100, 500], [384000, 8000, 101], [48000, 44100, 1]]) {
+    const left = Float32Array.from({ length }, (_, i) => Math.sin(i * .71) * 2 + Math.cos(i * .13))
+    const right = Float32Array.from({ length }, (_, i) => i % 31 === 0 ? -2 : .125)
+    const frames = Math.round(length * outputRate / inputRate) + 3
+    const result = resampleStereo({ left, right, sampleRate: inputRate }, outputRate, frames)
+    for (const [source, actual] of [[left, result.left], [right, result.right]]) {
+      const reference = directReference(source, inputRate, outputRate, frames)
+      assert.equal(actual.length, frames)
+      for (let i = 0; i < frames; i++) assert.ok(Math.abs(actual[i] - reference[i]) < 1e-6, `${inputRate}→${outputRate}, sample ${i}`)
+    }
+  }
+})
