@@ -16,7 +16,7 @@ flowchart LR
   Library --> Mixer[Mixer, replay, effects + visualizers]
 ```
 
-On Spotify, a packaged extension frame embeds the hosted app as a full-window overlay. Its narrow relay derives the Spotify tab from Chrome’s sender information; no tab ID is exposed in a URL. The extension’s existing host permission for the app origin gives its embedded app access to the same top-level storage partition as the standalone website ([Chrome documentation](https://developer.chrome.com/docs/extensions/develop/concepts/storage-and-cookies)). The frame does not own or broker the music library. `/` and `/catalog` render the catalog; `/playlist` renders the existing playlist and mixer directly. `/transfer` and `/replay` also work without the extension.
+On Spotify, a packaged extension frame embeds the hosted app as a full-window overlay. Its narrow relay derives the Spotify tab from Chrome’s sender information; no tab ID is exposed in a URL. The design assumed the extension host-permission exemption would share storage with the standalone website. Native Chrome testing on October 30 disproved that assumption for this nested Spotify → extension → website frame: the overlay and standalone page saw different tracks, and their delivery locks did not coordinate. Sharing one library without an additional permission prompt remains unresolved. Do not treat the two views as a single storage partition. The frame does not own or broker the music library. `/` and `/catalog` render the catalog; `/playlist` renders the existing playlist and mixer directly. `/transfer` and `/replay` also work without the extension.
 
 ## Ownership and updates
 

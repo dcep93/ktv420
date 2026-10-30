@@ -2,7 +2,7 @@
 
 [Open ktv420](https://ktv420.web.app) to import a playlist, listen, remix and visualize music locally. The website owns your audio library. **No extension is needed for imported music.**
 
-The optional [Chrome extension](https://chromewebstore.google.com/detail/ktv420/kmkbecinmhkfihahalgclomhcicmoiia) captures Spotify. Click **k** to open the full hosted playlist/player as an iframe overlay over Spotify. The same library is also available directly on the website.
+The optional [Chrome extension](https://chromewebstore.google.com/detail/ktv420/kmkbecinmhkfihahalgclomhcicmoiia) captures Spotify. Click **k** to open the full hosted playlist/player as an iframe overlay over Spotify. Known issue in 7.1.0: Chrome currently separates the overlay library from the standalone website library. See [live verification](docs/standalone-library-verification.md#overlay-restoration-710).
 
 ## Getting started
 
