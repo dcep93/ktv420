@@ -36,8 +36,13 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   const tabId = sender.tab.id;
   const handle = async () => {
     switch (message.type) {
-      case 'ktv420:open-app':
-        return openApp(tabId, new URL(sender.url!).pathname.slice(1));
+      case 'ktv420:open-app': {
+        // sender.url can retain the document's initial URL after Spotify's SPA navigation.
+        const tab = await chrome.tabs.get(tabId);
+        if (!tab.url?.startsWith('https://open.spotify.com/'))
+          throw new Error('Spotify tab is unavailable.');
+        return openApp(tabId, new URL(tab.url).pathname.slice(1).replace(/\/$/, ''));
+      }
       case 'ktv420:cached':
         return (await pendingCaptures()).map((c) => c.metadata);
       case 'ktv420:capture-begin':

@@ -39,6 +39,12 @@ These are model startup/warm measurements for a small fixture, not full-song thr
 
 ## Remaining live acceptance checks
 
-The unpacked extension must be manually reloaded after installing 7.0.0, then Spotify refreshed. Browser automation cannot reload the extension itself. The new real Spotify → website connection, a complete two-song capture, website closure/reopening during a recording, and a full-song listening check have not yet been verified against that installed version. Simulated protocol/queue tests are not represented as live Spotify evidence.
+On 2026-10-30, the reloaded 7.0.0 extension captured all five songs in the real **short kings** Spotify playlist. The website automatically scheduled each song, received all five originals, separated them and showed all five as Ready. Capture and website error logs were empty during the run. The catalog reported **5 of 5 captured · 5 ready**, with artwork and titles present.
+
+A website refresh during processing retained the captures and resumed separation. Common Enemy opened paused at 00:00 / 00:16; clicking Play advanced its playback clock, then automatically advanced to The Kill. Playback was paused after verification. After closing Spotify, the catalog's direct website link still opened all five prepared tracks.
+
+The live run also exposed a launch bug after Spotify SPA navigation: Chrome's message sender URL could still describe the original home page. Version 7.0.1 reads the current tab URL instead, validates the Spotify origin, and has a regression test for playlist/album navigation and leaving Spotify. This patch requires one more extension reload; its regression test is automated, while the actual capture run used 7.0.0 after refreshing at the playlist URL. The complete suite now has 298 passing tests, with lint and both production builds passing.
+
+Closing every website tab during an active recording and reconnecting its queued delivery has not yet been exercised live. Durable queue/commit acknowledgment behavior is covered by the transaction tests. This run verified playback progression, not a subjective listening-quality or sample-by-sample comparison against a known Spotify reference signal.
 
 A roughly 3 GB playlist was not imported in this run. The existing streaming ZIP writer, per-song importer and bounded delivery remain; round-trip verification used a small real-audio fixture. Sustained full-song GPU inference while listening, other operating systems and Chrome Web Store review remain separate acceptance checks.
