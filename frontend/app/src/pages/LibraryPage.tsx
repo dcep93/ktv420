@@ -484,7 +484,7 @@ export default function LibraryPage() {
           <span className="iframe-track-state"><OverlayIcon name={icon} /></span>
           {artwork ? <img className="iframe-track-artwork" alt="" src={artwork} crossOrigin="anonymous" /> : <span className="iframe-track-artwork iframe-artwork-placeholder"><OverlayIcon name="music" /></span>}
           <span className="iframe-track-copy"><span className="iframe-track-name">{track.title}</span><span className="iframe-track-artist">{track.artist}</span></span>
-          <span className="iframe-track-status">{label}{staged?.progress && !ready && <small className="iframe-separation-detail">{staged.progress.message}</small>}</span>
+          <span className="iframe-track-status">{label}</span>
         </button></li>;
       })}
     </ol>}

@@ -95,7 +95,6 @@ export default function CapturePage() {
         const status = separation ? 'processing' : track?.status;
         const separating = !!separation || waiting.busy;
         const fraction = separation ? separation.fraction : track?.progress?.fraction ?? null;
-        const detail = separation?.progress.message || (waiting.busy ? track?.progress?.message : '');
         const current = capture.active && progress?.trackId === row.trackId && !status ? progress : null;
         const label = current ? current.phase === 'saving' ? 'Saving…' : `Capturing${current.fraction === null ? '' : ` ${Math.floor(current.fraction * 100)}%`}`
           : separation ? `${separationPhase(separation.progress)}${separation.fraction === null ? '' : ` ~${Math.round(separation.fraction * 100)}%`}` : waiting.label;
@@ -106,7 +105,7 @@ export default function CapturePage() {
           <span className="iframe-track-state"><OverlayIcon name={status === 'ready' ? 'play' : current || separation || waiting.busy ? 'processing' : waiting.failed ? 'alert' : 'clock'} /></span>
           {row.trackArtworkSrc ? <img className="iframe-track-artwork" alt="" src={row.trackArtworkSrc} /> : <span className="iframe-track-artwork iframe-artwork-placeholder"><OverlayIcon name="music" /></span>}
           <span className="iframe-track-copy"><span className="iframe-track-name">{row.trackName}</span><span className="iframe-track-artist">{row.trackArtist}</span></span>
-          <span className="iframe-track-status">{label}{detail && <small className="iframe-separation-detail">{detail}</small>}</span>
+          <span className="iframe-track-status">{label}</span>
         </button></li>;
       })}</ol>}
     </div>
