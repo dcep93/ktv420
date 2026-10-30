@@ -73,3 +73,24 @@ test('closing overlay cancels inference and releases its raw capture for website
   assert.ok((await pendingCaptures()).some(c => c.id === id));
   assert.ok(await claimCapture(id, 'website'));
 });
+test('failed separation identifies the song and releases it without reporting continued progress', async () => {
+  const released = deferred<void>();
+  const errors: [string, string | undefined][] = [];
+  const updates: unknown[] = [];
+  const stop = startStagedProcessing((error, id) => errors.push([error, id]), (id, progress) => updates.push([id, progress]), {
+    request: async <T>(operation: string): Promise<T> => {
+      if (operation === 'hello') return { stagedAudio: true } as T;
+      if (operation === 'work-pending') return [{ id: 'failure', metadata: { trackId: 'failedSong' } }] as T;
+      if (operation === 'work-claim') return 'token' as T;
+      if (operation === 'work-release') { released.resolve(); return undefined as T; }
+      throw new Error(operation);
+    },
+    createSeparator: () => ({ dispose() {}, async separateStereo() { throw new Error('unused'); } }),
+    process: async () => { throw new Error('GPU failed'); },
+  });
+  try {
+    await released.promise;
+    assert.deepEqual(errors, [['GPU failed', 'failedSong']]);
+    assert.deepEqual(updates.at(-1), ['failedSong', null]);
+  } finally { stop(); }
+});

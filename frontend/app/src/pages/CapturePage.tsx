@@ -1,3 +1,4 @@
+import { separationStatus, separationPhase } from '../features/local/separationStatus';
 import ExtensionAudioSettings from './ExtensionAudioSettings';
 import { capturePercentage } from '../features/local/capturePercentage';
 import { startStagedProcessing } from '../features/local/spotify/stagedProcessing';
@@ -12,6 +13,8 @@ import OverlayIcon from './OverlayIcon';
 export default function CapturePage() {
   const spotify = usePlaylist();
   const [error, setError] = useState(''), [settings, setSettings] = useState(false);
+  const [failures, setFailures] = useState<Record<string, string>>({});
+  const [retry, setRetry] = useState(0);
   const [processing, setProcessing] = useState<{ id: string; progress: SeparationProgress; fraction: number | null } | null>(null);
   const [processingEnabled, setProcessingEnabled] = useState(() => {
     try { return localStorage.getItem('ktv420:overlay-separation') !== 'paused'; } catch { return true; }
@@ -21,10 +24,17 @@ export default function CapturePage() {
   }, [processingEnabled]);
   useEffect(() => {
     if (!processingEnabled || !spotify.navigation.open) return;
-    return startStagedProcessing(setError, (id, progress) => setProcessing(previous => progress ? {
+    let disposed = false;
+    const stop = startStagedProcessing((message, id) => {
+      if (disposed) return;
+      setError(message);
+      if (id) setFailures(previous => ({ ...previous, [id]: message }));
+    }, (id, progress) => { if (!disposed) setProcessing(previous => progress ? {
       id, progress, fraction: nextSeparationFraction(previous?.id === id ? previous.fraction : null, progress),
-    } : null));
-  }, [processingEnabled, spotify.navigation.open]);
+    } : null); });
+    return () => { disposed = true; stop(); setProcessing(null); };
+  }, [processingEnabled, spotify.navigation.open, retry]);
+  const resume = () => { setError(''); setFailures({}); setProcessingEnabled(true); setRetry(value => value + 1); };
   const followed = useRef(-1);
   const saved = new Map(spotify.librarySummary.map(track => [track.id, track]));
   for (const id of spotify.savingTrackIds) {
@@ -62,7 +72,7 @@ export default function CapturePage() {
   const message = error || spotify.error || (!spotify.tracksComplete ? 'Loading playlist…' : '');
   return <main className="iframe-page iframe-page--overlay" aria-label="ktv420 capture playlist">
     <header className="iframe-overlay-header">
-      <div className="iframe-status-slot">{message && <p className="iframe-status-message" data-kind={error || spotify.error ? 'error' : 'notice'} role="status"><OverlayIcon name={error || spotify.error ? 'alert' : 'music'} /><span>{message}</span></p>}</div>
+      <div className="iframe-status-slot">{message && <p className="iframe-status-message" data-kind={error || spotify.error ? 'error' : 'notice'} role="status"><OverlayIcon name={error || spotify.error ? 'alert' : 'music'} /><span>{message}</span>{Object.keys(failures).length > 0 && <button onClick={resume}>Retry separation</button>}</p>}</div>
       <div className="iframe-actions-shell"><div className="iframe-actions">
         <button className="iframe-close-button" aria-label="Close" onClick={spotify.close}><OverlayIcon name="close" /></button>
         <button className="iframe-logo-button" aria-label={capture.active ? 'Stop capture' : allCaptured ? 'Open first track in ktv420' : 'Start capture'}
@@ -80,22 +90,25 @@ export default function CapturePage() {
       {settings ? <section className="iframe-settings-view" aria-label="Settings view"><section className="iframe-settings-source">
         <header className="iframe-settings-source-header"><h2>Capture</h2></header>
         <p className="iframe-settings-help">Volume changes what you hear, not the recording. Songs separate here as capture continues, then move into ktv420 when you open it.</p>
-        <button onClick={() => { setError(''); setProcessingEnabled(value => !value); }}>{processingEnabled ? 'Pause separation' : 'Resume separation'}</button>
+        <button onClick={() => { setError(''); if (processingEnabled) { setProcessing(null); setProcessingEnabled(false); } else resume(); }}>{processingEnabled ? 'Pause separation' : 'Resume separation'}</button>
+        {Object.keys(failures).length > 0 && <button onClick={resume}>Retry separation</button>}
         <button onClick={() => open(null)}>Open playlist in ktv420</button>
       </section><ExtensionAudioSettings capturing={capture.active} /></section> : <ol className="iframe-track-list" aria-label="Playlist tracks">{spotify.tracks.map(row => {
-        const separation = processing?.id === row.trackId ? processing : null;
-        const status = separation ? 'processing' : saved.get(`spotify-${row.trackId}`)?.status;
+        const separation = processingEnabled && processing?.id === row.trackId ? processing : null;
+        const track = saved.get(`spotify-${row.trackId}`);
+        const waiting = separationStatus(track, processingEnabled, failures[row.trackId]);
+        const status = separation ? 'processing' : track?.status;
         const current = capture.active && progress?.trackId === row.trackId && !status ? progress : null;
         const label = current ? current.phase === 'saving' ? 'Saving…' : `Capturing${current.fraction === null ? '' : ` ${Math.floor(current.fraction * 100)}%`}`
-          : separation ? `${separation.progress.phase === 'encoding' ? 'Saving MP3' : 'Separating'}${separation.fraction === null ? '' : ` ~${Math.round(separation.fraction * 100)}%`}` : status === 'ready' ? 'Ready' : status === 'processing' ? 'Separating' : status === 'error' ? 'Needs attention' : status ? 'Captured' : 'Not captured';
+          : separation ? `${separationPhase(separation.progress)}${separation.fraction === null ? '' : ` ~${Math.round(separation.fraction * 100)}%`}` : waiting.label;
         return <li key={`${row.trackId}-${row.rowIndex}`}><button className="iframe-track-row" data-state={status || 'missing'} data-progress={current ? 'capture' : separation ? 'separation' : undefined}
-          disabled={!status} aria-label={`${row.trackName} — ${label}`} title={separation?.progress.message || (status ? 'Open in ktv420' : label)} onClick={() => open(row.rowIndex + 1)}>
+          disabled={!status} aria-label={`${row.trackName} — ${label}`} title={separation?.progress.message || waiting.detail || label} onClick={() => open(row.rowIndex + 1)}>
           {separation && <span className="iframe-track-fill" data-indeterminate={separation.fraction === null} style={{ width: separation.fraction === null ? '35%' : `${separation.fraction * 100}%` }} aria-hidden="true" />}
           {current && <span className="iframe-track-fill" data-indeterminate={current.fraction === null} style={{ width: current.fraction === null ? '35%' : `${current.fraction * 100}%` }} aria-hidden="true" />}
-          <span className="iframe-track-state"><OverlayIcon name={status === 'ready' ? 'play' : current || status === 'processing' ? 'processing' : status === 'error' ? 'alert' : 'clock'} /></span>
+          <span className="iframe-track-state"><OverlayIcon name={status === 'ready' ? 'play' : current || separation || waiting.busy ? 'processing' : waiting.failed ? 'alert' : 'clock'} /></span>
           {row.trackArtworkSrc ? <img className="iframe-track-artwork" alt="" src={row.trackArtworkSrc} /> : <span className="iframe-track-artwork iframe-artwork-placeholder"><OverlayIcon name="music" /></span>}
           <span className="iframe-track-copy"><span className="iframe-track-name">{row.trackName}</span><span className="iframe-track-artist">{row.trackArtist}</span></span>
-          <span className="iframe-track-status">{label}</span>
+          <span className="iframe-track-status">{label}{separation && <small className="iframe-separation-detail">{separation.progress.message}</small>}</span>
         </button></li>;
       })}</ol>}
     </div>

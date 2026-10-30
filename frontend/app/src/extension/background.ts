@@ -44,7 +44,7 @@ async function request(message: unknown, tabId?: number) {
     case 'collections': return playerCollections();
     case 'library-summary': {
       const tracks = new Map((await readLibrarySummary()).map(t => [t.id, t]));
-      for (const t of await stagedSummary()) if (tracks.get(t.id)?.status !== 'ready') tracks.set(t.id, t);
+      for (const t of await stagedSummary()) if (tracks.get(t.id)?.status !== 'ready') tracks.set(t.id, { ...t, location: 'extension' });
       return [...tracks.values()];
     }
     case 'claim-capture': if (tabId !== undefined) throw new Error('Only the website imports audio.'); return claimCapture(String(r.id), 'website');

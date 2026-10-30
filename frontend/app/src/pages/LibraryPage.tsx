@@ -475,12 +475,12 @@ export default function LibraryPage() {
         const available = ready && !mp3Export.busy && !deletingAudio && (!recording || selected === track.id);
         const capture = spotify.captureProgress?.trackId === track.id.replace(/^spotify-/, '') ? spotify.captureProgress : null;
         const saving = capture?.phase === 'saving' || track.status === 'missing' && spotify.savingTrackIds.includes(track.id.replace(/^spotify-/, ''));
-        const separating = !ready && (active === track.id || track.status === 'processing');
+        const separating = !ready && (active === track.id || autoProcessing && track.status === 'processing');
         const progressKind = !ready && (capture || saving) ? 'capture' : separating ? 'separation' : undefined;
         const fraction = progressKind === 'capture' ? saving ? .99 : capture!.fraction : active === track.id ? separationFraction : null;
         const label = ready ? 'Ready' : saving ? 'Saving…' : progressKind === 'capture' ? `Capturing${fraction === null ? '' : ` ${Math.floor(fraction * 100)}%`}`
           : separating ? `${active === track.id && progress?.phase === 'encoding' ? 'Saving MP3' : active === track.id && progress?.phase === 'restoring' ? 'Restoring audio' : active === track.id && progress?.phase === 'resampling' ? 'Preparing audio' : 'Separating'}${fraction === null ? '' : ` ~${(fraction * 100).toFixed(1)}%`}`
-          : track.status === 'error' ? 'Failed' : track.status === 'missing' ? 'Not captured' : 'Queued';
+          : track.status === 'error' ? 'Failed' : track.status === 'missing' ? 'Not captured' : !autoProcessing ? 'Separation paused' : 'Queued';
         const icon = ready ? 'play' : track.status === 'error' ? 'alert' : progressKind ? 'processing' : 'clock';
         const artwork = (typeof track.metadata?.trackArtworkSrc === 'string' ? track.metadata.trackArtworkSrc : '') ||
           spotify.tracks.find(item => `spotify-${item.trackId}` === track.id)?.trackArtworkSrc || '';

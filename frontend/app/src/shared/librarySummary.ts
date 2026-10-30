@@ -1,5 +1,10 @@
 /** Metadata only: combine staged captures with the website library status. */
-export type LibrarySummary = { id: string; status: 'captured' | 'processing' | 'ready' | 'error' };
+export type LibrarySummary = {
+  id: string; status: 'captured' | 'processing' | 'ready' | 'error';
+  separation?: 'paused' | 'queued' | 'processing' | 'error';
+  location?: 'website' | 'extension';
+  updatedAt?: number;
+};
 export function parseLibrarySummary(value: unknown): LibrarySummary[] {
   if (!Array.isArray(value) || value.length > 10000) throw new Error('Invalid library summary.');
   const ids = new Set<string>();
@@ -8,6 +13,8 @@ export function parseLibrarySummary(value: unknown): LibrarySummary[] {
       !['captured', 'processing', 'ready', 'error'].includes(item.status) || ids.has(item.id))
       throw new Error('Invalid library summary.');
     ids.add(item.id);
-    return { id: item.id, status: item.status };
+    if (item.separation !== undefined && !['paused', 'queued', 'processing', 'error'].includes(item.separation))
+      throw new Error('Invalid library summary.');
+    return { id: item.id, status: item.status, ...(item.separation ? { separation: item.separation } : {}) };
   });
 }

@@ -10,7 +10,7 @@ import type { SeparationProgress } from '../inference/types';
 
 /** No audio is stored in the hosted iframe's partitioned IndexedDB. */
 type Worker = Pick<LocalSeparator, 'separateStereo' | 'dispose'>;
-export function startStagedProcessing(onError: (error: string) => void, onProgress: (id: string, progress: SeparationProgress | null) => void,
+export function startStagedProcessing(onError: (error: string, trackId?: string) => void, onProgress: (id: string, progress: SeparationProgress | null) => void,
   dependencies: { request?: typeof spotifyRequest; createSeparator?: () => Worker; process?: typeof processLocalTrack } = {}) {
   const request = dependencies.request || spotifyRequest;
   const createSeparator = dependencies.createSeparator || (() => new LocalSeparator({ backend: 'gpu' in navigator ? 'webgpu' : 'wasm' }));
@@ -30,27 +30,29 @@ export function startStagedProcessing(onError: (error: string) => void, onProgre
         attempted.add(capture.id);
         let lost = false, finishing = false, latest: SeparationProgress | null = null, touchedAt = Date.now(), renewing = false;
         const args = { id: capture.id, token };
-        const worker = createSeparator();
-        separator = worker;
+        let worker: Worker | undefined;
         const renew = () => {
           if (renewing || stopped || lost || finishing) return;
           renewing = true; touchedAt = Date.now();
           void request('work-touch', { ...args, ...(latest ? { progress: { fraction: latest.fraction, message: latest.message } } : {}) }).catch(error => {
             if (finishing) return;
-            lost = true; worker.dispose(); if (!stopped) onError(String(error));
+            lost = true; worker?.dispose(); if (!stopped) onError(String(error), String(capture.metadata.trackId));
           }).finally(() => { renewing = false; });
         };
         const heartbeat = setInterval(renew, 10000);
         try {
+          worker = createSeparator(); separator = worker;
           await process(`spotify-${capture.metadata.trackId}`, separator, () => stopped || lost,
             progress => { latest = progress; onProgress(String(capture.metadata.trackId), progress); if (Date.now() - touchedAt > 5000) renew(); }, {
               setTrackStatus: async () => {}, // The exclusive claim represents processing; final commit represents ready.
               getInput: async () => {
+                onProgress(String(capture.metadata.trackId), { phase: 'loading', fraction: 0, message: 'Reading captured audio…' });
                 const parts: Blob[] = []; let bytes = 0;
                 for (let index = 0; index < capture.nextChunk; index++) {
                   if (stopped || lost) throw new Error('Separation paused.');
                   const chunk = decodeChunk(await request<string>('work-chunk', { ...args, index }));
                   parts.push(new Blob([chunk])); bytes += chunk.length;
+                  onProgress(String(capture.metadata.trackId), { phase: 'loading', fraction: bytes / capture.expectedBytes, message: `Reading captured audio · ${Math.round(bytes / capture.expectedBytes * 100)}%` });
                 }
                 if (bytes !== capture.expectedBytes) throw new Error('Incomplete recording.');
                 return new Blob([wavHeader(capture), ...parts], { type: 'audio/wav' });
@@ -68,17 +70,21 @@ export function startStagedProcessing(onError: (error: string) => void, onProgre
                 const p: PreparedAudio = { id: capture.id, capture, metadata, encoding, files: [] };
                 for (const { name, blob } of blobs) p.files.push({ name, bytes: blob.size, sha256: await sha256(blob), type: name === 'artwork' ? blob.type : 'audio/mpeg' });
                 await request('work-begin', { ...args, manifest: p });
+                const totalBytes = blobs.reduce((total, file) => total + file.blob.size, 0); let savedBytes = 0;
                 for (const { name, blob } of blobs) for (let index = 0; index < Math.ceil(blob.size / CHUNK_BYTES); index++) {
                   if (stopped || lost) throw new Error('Separation paused.');
                   await request('work-append', { ...args, name, index, base64: await encodeBlobChunk(blob, index) });
+                  savedBytes += Math.min(CHUNK_BYTES, blob.size - index * CHUNK_BYTES);
+                  onProgress(String(capture.metadata.trackId), { phase: 'encoding', fraction: 1, message: `Saving stems · ${Math.round(savedBytes / totalBytes * 100)}%` });
                 }
                 finishing = true;
+                onProgress(String(capture.metadata.trackId), { phase: 'encoding', fraction: 1, message: 'Verifying saved stems…' });
                 await request('work-finish', args);
               },
             });
-        } catch (error) { if (!stopped && !lost) onError(error instanceof Error ? error.message : String(error)); }
+        } catch (error) { if (!stopped && !lost) onError(error instanceof Error ? error.message : String(error), String(capture.metadata.trackId)); }
         finally {
-          clearInterval(heartbeat); worker.dispose(); if (separator === worker) separator = undefined;
+          clearInterval(heartbeat); worker?.dispose(); if (separator === worker) separator = undefined;
           onProgress(String(capture.metadata.trackId), null);
           await request('work-release', args).catch(() => {});
         }

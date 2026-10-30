@@ -126,3 +126,12 @@ test('playlist handoff persists membership without new audio and stale acknowled
   await acknowledgePlayerCollection(path, next.handoffId);
   assert.equal((await playerCollections() as unknown[]).length, 0);
 });
+
+test('published separation state has relay-assigned freshness and website ownership', async () => {
+  const before = Date.now();
+  await publishLibrarySummary([{ id: 'spotify-pausedSong', status: 'captured', separation: 'paused', updatedAt: 1 }]);
+  const row = (await readLibrarySummary()).find(t => t.id === 'spotify-pausedSong')!;
+  assert.equal(row.separation, 'paused');
+  assert.equal(row.location, 'website');
+  assert.ok(row.updatedAt! >= before);
+});

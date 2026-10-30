@@ -194,7 +194,7 @@ export function publishLibrarySummary(value: unknown) {
   return queueTransaction(['library'], 'readwrite', tx => {
     const store = tx.objectStore('library');
     store.clear();
-    for (const track of tracks) store.put(track, track.id);
+    for (const track of tracks) store.put({ ...track, ...(track.separation ? { updatedAt: Date.now(), location: 'website' } : {}) }, track.id);
   });
 }
 export async function readLibrarySummary(): Promise<LibrarySummary[]> {

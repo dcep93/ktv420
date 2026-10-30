@@ -97,7 +97,10 @@ export default function AppServices() {
     const publish = async () => {
       try {
         const { spotifyRequest } = await import('../features/local/spotify/client');
-        const tracks = (await listTracks()).filter(t => t.source === 'spotify').map(({ id, status }) => ({ id, status }));
+        const enabled = await getProcessingEnabled();
+        const tracks = (await listTracks()).filter(t => t.source === 'spotify').map(({ id, status }) => ({ id, status,
+          ...(status !== 'ready' ? { separation: status === 'error' ? 'error' : !enabled ? 'paused' : status === 'processing' ? 'processing' : 'queued' } : {}),
+        }));
         await spotifyRequest('publish-library', { tracks });
       } catch { /* Capture extension is optional. */ }
     };
