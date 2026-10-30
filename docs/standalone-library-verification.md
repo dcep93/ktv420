@@ -58,3 +58,12 @@ Auto-open exposed a startup discovery race: an incomplete initial Spotify render
 **Shared-library acceptance failed.** The first live capture saved Common Enemy in the overlay. Opening the standalone catalog during delivery received The Kill into a different library, and the overlay reported `Capture delivery transaction failed.` The standalone player showed Common Enemy as not captured and The Kill ready; the overlay showed the inverse. Host permissions alone did not provide shared storage/locks in this nested-frame arrangement. No storage-access permission prompt has been added; the user rejected that approach.
 
 At the user's request, a normal recapture was run through the overlay's central k button after closing the temporary standalone test player. It skipped the already-ready Common Enemy, captured the remaining four songs, advanced normally, and separated all five songs to Ready. No delivery failure appeared during this run. A subsequent standalone catalog check still showed only 1 of 5 captured / 1 ready. Recapture therefore verifies the overlay capture path but does not resolve library sharing. The overlay was closed to pause Spotify, then reopened and left displaying all five Ready songs with playback paused. No existing audio was deleted.
+
+
+## Capture-only overlay (7.2.0)
+
+The Spotify overlay now renders a dedicated capture page and never mounts the mixer. Song clicks, the all-captured logo action and indexed links open top-level ktv420. The website is the sole delivery receiver and audio owner; the extension rejects overlay chunk reads and acknowledgments. Capture scheduling waits for the durable queue commit, not for website delivery/separation. Website status is cached as metadata only for overlay labels and skip decisions. No extra permissions or storage-access prompt are introduced. Existing isolated overlay recordings remain untouched and can be recaptured.
+
+The Spotify launcher and app logo use the same opaque pink 2 px border. Redundant fullscreen permissions/attributes were removed from both capture frames.
+
+Automated validation covers source-bound player URLs, refusal of audio delivery to the overlay, summary validation, queued-to-committed-to-ready status, deletion propagation, plus the existing capture and import tests. Lint and production builds pass. Live 7.2.0 capture-to-website verification requires reloading the installed extension; the preceding live test results apply to 7.1.0.

@@ -1,4 +1,4 @@
-// This packaged frame supplies the storage-partition exemption and a narrow,
+// This packaged frame supplies a narrow,
 // sender-bound relay. The hosted app never receives a Chrome tab ID or API object.
 const APP = 'https://ktv420.web.app';
 const SPOTIFY = 'https://open.spotify.com';

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 type Listener = Parameters<typeof chrome.runtime.onMessage.addListener>[0];
 let listener: Listener, external: Listener;
 let currentUrl = 'https://open.spotify.com/playlist/1wOJr3rvMmPRPnyFBA7n3Z';
+const opened: string[] = [];
 const delivered: { tabId: number; message: Record<string, unknown>; frameId: number }[] = [];
 const extensionId = 'abcdefghijklmnopabcdefghijklmnop';
 const host = `chrome-extension://${extensionId}/src/overlay/index.html`;
@@ -17,6 +18,7 @@ globalThis.chrome = {
   },
   action: { onClicked: { addListener: () => {} } },
   tabs: {
+    create: async ({ url }: { url: string }) => { opened.push(url); return { id: 8 }; },
     get: async () => ({ id: 7, url: currentUrl }),
     sendMessage: async (tabId: number, message: Record<string, unknown>, options: { frameId: number }) => {
       delivered.push({ tabId, message, ...options });
@@ -58,4 +60,29 @@ test('website and Spotify pages cannot impersonate the packaged overlay or choos
   assert.equal((await call(request, { ...sender, url: 'https://ktv420.web.app/', frameId: 0 }, external)).ok, false);
   assert.equal((await call({ ...request, operation: 'hello' }, { ...sender, url: 'https://ktv420.web.app/', frameId: 0 }, external)).ok, true);
   assert.equal(delivered.length, 2);
+});
+
+test('capture frame cannot receive or acknowledge audio or replace website status', async () => {
+  for (const operation of ['pending', 'chunk', 'ack', 'publish-library']) {
+    const result = await call({ type: 'ktv420:overlay-request', request: {
+      ...request, operation, id: '11111111-1111-1111-1111-111111111111', index: 0, tracks: [],
+    } });
+    assert.equal(result.ok, false);
+  }
+});
+test('track handoff opens a one-based website link, never an embedded player or arbitrary URL', async () => {
+  currentUrl = 'https://open.spotify.com/playlist/1wOJr3rvMmPRPnyFBA7n3Z';
+  const handoff = { ...request, operation: 'open-player', path: 'playlist/1wOJr3rvMmPRPnyFBA7n3Z', trackIndex: 2 };
+  assert.equal((await call({ type: 'ktv420:overlay-request', request: handoff })).ok, true);
+  const url = new URL(opened.at(-1)!);
+  assert.equal(url.origin, 'https://ktv420.web.app');
+  assert.equal(url.pathname, '/playlist');
+  assert.equal(url.searchParams.get('id'), 'playlist.1wOJr3rvMmPRPnyFBA7n3Z');
+  assert.equal(url.searchParams.get('ktv420'), '2');
+  assert.equal(url.searchParams.has('spotifyTab'), false);
+  assert.equal(url.searchParams.has('autoplay'), false);
+  assert.equal(url.searchParams.get('extension'), extensionId);
+  assert.equal((await call({ type: 'ktv420:overlay-request', request: { ...handoff, path: 'album/19cvoEE5d3pMkxLFL5TsAG' } })).ok, false);
+  assert.equal((await call(handoff, { ...sender, url: 'https://ktv420.web.app/', frameId: 0 }, external)).ok, false);
+  assert.equal(opened.length, 1);
 });

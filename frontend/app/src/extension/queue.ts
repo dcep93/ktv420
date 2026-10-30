@@ -1,3 +1,4 @@
+import { parseLibrarySummary, type LibrarySummary } from '../shared/librarySummary';
 import { decodeChunk, validateCapture, type QueuedCapture } from '../shared/captureFormat';
 /** Temporary delivery storage only. Old extension databases are never opened or deleted. */
 export const QUEUE_DB = 'ktv420-capture-delivery-v1';
@@ -7,8 +8,10 @@ export async function queueTransaction<T>(
   run: (tx: IDBTransaction, done: (value: T) => void) => void,
 ): Promise<T> {
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
-    const r = indexedDB.open(QUEUE_DB, 1);
+    const r = indexedDB.open(QUEUE_DB, 2);
     r.onupgradeneeded = () => {
+      if (!r.result.objectStoreNames.contains('library')) r.result.createObjectStore('library');
+      if (r.result.objectStoreNames.contains('captures')) return;
       r.result.createObjectStore('captures', { keyPath: 'id' });
       r.result
         .createObjectStore('chunks', { keyPath: 'key' })
@@ -152,7 +155,7 @@ export function readChunk(id: string, index: number): Promise<string> {
   });
 }
 export function acknowledgeCapture(id: string) {
-  return queueTransaction(['captures', 'chunks'], 'readwrite', (tx) => {
+  return queueTransaction(['captures', 'chunks', 'library'], 'readwrite', (tx) => {
     const r = tx.objectStore('captures').get(id);
     r.onsuccess = () => {
       if (!r.result) return;
@@ -160,6 +163,9 @@ export function acknowledgeCapture(id: string) {
         tx.abort();
         return;
       }
+      const trackId = `spotify-${r.result.metadata.trackId}`;
+      const library = tx.objectStore('library'), previous = library.get(trackId);
+      previous.onsuccess = () => { if (!previous.result) library.put({ id: trackId, status: 'captured' }, trackId); };
       tx.objectStore('captures').delete(id);
       const cursor = tx.objectStore('chunks').index('captureId').openCursor(id);
       cursor.onsuccess = () => {
@@ -171,4 +177,24 @@ export function acknowledgeCapture(id: string) {
       };
     };
   });
+}
+
+export function publishLibrarySummary(value: unknown) {
+  const tracks = parseLibrarySummary(value);
+  return queueTransaction(['library'], 'readwrite', tx => {
+    const store = tx.objectStore('library');
+    store.clear();
+    for (const track of tracks) store.put(track, track.id);
+  });
+}
+export async function readLibrarySummary(): Promise<LibrarySummary[]> {
+  const saved = await queueTransaction<LibrarySummary[]>(['library'], 'readonly', (tx, done) => {
+    const r = tx.objectStore('library').getAll(); r.onsuccess = () => done(r.result);
+  });
+  const tracks = new Map(saved.map(track => [track.id, track]));
+  for (const capture of await pendingCaptures()) {
+    const id = `spotify-${capture.metadata.trackId}`;
+    if (!tracks.has(id)) tracks.set(id, { id, status: 'captured' });
+  }
+  return [...tracks.values()];
 }

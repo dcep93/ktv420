@@ -9,6 +9,8 @@ import {
   readChunk,
   acknowledgeCapture,
   queueTransaction,
+  publishLibrarySummary,
+  readLibrarySummary,
 } from './queue';
 import { parseRequest, websiteSender } from './protocol';
 const metadata = {
@@ -85,4 +87,24 @@ test('only the exact top-level website origin and bounded explicit v1 operations
     { ...base, operation: 'chunk', id: crypto.randomUUID(), index: -1 },
   ])
     assert.throws(() => parseRequest(bad));
+});
+
+test('capture metadata bridges delivery and website processing without a second audio library', async () => {
+  await publishLibrarySummary([]);
+  const id = await beginCapture(77, { ...metadata, trackId: 'summarySong' }, 16);
+  await appendCapture(77, id, 0, bytes);
+  await finishCapture(77, id);
+  assert.deepEqual((await readLibrarySummary()).find(t => t.id === 'spotify-summarySong'), { id: 'spotify-summarySong', status: 'captured' });
+  await acknowledgeCapture(id);
+  assert.deepEqual((await readLibrarySummary()).find(t => t.id === 'spotify-summarySong'), { id: 'spotify-summarySong', status: 'captured' });
+  await publishLibrarySummary([{ id: 'spotify-summarySong', status: 'ready', audio: 'must not be stored' }]);
+  assert.deepEqual(await readLibrarySummary(), [{ id: 'spotify-summarySong', status: 'ready' }]);
+  await publishLibrarySummary([]); // Website deletion clears the status cache too.
+  assert.deepEqual(await readLibrarySummary(), []);
+});
+test('library summary validation rejects malformed IDs, duplicate rows and unknown status', async () => {
+  for (const value of [[{ id: '../secret', status: 'ready' }], [{ id: 'spotify-a', status: 'anything' }],
+    [{ id: 'spotify-a', status: 'ready' }, { id: 'spotify-a', status: 'captured' }]]) {
+    assert.throws(() => parseRequest({ protocol: 'ktv420-spotify', version: 1, operation: 'publish-library', tracks: value }), /Invalid library summary/);
+  }
 });

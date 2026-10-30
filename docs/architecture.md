@@ -16,23 +16,31 @@ flowchart LR
   Library --> Mixer[Mixer, replay, effects + visualizers]
 ```
 
-On Spotify, a packaged extension frame embeds the hosted app as a full-window overlay. Its narrow relay derives the Spotify tab from Chrome’s sender information; no tab ID is exposed in a URL. The design assumed the extension host-permission exemption would share storage with the standalone website. Native Chrome testing on October 30 disproved that assumption for this nested Spotify → extension → website frame: the overlay and standalone page saw different tracks, and their delivery locks did not coordinate. Sharing one library without an additional permission prompt remains unresolved. Do not treat the two views as a single storage partition. The frame does not own or broker the music library. `/` and `/catalog` render the catalog; `/playlist` renders the existing playlist and mixer directly. `/transfer` and `/replay` also work without the extension.
+On Spotify, a packaged extension frame embeds the hosted capture playlist as a full-window overlay. Its narrow relay derives the Spotify tab from Chrome’s sender information; no tab ID is exposed in a URL. It never mounts the mixer, receives audio chunks, or performs separation. Track clicks and indexed Spotify links open the corresponding top-level ktv420 playlist/track, paused.
+
+The top-level website is the only receiver and owner of audio. Captures remain in the extension’s durable queue until a website transaction commits them. The overlay can schedule the next song immediately after the extension queues the previous one, even if the website is closed. Website pages publish bounded metadata-only captured/processing/ready summaries to the extension; the overlay combines those with queued captures to render progress. It does not require cross-site storage access, an extra permission prompt, or shared iframe storage. Files left in the old overlay partition are ignored, not deleted or migrated; recapture is supported.
+
+`/` and `/catalog` render the catalog; `/playlist` renders the standalone playlist and mixer. `/transfer` and `/replay` work without the extension.
 
 ## Ownership and updates
 
 | Website deployment | Extension release |
 | --- | --- |
-| Library, catalog, import/export, capture order, processing, mixer, effects, visuals and replay | Spotify DOM selectors/discovery, precise capture, temporary delivery storage and versioned operations |
+| Library, catalog, import/export, capture order, processing, mixer, effects, visuals and replay | Spotify DOM selectors/discovery, precise capture, temporary delivery storage, website status metadata and versioned operations |
 
 The website’s fresh `ktv420-web-library-v1` IndexedDB database contains tracks, audio Blobs, collections, settings, incoming delivery chunks and commit receipts. Per-song MP3 commits replace raw audio atomically; imported files and metadata commit with collection membership. Processing status remains recoverable from raw input when a worker/tab closes. A website Web Lock excludes competing separation and import/deletion commits. Performance recordings and analysis/model caches remain website-local.
 
-The extension’s new `ktv420-capture-delivery-v1` database contains only temporary capture manifests and chunks. Previous extension library/state databases are untouched and never opened. Completed queue entries have no automatic expiry. Starting a new capture may clear unfinished staging for that same Spotify tab, but never completed recordings awaiting acknowledgment.
+The extension’s new `ktv420-capture-delivery-v1` database contains temporary capture manifests/chunks and a metadata-only website status cache (schema version 2). Previous extension library/state databases are untouched and never opened. Completed queue entries have no automatic expiry. Starting a new capture may clear unfinished staging for that same Spotify tab, but never completed recordings awaiting acknowledgment.
 
 ## Protocol and scheduling
 
 `ktv420-spotify`, version 1, is a new protocol. `chrome.runtime.sendMessage` connects a top-level `https://ktv420.web.app` document for delivery operations only. The overlay app uses an origin/source-validated postMessage relay through its packaged parent. The worker accepts Spotify commands only from that extension frame in the enclosing Spotify tab, rejects client-supplied tab IDs, and validates versions, IDs/indexes/volumes and operations:
 
 - `hello`: protocol/extension version.
+- `library-summary`: captured/ready metadata plus pending deliveries; no audio.
+- `publish-library`: replace status metadata; top-level website only.
+- `open-player`: open a website playlist/index matching the bound Spotify route.
+- `pending`/`chunk`/`ack`: top-level website only; the capture frame cannot consume or acknowledge audio.
 - `discover`, `status`: an identified Spotify tab’s collection and capture state.
 - `capture`: one track ID, request UUID and collection path. Retrying the same request reports its status rather than starting another recording.
 - `cancel`, `volume`: stop the active primitive or adjust monitoring gain.

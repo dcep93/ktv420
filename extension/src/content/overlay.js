@@ -24,7 +24,7 @@ export function createOverlay({ onClose }) {
       frame?.remove(); ready = false; route = location.pathname;
       frame = document.createElement('iframe');
       frame.id = 'ktv420-spotify-overlay';
-      frame.title = 'ktv420'; frame.allow = 'autoplay; fullscreen'; frame.allowFullscreen = true;
+      frame.title = 'ktv420'; frame.allow = 'autoplay';
       Object.assign(frame.style, { position: 'fixed', inset: '0', width: '100%', height: '100%', border: '0', zIndex: '2147483647', background: '#100c09', colorScheme: 'dark' });
       const url = new URL(chrome.runtime.getURL('src/overlay/index.html'));
       url.searchParams.set('id', route.slice(1).replace(/\/$/, '').replace('/', '.'));

@@ -4,7 +4,7 @@ import type { usePlaylist } from './usePlaylist';
 import type { LocalTrack } from './library';
 type Options = {
   spotify: ReturnType<typeof usePlaylist>;
-  tracks: LocalTrack[];
+  tracks: Pick<LocalTrack, 'id'>[];
   libraryReady: boolean;
   required: { id: string }[];
   replaying: boolean;

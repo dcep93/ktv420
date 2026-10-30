@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { savedCollection, rememberCollection, type TrackRow } from './collections';
+import { savedCollection, type TrackRow } from './collections';
 import { playlistPath, playlistIndex, playlistViewUrl } from './playlistPage';
 import { spotifyRequest } from './spotify/client';
 import { embeddedSpotify, overlayReady } from './spotify/overlay';
 import { drainDeliveries } from './spotify/delivery';
-import { getTrack } from './library';
+import type { LibrarySummary } from '../../shared/librarySummary';
 import { loadPerformance } from './performanceFiles';
 import type { PerformanceRecording } from './recording';
 import type { CaptureProgress } from './captureProgress';
@@ -31,6 +31,8 @@ export function usePlaylist(onClose?: () => void) {
     revision: 0,
   });
   const [replay, setReplay] = useState<PerformanceRecording | null>(null);
+  const [librarySummary, setLibrarySummary] = useState<LibrarySummary[]>([]);
+  const [summaryReady, setSummaryReady] = useState(false);
   const cancelled = useRef(false),
     closeRef = useRef(onClose);
   closeRef.current = onClose;
@@ -45,9 +47,13 @@ export function usePlaylist(onClose?: () => void) {
           const snapshot = await discoverPlaylist(path,
             () => spotifyRequest<PlaylistSnapshot>('discover'), () => disposed);
           if (!snapshot) return;
-          await rememberCollection(snapshot.collection, snapshot.tracks);
+          // The overlay holds metadata only; the website registers delivered captures.
           collection = { ...snapshot.collection, tracks: snapshot.tracks };
-        } else collection = await savedCollection(path);
+        } else {
+          // Await any other website receiver before resolving a newly captured collection.
+          await drainDeliveries(undefined, true).catch(() => {});
+          collection = await savedCollection(path);
+        }
         if (!disposed) {
           setTracks(collection.tracks);
           setComplete(true);
@@ -57,7 +63,8 @@ export function usePlaylist(onClose?: () => void) {
       } catch (reason) {
         if (!disposed) {
           setError(reason instanceof Error ? reason.message : String(reason));
-          // An unavailable capture connection must never block already saved music.
+          // The capture frame must never consult its isolated audio database.
+          if (embeddedSpotify) return;
           try {
             const c = await savedCollection(path);
             setTracks(c.tracks);
@@ -69,7 +76,7 @@ export function usePlaylist(onClose?: () => void) {
       }
     };
     void load();
-    if (params.has('replay'))
+    if (!embeddedSpotify && params.has('replay'))
       void loadPerformance('import').then((value) => {
         if (!disposed) setReplay(value);
       });
@@ -95,7 +102,12 @@ export function usePlaylist(onClose?: () => void) {
       try {
         const next = await spotifyRequest<Status>('status');
         if (!disposed) setStatus(next);
-        await drainDeliveries();
+        const summary = await spotifyRequest<LibrarySummary[]>('library-summary');
+        if (!disposed) {
+          setLibrarySummary(summary); setSummaryReady(true);
+          const ids = new Set(summary.map(track => track.id.replace(/^spotify-/, '')));
+          setSavingTrackIds(previous => previous.filter(id => !ids.has(id)));
+        }
       } catch (reason) {
         if (!disposed) setError(reason instanceof Error ? reason.message : String(reason));
       } finally {
@@ -150,11 +162,7 @@ export function usePlaylist(onClose?: () => void) {
       if (next.request.state === 'error') throw new Error(next.request.error);
       if (next.request.state === 'complete') {
         setSavingTrackIds((previous) => [...new Set([...previous, trackId])]);
-        do {
-          await drainDeliveries();
-          if (await getTrack(`spotify-${trackId}`)) return;
-          await delay(500);
-        } while (!cancelled.current);
+        return;
       }
       await delay(1000);
     }
@@ -176,6 +184,9 @@ export function usePlaylist(onClose?: () => void) {
   }, []);
   return {
     tracks,
+    librarySummary,
+    summaryReady,
+    openPlayer: (trackIndex: number | null) => spotifyRequest('open-player', { path, trackIndex }),
     tracksComplete: complete,
     error,
     notice: '',

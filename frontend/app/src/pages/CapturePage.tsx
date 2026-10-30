@@ -1,0 +1,81 @@
+import { useEffect, useRef, useState } from 'react';
+import { usePlaylist } from '../features/local/usePlaylist';
+import { useHostedCapture } from '../features/local/useHostedCapture';
+import OverlayIcon from './OverlayIcon';
+
+/** The Spotify frame never opens audio storage or mounts the mixer. */
+export default function CapturePage() {
+  const spotify = usePlaylist();
+  const [error, setError] = useState(''), [settings, setSettings] = useState(false), [localVolume, setVolume] = useState<number | null>(null);
+  const followed = useRef(-1);
+  const saved = new Map(spotify.librarySummary.map(track => [track.id, track]));
+  for (const id of spotify.savingTrackIds) {
+    if (!saved.has(`spotify-${id}`)) saved.set(`spotify-${id}`, { id: `spotify-${id}`, status: 'captured' });
+  }
+  const capture = useHostedCapture({ spotify, tracks: [...saved.values()], libraryReady: spotify.summaryReady,
+    required: [], replaying: false, onError: setError });
+  const allCaptured = spotify.tracks.length > 0 && spotify.tracks.every(row => saved.has(`spotify-${row.trackId}`));
+  const canStart = spotify.summaryReady && spotify.tracksComplete && spotify.tracks.length > 0;
+  const open = (index: number | null) => { void spotify.openPlayer(index).catch(reason => setError(String(reason.message || reason))); };
+  const volume = localVolume ?? spotify.captureVolume ?? 1;
+  useEffect(() => {
+    const n = spotify.navigation;
+    if (!n.open || n.trackIndex === null || followed.current === n.revision || !spotify.tracksComplete) return;
+    followed.current = n.revision;
+    if (spotify.tracks.some(row => row.rowIndex + 1 === n.trackIndex))
+      void spotify.openPlayer(n.trackIndex).catch(reason => setError(String(reason.message || reason)));
+    spotify.setView(null, n.revision, true);
+  }, [spotify]);
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); spotify.close(); }
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, [spotify]);
+  const progress = spotify.captureProgress;
+  const completed = spotify.tracks.filter(row => saved.has(`spotify-${row.trackId}`)).length;
+  useEffect(() => {
+    if (capture.active && spotify.tracks.length)
+      document.title = `${Math.min(99, Math.floor(100 * (completed + (progress?.fraction || 0)) / spotify.tracks.length))}% · ktv420`;
+    else if (allCaptured) document.title = 'ktv420';
+  }, [capture.active, spotify.tracks.length, completed, progress?.fraction, allCaptured]);
+  const message = error || spotify.error || (!spotify.tracksComplete ? 'Loading playlist…' : '');
+  return <main className="iframe-page iframe-page--overlay" aria-label="ktv420 capture playlist">
+    <header className="iframe-overlay-header">
+      <div className="iframe-status-slot">{message && <p className="iframe-status-message" data-kind={error || spotify.error ? 'error' : 'notice'} role="status"><OverlayIcon name={error || spotify.error ? 'alert' : 'music'} /><span>{message}</span></p>}</div>
+      <div className="iframe-actions-shell"><div className="iframe-actions">
+        <button className="iframe-close-button" aria-label="Close" onClick={spotify.close}><OverlayIcon name="close" /></button>
+        <button className="iframe-logo-button" aria-label={capture.active ? 'Stop capture' : allCaptured ? 'Open first track in ktv420' : 'Start capture'}
+          title={capture.active ? 'Stop capture' : allCaptured ? 'Open first track in ktv420' : 'Start capture'}
+          disabled={!capture.active && !canStart} aria-pressed={capture.active}
+          onClick={() => capture.active ? capture.cancel() : allCaptured ? open(1) : capture.toggle()}><img alt="" src={`${import.meta.env.BASE_URL}favicon.svg`} /></button>
+        <button className="iframe-settings-button" aria-label="Toggle settings view" aria-pressed={settings} onClick={() => setSettings(!settings)}><OverlayIcon name="settings" /></button>
+      </div><label className="iframe-master-volume"><span>Volume <output>{Math.round(volume * 100)}%</output></span>
+        <input type="range" min="0" max="1" step="0.01" aria-label="Listening volume" value={volume}
+          onChange={event => { const next = Number(event.target.value); setVolume(next); spotify.transport({ action: 'volume', volume: next }); }} />
+        <small>{capture.active ? 'Capture' : 'Muted'}</small>
+      </label></div>
+    </header>
+    <div className="iframe-content">
+      {settings ? <section className="iframe-settings-view" aria-label="Settings view"><section className="iframe-settings-source">
+        <header className="iframe-settings-source-header"><h2>Capture</h2></header>
+        <p className="iframe-settings-help">Volume changes what you hear, not the recording. Separation and playback run in ktv420.</p>
+        <button onClick={() => open(null)}>Open playlist in ktv420</button>
+      </section></section> : <ol className="iframe-track-list" aria-label="Playlist tracks">{spotify.tracks.map(row => {
+        const status = saved.get(`spotify-${row.trackId}`)?.status;
+        const current = capture.active && progress?.trackId === row.trackId && !status ? progress : null;
+        const label = current ? current.phase === 'saving' ? 'Saving…' : `Capturing${current.fraction === null ? '' : ` ${Math.floor(current.fraction * 100)}%`}`
+          : status === 'ready' ? 'Ready' : status === 'processing' ? 'Separating' : status === 'error' ? 'Needs attention' : status ? 'Captured' : 'Not captured';
+        return <li key={`${row.trackId}-${row.rowIndex}`}><button className="iframe-track-row" data-state={status || 'missing'} data-progress={current ? 'capture' : undefined}
+          disabled={!status} aria-label={`${row.trackName} — ${label}`} title={status ? 'Open in ktv420' : label} onClick={() => open(row.rowIndex + 1)}>
+          {current && <span className="iframe-track-fill" data-indeterminate={current.fraction === null} style={{ width: current.fraction === null ? '35%' : `${current.fraction * 100}%` }} aria-hidden="true" />}
+          <span className="iframe-track-state"><OverlayIcon name={status === 'ready' ? 'play' : current || status === 'processing' ? 'processing' : status === 'error' ? 'alert' : 'clock'} /></span>
+          {row.trackArtworkSrc ? <img className="iframe-track-artwork" alt="" src={row.trackArtworkSrc} /> : <span className="iframe-track-artwork iframe-artwork-placeholder"><OverlayIcon name="music" /></span>}
+          <span className="iframe-track-copy"><span className="iframe-track-name">{row.trackName}</span><span className="iframe-track-artist">{row.trackArtist}</span></span>
+          <span className="iframe-track-status">{label}</span>
+        </button></li>;
+      })}</ol>}
+    </div>
+  </main>;
+}

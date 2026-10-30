@@ -76,7 +76,7 @@ async function discover() {
   if (location.pathname.slice(1).replace(/\/$/, '') !== path)
     throw new Error('Spotify changed pages during discovery.');
   tracks = serialRows(rows);
-  collection = { path, ...header(), trackIds: tracks.map((t) => t.trackId), complete };
+  collection = { path, ...header(), trackIds: tracks.map((t) => t.trackId), tracks, complete };
   return { collection, tracks, complete };
 }
 async function monitor(value) {
@@ -207,7 +207,7 @@ icon.alt = 'k';
 icon.width = 32;
 icon.height = 32;
 button.append(icon);
-Object.assign(button.style, { background: 'transparent', border: '0', cursor: 'pointer' });
+Object.assign(button.style, { background: '#100c09', border: '2px solid #ff7bc3', borderRadius: '50%', width: '40px', height: '40px', padding: '2px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxSizing: 'border-box' });
 button.onclick = () => overlay.show();
 setInterval(() => {
   const parent = document.querySelector(SELECTORS.spotifyLogo)?.closest('a')?.parentElement;

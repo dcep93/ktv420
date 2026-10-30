@@ -394,7 +394,7 @@
   position: relative;
   width: 64px;
   height: 64px;
-  border: 1px solid rgba(255, 123, 195, 0.65);
+  border: 2px solid var(--ww-title-pink);
   border-radius: 50%;
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.16);
 }

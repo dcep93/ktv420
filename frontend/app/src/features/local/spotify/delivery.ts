@@ -2,6 +2,7 @@ import { transaction, type LocalTrack } from '../library';
 import { parseCollection } from '../savedCollections';
 import { decodeChunk, validateCapture, type QueuedCapture } from '../../../shared/captureFormat';
 import { spotifyRequest } from './client';
+import { embeddedSpotify } from './overlay';
 
 type Stage = { id: string; nextChunk: number; receivedBytes: number; expectedBytes: number };
 function wavHeader(capture: QueuedCapture) {
@@ -111,6 +112,12 @@ export async function receiveCapture(capture: QueuedCapture, request = spotifyRe
     collection = parseCollection(rawCollection);
   if (!collection || !collection.trackIds.includes(String(metadata.trackId)))
     throw new Error('Captured song has no valid collection.');
+  const rows = (rawCollection as { tracks?: unknown }).tracks;
+  const validRows = Array.isArray(rows) && rows.length === collection.trackIds.length && rows.every((row, i) =>
+    row?.trackId === collection.trackIds[i] && row.rowIndex === i &&
+    typeof row.trackName === 'string' && row.trackName.length <= 500 &&
+    typeof row.trackArtist === 'string' && row.trackArtist.length <= 500 &&
+    typeof row.trackArtworkSrc === 'string' && row.trackArtworkSrc.length <= 4096);
   const id = `spotify-${metadata.trackId}`;
   await transaction(
     ['tracks', 'audio', 'collections', 'receipts', 'captures', 'chunks'],
@@ -143,8 +150,9 @@ export async function receiveCapture(capture: QueuedCapture, request = spotifyRe
       const store = tx.objectStore('collections'),
         existing = store.get(collection.path);
       existing.onsuccess = () => {
-        if (!existing.result)
-          store.put({ ...collection, startedAt: Date.now(), savedAt: Date.now() });
+        store.put({ ...existing.result, ...collection,
+          tracks: validRows ? rows.map(({ trackId, trackName, trackArtist, trackArtworkSrc, rowIndex }) => ({ trackId, trackName, trackArtist, trackArtworkSrc, rowIndex })) : existing.result?.tracks,
+          startedAt: existing.result?.startedAt ?? Date.now(), savedAt: existing.result?.savedAt ?? Date.now() });
       };
       tx.objectStore('receipts').put({ id: capture.id, trackId: id });
       tx.objectStore('captures').delete(capture.id);
@@ -154,8 +162,9 @@ export async function receiveCapture(capture: QueuedCapture, request = spotifyRe
   // No acknowledgment before the transaction above has completed successfully.
   await request('ack', { id: capture.id });
 }
-export async function drainDeliveries(request = spotifyRequest) {
-  return navigator.locks.request('ktv420-delivery', { ifAvailable: true }, async (lock) => {
+export async function drainDeliveries(request = spotifyRequest, wait = false) {
+  if (embeddedSpotify) return;
+  return navigator.locks.request('ktv420-delivery', { ifAvailable: !wait }, async (lock) => {
     if (!lock) return;
     for (const capture of await request<QueuedCapture[]>('pending'))
       await receiveCapture(capture, request);

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { embeddedSpotify } from '../features/local/spotify/overlay';
 import { drainDeliveries } from '../features/local/spotify/delivery';
 import {
   getProcessingEnabled,
@@ -13,6 +14,7 @@ import { drainSpotifyQueue } from '../features/local/spotifyQueue';
 export default function AppServices() {
   const [notice, setNotice] = useState('');
   useEffect(() => {
+    if (embeddedSpotify) return;
     let cancelled = false,
       busy = false,
       processingCancelled = false,
@@ -91,11 +93,21 @@ export default function AppServices() {
         busy = false;
       }
     };
+    const publish = async () => {
+      try {
+        const { spotifyRequest } = await import('../features/local/spotify/client');
+        const tracks = (await listTracks()).filter(t => t.source === 'spotify').map(({ id, status }) => ({ id, status }));
+        await spotifyRequest('publish-library', { tracks });
+      } catch { /* Capture extension is optional. */ }
+    };
+    void publish();
+    const summaryTimer = setInterval(() => void publish(), 2500);
     void tick();
     const timer = setInterval(() => void tick(), 3000);
     return () => {
       cancelled = true;
       clearInterval(timer);
+      clearInterval(summaryTimer);
       separator?.dispose();
     };
   }, []);

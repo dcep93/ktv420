@@ -6,18 +6,34 @@ import {
   pendingCaptures,
   readChunk,
   acknowledgeCapture,
+  readLibrarySummary,
+  publishLibrarySummary,
 } from './queue';
 async function request(message: unknown, tabId?: number) {
   const r = parseRequest(message);
   switch (r.operation) {
     case 'hello': return { version: 1, extensionVersion: chrome.runtime.getManifest().version, extensionId: chrome.runtime.id };
-    case 'pending': return pendingCaptures();
-    case 'chunk': return readChunk(String(r.id), Number(r.index));
-    case 'ack': return acknowledgeCapture(String(r.id));
+    case 'library-summary': return readLibrarySummary();
+    case 'publish-library': {
+      if (tabId !== undefined) throw new Error('Only the standalone website publishes library status.');
+      return publishLibrarySummary(r.tracks);
+    }
+    case 'pending': { if (tabId !== undefined) throw new Error('Open ktv420 to receive audio.'); return pendingCaptures(); }
+    case 'chunk': if (tabId !== undefined) throw new Error('Open ktv420 to receive audio.'); return readChunk(String(r.id), Number(r.index));
+    case 'ack': if (tabId !== undefined) throw new Error('Open ktv420 to receive audio.'); return acknowledgeCapture(String(r.id));
     default: {
       if (tabId === undefined) throw new Error('Open ktv420 over a Spotify playlist to capture.');
       const tab = await chrome.tabs.get(tabId);
       if (!tab.url?.startsWith('https://open.spotify.com/')) throw new Error('Spotify tab is unavailable.');
+      if (r.operation === 'open-player') {
+        if (new URL(tab.url).pathname.replace(/\/$/, '').slice(1) !== r.path) throw new Error('Spotify changed playlists.');
+        const url = new URL('/playlist', APP_ORIGIN);
+        url.searchParams.set('id', String(r.path).replace('/', '.'));
+        if (r.trackIndex !== null) url.searchParams.set('ktv420', String(r.trackIndex));
+        url.searchParams.set('extension', chrome.runtime.id);
+        await chrome.tabs.create({ url: url.href });
+        return;
+      }
       const response = await chrome.tabs.sendMessage(tabId, { type: 'ktv420:command', ...r }, { frameId: 0 });
       if (!response?.ok) throw new Error(response?.error || 'Reload Spotify.');
       return response.result;

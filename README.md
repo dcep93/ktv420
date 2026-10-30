@@ -2,12 +2,12 @@
 
 [Open ktv420](https://ktv420.web.app) to import a playlist, listen, remix and visualize music locally. The website owns your audio library. **No extension is needed for imported music.**
 
-The optional [Chrome extension](https://chromewebstore.google.com/detail/ktv420/kmkbecinmhkfihahalgclomhcicmoiia) captures Spotify. Click **k** to open the full hosted playlist/player as an iframe overlay over Spotify. Known issue in 7.1.0: Chrome currently separates the overlay library from the standalone website library. See [live verification](docs/standalone-library-verification.md#overlay-restoration-710).
+The optional [Chrome extension](https://chromewebstore.google.com/detail/ktv420/kmkbecinmhkfihahalgclomhcicmoiia) captures Spotify. Click **k** to open the full hosted capture playlist as an iframe overlay over Spotify. Song links open the mixer on ktv420.web.app. The overlay never receives or separates audio; the top-level website owns the single playback library.
 
 ## Getting started
 
 - **Import:** Catalog → Import playlist → ZIP or extracted folder. Open the imported playlist, then a prepared song. Entering a track starts paused; track endings advance normally.
-- **Capture:** install extension 7.1.0, reload Spotify, open a playlist/album, click **k** to open the overlay, then click its central **k**. The website chooses missing songs; Spotify records one at a time. Monitor volume does not change captured samples.
+- **Capture:** install extension 7.2.0, reload Spotify, open a playlist/album, click **k** to open the overlay, then click its central **k**. The overlay chooses missing songs; Spotify records one at a time. Open a captured song to receive and separate it on ktv420. An already-open website receives captures automatically. Monitor volume does not change captured samples.
 - **Share:** Catalog → Export → Save ZIP. Upload to Dropbox yourself. Your friend downloads and imports the ZIP or extracted folder. No Dropbox integration, extension, model download or separation is needed for imported prepared audio.
 - **Replay:** `/replay` accepts a recorded mix JSON. Import the required playlist audio, then open the recording in the website mixer. Export MP3 renders the performance locally.
 
@@ -23,7 +23,7 @@ Old extension databases are neither opened nor automatically deleted. Removing t
 
 The website owns catalog, audio, capture scheduling, separation, encoding, playback, effects, visualizers, recording and import/export. Audio stays on the computer; there is no audio-processing backend, Cloud Run service or GCS audio store. Firebase Hosting serves static app files. Pinned model weights download as data.
 
-The extension owns Spotify discovery, DOM transport, precise Float32 capture and a temporary durable delivery queue. Completed recordings survive website closure. The website pulls bounded 256 KiB chunks with backpressure and resumes after interruption. The extension deletes a recording only after the website acknowledges its committed IndexedDB input. Closing the website stops scheduling additional songs; it does not discard the current completed capture.
+The extension owns Spotify discovery, DOM transport, precise Float32 capture, a temporary durable delivery queue and a metadata-only cache of the website’s captured/ready status. Completed recordings survive website closure. The website pulls bounded 256 KiB chunks with backpressure and resumes after interruption. The extension deletes a recording only after the website acknowledges its committed IndexedDB input. Closing the website stops scheduling additional songs; it does not discard the current completed capture.
 
 Separation resumes from stored raw inputs after reopening. Browser Web Locks coordinate separation, import and deletion. The existing Demucs model, WebGPU worker and MP3 worker remain. Supported GPU devices use explicitly requested WebGPU; initialization failure is visible rather than silently switching the entire job to CPU. The settings page provides a CPU/WASM option.
 
