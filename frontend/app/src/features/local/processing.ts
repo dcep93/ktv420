@@ -16,8 +16,10 @@ export async function processLocalTrack(id: string, separator: Separator,
     if (cancelled()) return;
     const input = await storage.getInput(id);
     if (cancelled()) return;
+    onProgress({ phase: 'loading', fraction: 0, message: 'Reading recording into memory…' });
     const bytes = await input.arrayBuffer();
     if (cancelled()) return;
+    onProgress({ phase: 'loading', fraction: 0, message: 'Decoding recorded audio…' });
     const original = decodeWav(bytes);
     const result = await separator.separateStereo(original, onProgress);
     if (cancelled()) return;

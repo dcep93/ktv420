@@ -33,6 +33,7 @@ test('cache access failures do not prevent the network path or break cache statu
   try {
     for (const mock of cases) {
       let requested = false
+      const activity: string[] = []
       Object.defineProperty(globalThis, 'caches', { configurable: true, value: mock })
       globalThis.fetch = async (url, options) => {
         requested = true
@@ -40,8 +41,11 @@ test('cache access failures do not prevent the network path or break cache statu
         assert.equal(options?.credentials, 'omit')
         throw new Error('Network path reached')
       }
-      await assert.rejects(loadModelBytes(() => undefined), /Network path reached/)
+      await assert.rejects(loadModelBytes(() => undefined, { onActivity: message => activity.push(message) }), /Network path reached/)
       assert.equal(requested, true)
+      assert.equal(activity[0], 'Checking cached model…')
+      assert.equal(activity.at(-1), 'Connecting to model download…')
+      if (mock === cases[3]) assert.ok(activity.includes('Verifying cached model…'))
     }
     Object.defineProperty(globalThis, 'caches', { configurable: true, value: { open: fail } })
     assert.equal(await getModelCacheStatus(), false)

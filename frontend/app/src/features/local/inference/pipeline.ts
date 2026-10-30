@@ -4,7 +4,7 @@ import { MODEL } from './model.ts'
 import { STEM_NAMES, type ProgressCallback, type StemAudio } from './types.ts'
 import { conditionAudio, restoreConditioning } from './conditioning.ts'
 
-export type RunSegment = (channelFirst: Float32Array, frames: number) => Promise<Float32Array>
+export type RunSegment = (channelFirst: Float32Array, frames: number, reportStep: (step: string) => void) => Promise<Float32Array>
 
 /** Positive triangle endpoints prevent losing sample zero and the final input sample. */
 export function transitionWindow(frames: number): Float64Array {
@@ -47,7 +47,9 @@ export async function separateWithRunner(
     packed.set(audio.right.subarray(start, start + count), segmentFrames)
     // Report the operation in flight without claiming unfinished samples as done.
     onProgress({ phase: 'separating', fraction: chunk / chunks, chunk, totalChunks: chunks, message: `Separating segment ${chunk + 1} of ${chunks}` })
-    const separated = await runSegment(packed, segmentFrames)
+    const separated = await runSegment(packed, segmentFrames, step => {
+      onProgress({ phase: 'separating', fraction: chunk / chunks, chunk, totalChunks: chunks, message: `${step} · segment ${chunk + 1} of ${chunks}` })
+    })
     if (!(separated instanceof Float32Array) || separated.length !== segmentFrames * 8) {
       throw new Error('The model returned an unexpected four-stem tensor.')
     }

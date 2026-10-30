@@ -18,10 +18,11 @@ async function getSession(request: WorkerRequest, progress: ProgressCallback): P
   // Extension pages need not be cross-origin isolated; one thread always works.
   ort.env.wasm.numThreads = 1
   ort.env.wasm.proxy = false
-  const bytes = await loadModelBytes(fraction => progress({ phase: 'download', fraction, message: `Downloading and verifying Float32 model (${Math.round(fraction * 100)}%)` }))
+  const bytes = await loadModelBytes(fraction => progress({ phase: 'download', fraction, message: `Downloading model (${Math.round(fraction * 100)}%)` }),
+    { onActivity: message => progress({ phase: 'loading', fraction: 0, message }) })
   const useGpu = request.backend !== 'wasm' && 'gpu' in navigator
   if (request.backend === 'webgpu' && !useGpu) throw new Error('WebGPU is unavailable in this browser.')
-  progress({ phase: 'loading', fraction: 0, message: useGpu ? 'Preparing local WebGPU inference' : 'Preparing local WASM inference' })
+  progress({ phase: 'loading', fraction: 0, message: useGpu ? 'Initializing GPU model…' : 'Initializing CPU model…' })
   try {
     session = await ort.InferenceSession.create(bytes, {
       executionProviders: useGpu ? ['webgpu', 'wasm'] : ['wasm'],
@@ -55,18 +56,21 @@ scope.onmessage = async ({ data: request }) => {
   const progress: ProgressCallback = value => scope.postMessage({ id: request.id, type: 'progress', progress: value })
   try {
     const activeSession = await getSession(request, progress)
-    const stems = await separateWithRunner(request.audio, async (samples, frames) => {
+    const stems = await separateWithRunner(request.audio, async (samples, frames, reportStep) => {
+      reportStep('Preparing frequency input')
       const prepared = prepareModelInput(samples.subarray(0, frames), samples.subarray(frames))
       const tensor = new ort.Tensor('float32', samples, [1, 2, frames])
       const spectrogram = new ort.Tensor('float32', prepared.magSpec, [1, 4, MODEL_SPEC_BINS, MODEL_SPEC_FRAMES])
       let result: ort.InferenceSession.ReturnType | undefined
       try {
+        reportStep(backend.startsWith('WebGPU') ? 'Running GPU model' : 'Running CPU model')
         result = await activeSession.run({ input: tensor, x: spectrogram })
         const time = result.add_67, frequency = result.output
         if (time.type !== 'float32' || time.dims.join(',') !== `1,4,2,${frames}` || !(time.data instanceof Float32Array)
           || frequency.type !== 'float32' || frequency.dims.join(',') !== `1,4,4,${MODEL_SPEC_BINS},${MODEL_SPEC_FRAMES}` || !(frequency.data instanceof Float32Array)) {
           throw new Error('The model returned an invalid output layout.')
         }
+        reportStep('Reconstructing stems')
         return reconstructStems(time.data, frequency.data)
       } finally {
         tensor.dispose()

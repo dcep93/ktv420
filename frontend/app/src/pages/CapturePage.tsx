@@ -1,4 +1,4 @@
-import { separationStatus, separationPhase } from '../features/local/separationStatus';
+import { separationStatus, separationProgressLabel } from '../features/local/separationStatus';
 import ExtensionAudioSettings from './ExtensionAudioSettings';
 import { capturePercentage } from '../features/local/capturePercentage';
 import { startStagedProcessing } from '../features/local/spotify/stagedProcessing';
@@ -13,6 +13,7 @@ import OverlayIcon from './OverlayIcon';
 export default function CapturePage() {
   const spotify = usePlaylist();
   const [error, setError] = useState(''), [settings, setSettings] = useState(false);
+  const [startup, setStartup] = useState('');
   const [failures, setFailures] = useState<Record<string, string>>({});
   const [retry, setRetry] = useState(0);
   const [processing, setProcessing] = useState<{ id: string; progress: SeparationProgress; fraction: number | null } | null>(null);
@@ -26,8 +27,8 @@ export default function CapturePage() {
       if (id) setFailures(previous => ({ ...previous, [id]: message }));
     }, (id, progress) => { if (!disposed) setProcessing(previous => progress ? {
       id, progress, fraction: nextSeparationFraction(previous?.id === id ? previous.fraction : null, progress),
-    } : null); });
-    return () => { disposed = true; stop(); setProcessing(null); };
+    } : null); }, {}, message => { if (!disposed) setStartup(message); });
+    return () => { disposed = true; stop(); setProcessing(null); setStartup(''); };
   }, [processingEnabled, spotify.navigation.open, retry]);
   const resume = () => { void spotify.configureQueue(true, true).then(() => { setError(''); setFailures({}); setRetry(value => value + 1); }).catch(reason => setError(String(reason))); };
   const followed = useRef(-1);
@@ -64,7 +65,7 @@ export default function CapturePage() {
       document.title = `${Math.min(99, percentage)}% · ktv420`;
     else if (allCaptured) document.title = 'ktv420';
   }, [capture.active, spotify.tracks.length, percentage, allCaptured]);
-  const message = error || spotify.error || (!spotify.tracksComplete ? 'Loading playlist…' : '');
+  const message = error || spotify.error || (!spotify.tracksComplete ? 'Loading playlist…' : startup);
   return <main className="iframe-page iframe-page--overlay" aria-label="ktv420 capture playlist">
     <header className="iframe-overlay-header">
       <div className="iframe-status-slot">{message && <p className="iframe-status-message" data-kind={error || spotify.error ? 'error' : 'notice'} role="status"><OverlayIcon name={error || spotify.error ? 'alert' : 'music'} /><span>{message}</span>{(Object.keys(failures).length > 0 || spotify.librarySummary.some(track => track.status === 'error' && track.location === 'extension')) && <button onClick={resume}>Retry separation</button>}</p>}</div>
@@ -97,7 +98,7 @@ export default function CapturePage() {
         const fraction = separation ? separation.fraction : track?.progress?.fraction ?? null;
         const current = capture.active && progress?.trackId === row.trackId && !status ? progress : null;
         const label = current ? current.phase === 'saving' ? 'Saving…' : `Capturing${current.fraction === null ? '' : ` ${Math.floor(current.fraction * 100)}%`}`
-          : separation ? `${separationPhase(separation.progress)}${separation.fraction === null ? '' : ` ~${Math.round(separation.fraction * 100)}%`}` : waiting.label;
+          : separation ? separationProgressLabel(separation.progress.message, separation.fraction) : waiting.label;
         return <li key={`${row.trackId}-${row.rowIndex}`}><button className="iframe-track-row" data-state={status || 'missing'} data-progress={current ? 'capture' : separating ? 'separation' : undefined}
           disabled={!status} aria-label={`${row.trackName} — ${label}`} title={separation?.progress.message || waiting.detail || label} onClick={() => open(row.rowIndex + 1)}>
           {separating && <span className="iframe-track-fill" data-indeterminate={fraction === null} style={{ width: fraction === null ? '35%' : `${fraction * 100}%` }} aria-hidden="true" />}

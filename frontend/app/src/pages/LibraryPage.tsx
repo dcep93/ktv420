@@ -1,4 +1,4 @@
-import { separationStatus } from '../features/local/separationStatus';
+import { separationStatus, separationProgressLabel } from '../features/local/separationStatus';
 import { libraryChanges } from '../features/local/libraryChanges';
 import { missingTrackLabel } from '../features/local/missingTrackLabel';
 import { useSpacePlayback } from '../features/local/useSpacePlayback';
@@ -474,7 +474,7 @@ export default function LibraryPage() {
         const progressKind = !ready && (capture || saving) ? 'capture' : separating ? 'separation' : undefined;
         const fraction = progressKind === 'capture' ? saving ? .99 : capture!.fraction : active === track.id ? separationFraction : staged?.progress?.fraction ?? null;
         const label = ready ? 'Ready' : staged ? staged.status === 'ready' ? 'Importing finished stems…' : queueStatus!.label : saving ? 'Saving…' : progressKind === 'capture' ? `Capturing${fraction === null ? '' : ` ${Math.floor(fraction * 100)}%`}`
-          : separating ? `${active === track.id && progress?.phase === 'encoding' ? 'Saving MP3' : active === track.id && progress?.phase === 'restoring' ? 'Restoring audio' : active === track.id && progress?.phase === 'resampling' ? 'Preparing audio' : 'Separating'}${fraction === null ? '' : ` ~${(fraction * 100).toFixed(1)}%`}`
+          : separating ? separationProgressLabel(progress?.message || 'Starting separation worker', fraction)
           : track.status === 'error' ? 'Failed' : track.status === 'missing' ? missingTrackLabel(libraryReady, spotify.summaryReady, spotify.librarySummary.find(row => row.id === track.id)) : !autoProcessing ? 'Separation paused' : 'Queued';
         const icon = ready ? 'play' : track.status === 'error' || queueStatus?.failed ? 'alert' : progressKind ? 'processing' : 'clock';
         const artwork = (typeof track.metadata?.trackArtworkSrc === 'string' ? track.metadata.trackArtworkSrc : '') ||

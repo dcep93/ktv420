@@ -10,6 +10,36 @@ import { encodeBlobChunk } from '../../../shared/preparedAudio';
 import type { SeparationResult } from '../inference/types';
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
 
+test('startup and a blocked model initialization publish their actual stage immediately', async () => {
+  const entered = deferred<void>(), finish = deferred<void>(), released = deferred<void>();
+  const startup: string[] = [], remote: string[] = [];
+  const stop = startStagedProcessing(error => assert.fail(error), () => {}, {
+    request: async <T>(op: string, args: Record<string, unknown> = {}): Promise<T> => {
+      if (op === 'hello') return { stagedAudio: true, extensionQueue: true, workRecovery: true } as T;
+      if (op === 'work-recover') return undefined as T;
+      if (op === 'work-state') return { enabled: true, backend: 'auto' } as T;
+      if (op === 'work-pending') return [{ id: 'status', metadata: { trackId: 'statusSong' } }] as T;
+      if (op === 'work-claim') return 'token' as T;
+      if (op === 'work-touch') { remote.push((args.progress as { message: string }).message); return undefined as T; }
+      if (op === 'work-release') { released.resolve(); return undefined as T; }
+      throw Error(op);
+    },
+    createSeparator: () => ({ dispose() {}, separateStereo: async () => { throw Error('unused'); } }),
+    process: async (_id, _separator, _cancelled, report) => {
+      report({ phase: 'loading', fraction: 0, message: 'Initializing GPU model…' });
+      entered.resolve(); await finish.promise;
+    },
+  }, message => startup.push(message));
+  try {
+    await entered.promise; await new Promise(resolve => setImmediate(resolve));
+    assert.ok(startup.includes('Recovering interrupted separation…'));
+    assert.ok(startup.includes('Checking saved recordings…'));
+    assert.equal(startup.at(-1), '');
+    assert.equal(remote[0], 'Starting separation worker…');
+    assert.equal(remote.at(-1), 'Initializing GPU model…');
+  } finally { stop(); finish.resolve(); await released.promise; }
+});
+
 test('startup heals before claiming, and a stopped page releases a late claim without starting inference', async () => {
   const entered = deferred<void>(), claim = deferred<string>(), released = deferred<void>();
   const calls: string[] = [];
@@ -81,6 +111,7 @@ test('closing overlay cancels inference and releases its raw capture for website
     request: async <T>(op: string, args: Record<string, unknown> = {}): Promise<T> => {
       switch (op) {
         case 'hello': return { stagedAudio: true } as T;
+        case 'work-touch': return undefined as T;
         case 'work-pending': return (await pendingCaptures()).filter(c => c.id === id) as T;
         case 'work-claim': return await claimCapture(id, 91) as T;
         case 'work-chunk': return await readChunk(id, Number(args.index), String(args.token)) as T;
@@ -102,6 +133,7 @@ test('failed separation identifies the song and releases it without reporting co
   const stop = startStagedProcessing((error, id) => errors.push([error, id]), (id, progress) => updates.push([id, progress]), {
     request: async <T>(operation: string): Promise<T> => {
       if (operation === 'hello') return { stagedAudio: true } as T;
+      if (operation === 'work-touch') return undefined as T;
       if (operation === 'work-pending') return [{ id: 'failure', metadata: { trackId: 'failedSong' } }] as T;
       if (operation === 'work-claim') return 'token' as T;
       if (operation === 'work-release') { released.resolve(); return undefined as T; }
@@ -122,6 +154,7 @@ test('shared queue worker respects pause and resumes without a website-owned raw
   const stop = startStagedProcessing(() => {}, () => {}, {
     request: async <T>(op: string): Promise<T> => {
       if (op === 'hello') return { stagedAudio: true, extensionQueue: true } as T;
+      if (op === 'work-touch') return undefined as T;
       if (op === 'work-state') { polls++; return { enabled, backend: 'auto' } as T; }
       if (op === 'work-pending') return (saved ? [] : [{ id: 'shared', metadata: { trackId: 'sharedSong' } }]) as T;
       if (op === 'work-claim') { claimed++; return 'token' as T; }

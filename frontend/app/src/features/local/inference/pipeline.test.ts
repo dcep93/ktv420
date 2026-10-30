@@ -3,6 +3,20 @@ import assert from 'node:assert/strict'
 import { separateWithRunner } from './pipeline.ts'
 import { STEM_NAMES, type SeparationProgress } from './types.ts'
 
+test('segment substeps are reported without claiming unfinished audio as completed', async () => {
+  const progress: SeparationProgress[] = []
+  const audio = { left: new Float32Array(25), right: new Float32Array(25), sampleRate: 44100 }
+  await separateWithRunner(audio, async (_packed, frames, reportStep) => {
+    reportStep('Preparing frequency input')
+    reportStep('Running GPU model')
+    reportStep('Reconstructing stems')
+    return new Float32Array(frames * 8)
+  }, value => progress.push(value), 32, false)
+  const running = progress.filter(p => p.message.startsWith('Running GPU'))
+  assert.deepEqual(running.map(p => p.message), ['Running GPU model · segment 1 of 2', 'Running GPU model · segment 2 of 2'])
+  assert.deepEqual(running.map(p => p.fraction), [0, .5])
+})
+
 test('overlap-add preserves endpoints, seams, stereo order and arbitrary tail length', async () => {
   for (const length of [1, 7, 23, 24, 31, 32, 33, 48, 65, 97]) {
     const left = Float32Array.from({ length }, (_, i) => i % 3 === 0 ? 2.125 : -0.375)

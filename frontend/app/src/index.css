@@ -913,7 +913,7 @@
 .iframe-track-row[data-state="processing"] .iframe-track-state { color: var(--ww-accent-cyan); }
 .iframe-track-row[data-progress] .iframe-track-state .overlay-icon { animation: overlay-spin 1.6s linear infinite; }
 .iframe-track-row[data-state="error"] .iframe-track-state { color: var(--ww-danger); }
-.iframe-track-status { color: var(--ww-text-muted); font-size: 11px; white-space: nowrap; }
+.iframe-track-status { color: var(--ww-text-muted); font-size: 11px; max-width: min(32vw, 30rem); white-space: normal; text-align: right; line-height: 1.4; }
 .iframe-track-row[data-state="ready"] .iframe-track-status { color: var(--ww-accent-cyan); }
 .iframe-track-artwork { display: block; border-radius: 8px; width: 48px; height: 48px; object-fit: cover; }
 .iframe-artwork-placeholder { display: flex; align-items: center; justify-content: center; color: var(--ww-accent-cyan); background: var(--ww-audio-bg); }

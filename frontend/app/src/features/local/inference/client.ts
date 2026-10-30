@@ -23,6 +23,7 @@ export class LocalSeparator {
     validateStereo(audio)
     if (!audio.left.length) return Promise.reject(new Error('The recording is empty.'))
     if (this.pending) return Promise.reject(new Error('A separation is already in progress.'))
+    onProgress?.({ phase: 'loading', fraction: 0, message: 'Starting separation worker…' })
     if (!this.worker) {
       this.worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' })
       this.worker.onmessage = ({ data }: MessageEvent<WorkerResponse>) => {
