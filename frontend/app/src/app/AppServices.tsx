@@ -15,6 +15,7 @@ export default function AppServices() {
   useEffect(() => {
     let cancelled = false,
       busy = false,
+      processingCancelled = false,
       separator: LocalSeparator | null = null;
     void requestPersistence()
       .then((persistent) => {
@@ -25,7 +26,19 @@ export default function AppServices() {
       })
       .catch(() => {});
     const tick = async () => {
-      if (busy) return;
+      if (busy) {
+        // A settings page can pause the worker owned by a different website tab.
+        const current = separator;
+        if (current) {
+          try {
+            if (!(await getProcessingEnabled()) && separator === current) {
+              processingCancelled = true;
+              current.dispose();
+            }
+          } catch { /* The active operation reports storage failures. */ }
+        }
+        return;
+      }
       busy = true;
       try {
         // A missing extension is normal. Only surface delivery failures after a successful hello.
@@ -50,16 +63,17 @@ export default function AppServices() {
         if (location.pathname !== '/playlist' && (await getProcessingEnabled()) && !cancelled)
           await withProcessingLock(async (acquired) => {
             if (!acquired || cancelled) return;
+            processingCancelled = false;
             separator = new LocalSeparator({ backend: 'gpu' in navigator ? 'webgpu' : 'wasm' });
             try {
               await drainSpotifyQueue({
                 list: listTracks,
-                cancelled: () => cancelled,
+                cancelled: () => cancelled || processingCancelled,
                 process: (id) =>
                   processLocalTrack(
                     id,
                     separator!,
-                    () => cancelled,
+                    () => cancelled || processingCancelled,
                     () => {},
                   ),
                 onError: (reason) => {
