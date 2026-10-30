@@ -83,7 +83,8 @@ export class CaptureOrchestrator extends EventTarget {
       if (this.tearingDown) throw new DOMException('Spotify page is closing.', 'AbortError');
       const report={...debug,failedAt:new Date().toISOString(),error:serializeError(error),mediaSession:this.bridge.getSnapshot().mediaSession};
       try {window.sessionStorage.setItem('ktv420:last-capture-failure',JSON.stringify(report));}catch{/* retain console evidence */}
-      console.warn(`[ktv420] Capture failed: ${report.error.message}`);
+      // Keep diagnostics without turning expected interruptions into Chrome's
+      // extension-error entries. The overlay still receives genuine failures.
       console.debug('[ktv420] Capture diagnostic', report);
       throw error;
     } finally {

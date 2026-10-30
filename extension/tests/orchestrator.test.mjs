@@ -124,6 +124,7 @@ test('the last capture failure survives refresh and unavailable diagnostic stora
   mockPage(t);
   const warnings = t.mock.method(console, 'warn', () => {});
   const diagnostics = t.mock.method(console, 'debug', () => {});
+  const errors = t.mock.method(console, 'error', () => {});
   const stored = new Map();
   window.sessionStorage = { setItem: (key, value) => stored.set(key, value) };
   const runner = new CaptureOrchestrator({ bridge: { command: async () => ({}), getSnapshot: () => ({}) } });
@@ -138,11 +139,14 @@ test('the last capture failure survives refresh and unavailable diagnostic stora
   assert.equal(report.phase, 'recording');
   assert.equal(report.trackName, 'Unwritten');
   assert.equal(report.recentMediaStates[0].previousPosition, 100);
-  assert.deepEqual(warnings.mock.calls[0].arguments, ['[ktv420] Capture failed: Original capture failure']);
+  assert.equal(warnings.mock.callCount(), 0);
+  assert.equal(errors.mock.callCount(), 0);
   assert.equal(diagnostics.mock.calls[0].arguments[0], '[ktv420] Capture diagnostic');
   assert.deepEqual(JSON.parse(JSON.stringify(diagnostics.mock.calls[0].arguments[1])), report);
   window.sessionStorage.setItem = () => { throw Error('Storage unavailable'); };
   await assert.rejects(runner.run({trackIds:[item.trackId],trackSnapshot:[item]}), /Original capture failure/);
+  assert.equal(warnings.mock.callCount(), 0);
+  assert.equal(errors.mock.callCount(), 0);
 });
 
 
