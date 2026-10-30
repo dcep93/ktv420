@@ -1,3 +1,4 @@
+import { capturePercentage } from '../features/local/capturePercentage';
 import { startStagedProcessing } from '../features/local/spotify/stagedProcessing';
 import { nextSeparationFraction } from '../features/local/rowProgress';
 import type { SeparationProgress } from '../features/local/inference/types';
@@ -50,12 +51,13 @@ export default function CapturePage() {
     return () => window.removeEventListener('keydown', key);
   }, [spotify]);
   const progress = spotify.captureProgress;
-  const completed = spotify.tracks.filter(row => saved.has(`spotify-${row.trackId}`)).length;
+  const percentage = capturePercentage(spotify.tracks.map(row => row.trackId),
+    new Set([...saved.keys()].map(id => id.replace(/^spotify-/, ''))), progress);
   useEffect(() => {
     if (capture.active && spotify.tracks.length)
-      document.title = `${Math.min(99, Math.floor(100 * (completed + (progress?.fraction || 0)) / spotify.tracks.length))}% · ktv420`;
+      document.title = `${Math.min(99, percentage)}% · ktv420`;
     else if (allCaptured) document.title = 'ktv420';
-  }, [capture.active, spotify.tracks.length, completed, progress?.fraction, allCaptured]);
+  }, [capture.active, spotify.tracks.length, percentage, allCaptured]);
   const message = error || spotify.error || (!spotify.tracksComplete ? 'Loading playlist…' : '');
   return <main className="iframe-page iframe-page--overlay" aria-label="ktv420 capture playlist">
     <header className="iframe-overlay-header">

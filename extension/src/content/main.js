@@ -19,7 +19,7 @@ const volume = createVolumeMonitor({
   read: () => readTransportDom().volume, write: setSpotifyVolume,
   apply: gain => bridge.command('listening-output', { gain }),
   active: () => monitoring,
-  onError: reason => { error = reason?.message || String(reason); render(); },
+  onError: reason => { error = reason?.message || String(reason); },
 });
 const volumeTimer = setInterval(() => void volume.sync(), 250);
 const overlay = createOverlay({ onClose: async () => {
@@ -125,10 +125,8 @@ async function capture(request) {
       monitoring = false;
       await bridge.command('listening-enable', { enabled: false }).catch(() => {});
       if (current.state === 'running') current.state = 'complete';
-      render();
     }
   })();
-  render();
   return status();
 }
 function status() {
@@ -197,12 +195,8 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
 });
 runner.addEventListener('captureprogress', (event) => {
   progress = event.detail;
-  render();
 });
-runner.addEventListener('activechange', render);
-function render() {
-  if (current?.state === 'running') overlay.setTitle(`${progress?.fraction == null ? '' : `${Math.floor(progress.fraction * 100)}% · `}ktv420`);
-}
+// The hosted capture scheduler owns the whole-playlist title via presentation.
 
 const button = document.createElement('button');
 button.title = 'ktv420';

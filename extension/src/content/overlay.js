@@ -3,7 +3,10 @@ import { isSupportedRoute } from './dom.js';
 export function createOverlay({ onClose }) {
   const origin = chrome.runtime.getURL('').replace(/\/$/, '');
   let frame, ready = false, open = false, route = '', lastUrl = '', previousOverflow = '';
-  let originalTitle = '', favicons = [];
+  let originalTitle = '', overlayTitle = 'ktv420', favicons = [];
+  // Spotify updates its title on track changes. Keep the hosted title while open.
+  const applyTitle = () => { if (open && document.title !== overlayTitle) document.title = overlayTitle; };
+  const titleObserver = new MutationObserver(applyTitle);
   const index = () => {
     const value = new URLSearchParams(location.search).get('ktv420');
     return /^[1-9]\d{0,4}$/.test(value || '') && Number(value) <= 10000 ? Number(value) : null;
@@ -35,17 +38,18 @@ export function createOverlay({ onClose }) {
     if (!open) {
       previousOverflow = document.documentElement.style.overflow;
       originalTitle = document.title;
+      overlayTitle = 'ktv420';
+      if (document.head) titleObserver.observe(document.head, { childList: true, subtree: true, characterData: true });
       favicons = [...document.querySelectorAll('link[rel~="icon"]')].map(link => [link, link.getAttribute('href')]);
       for (const [link] of favicons) link.href = chrome.runtime.getURL('assets/favicon.svg');
     }
-    open = true; frame.hidden = false; document.documentElement.style.overflow = 'hidden';
-    document.title = 'ktv420';
+    open = true; applyTitle(); frame.hidden = false; document.documentElement.style.overflow = 'hidden';
     if (updateUrl) write(true, index());
     post(); frame.focus();
   }
   function hide(updateUrl = true) {
     if (!open) return;
-    open = false; post(); frame.hidden = true;
+    open = false; titleObserver.disconnect(); post(); frame.hidden = true;
     document.documentElement.style.overflow = previousOverflow;
     document.title = originalTitle;
     for (const [link, href] of favicons) { if (href === null) link.removeAttribute('href'); else link.setAttribute('href', href); }
@@ -70,6 +74,6 @@ export function createOverlay({ onClose }) {
   setInterval(sync, 300);
   return { show, hide,
     setView(trackIndex, replace) { write(true, trackIndex, replace); },
-    setTitle(title) { if (open) document.title = title; },
+    setTitle(title) { if (open) { overlayTitle = title; applyTitle(); } },
   };
 }

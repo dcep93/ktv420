@@ -41,16 +41,17 @@ test('packaged host waits for the real child and rejects forged cross-window req
 test('overlay restores Spotify on close, reuses its frame and synchronizes one-based track links', () => {
   let location = new URL(`${spotify}/album/19cvoEE5d3pMkxLFL5TsAG?ktv420=2`);
   const listeners = {}, messages = [], frames = [];
-  let tick, closed = 0;
+  let tick, titleChanged, observing = false, closed = 0;
   const favicon = { href: '/spotify.ico', getAttribute() { return this.href; }, setAttribute(_key, value) { this.href = value; } };
   const document = {
-    title: 'Spotify album', documentElement: { style: { overflow: 'auto' } },
+    head: {}, title: 'Spotify album', documentElement: { style: { overflow: 'auto' } },
     body: { append(frame) { frame.isConnected = true; frames.push(frame); } },
     querySelectorAll: () => [favicon],
     createElement: () => ({ style: {}, contentWindow: { postMessage: (...args) => messages.push(args) }, focus() {}, remove() { this.isConnected = false; } }),
   };
   const context = {
     URL, URLSearchParams, document,
+    MutationObserver: class { constructor(fn) { titleChanged = fn; } observe() { observing = true; } disconnect() { observing = false; } },
     chrome: { runtime: { getURL: path => `${extension}/${path}` } },
     isSupportedRoute: () => /^\/(album|playlist)\//.test(location.pathname),
     setInterval: fn => { tick = fn; },
@@ -69,6 +70,13 @@ test('overlay restores Spotify on close, reuses its frame and synchronizes one-b
   listeners.message({ source: frames[0].contentWindow, origin: extension, data: { source: 'ktv420-extension-host', type: 'ready' } });
   assert.equal(messages.at(-1)[0].trackIndex, 2);
   assert.equal(messages.at(-1)[1], extension);
+  context.overlay.setTitle('37% · ktv420');
+  context.overlay.show();
+  assert.equal(document.title, '37% · ktv420');
+  document.title = 'Next song • Spotify';
+  titleChanged();
+  assert.equal(document.title, '37% · ktv420');
+  assert.equal(observing, true);
   context.overlay.setView(3, false);
   assert.equal(location.searchParams.get('ktv420'), '3');
   tick();
@@ -79,6 +87,10 @@ test('overlay restores Spotify on close, reuses its frame and synchronizes one-b
   assert.equal(messages.at(-1)[0].open, false);
   assert.equal(location.searchParams.has('ktv420'), false);
   assert.equal(document.title, 'Spotify album');
+  assert.equal(observing, false);
+  document.title = 'Spotify after closing';
+  titleChanged();
+  assert.equal(document.title, 'Spotify after closing');
   assert.equal(favicon.href, '/spotify.ico');
   assert.equal(document.documentElement.style.overflow, 'auto');
   context.overlay.show();
