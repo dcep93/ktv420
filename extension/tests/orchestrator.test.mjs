@@ -91,14 +91,14 @@ test('run errors and cached completion reset progress', async t => {
     runner.updateCaptureProgress(item, { currentTime: 50, duration: 100 });
     throw new Error('Capture failed');
   };
-  await assert.rejects(runner.run(), /Capture failed/);
+  await assert.rejects(runner.run({trackIds:[item.trackId],trackSnapshot:[item]}), /Capture failed/);
   assert.equal(events.at(-1), null);
   assert.equal(runner.isActive(), false);
   runner.preflightQueue = async () => {
     runner.updateCaptureProgress(item, { currentTime: 50, duration: 100 });
     return [{ ...item, cached: true, cachedMetadata: {} }];
   };
-  await runner.run();
+  await runner.run({trackIds:[item.trackId],trackSnapshot:[item]});
   assert.equal(events.at(-1), null);
   assert.equal(runner.isActive(), false);
 });
@@ -114,24 +114,16 @@ test('the last capture failure survives refresh and unavailable diagnostic stora
     debug.recentMediaStates.push({ currentTime: 90, previousPosition: 100 });
     throw Error('Original capture failure');
   };
-  await assert.rejects(runner.run(), /Original capture failure/);
+  await assert.rejects(runner.run({trackIds:[item.trackId],trackSnapshot:[item]}), /Original capture failure/);
   const report = JSON.parse(stored.get('ktv420:last-capture-failure'));
   assert.equal(report.error.message, 'Original capture failure');
   assert.equal(report.phase, 'recording');
   assert.equal(report.trackName, 'Unwritten');
   assert.equal(report.recentMediaStates[0].previousPosition, 100);
   window.sessionStorage.setItem = () => { throw Error('Storage unavailable'); };
-  await assert.rejects(runner.run(), /Original capture failure/);
+  await assert.rejects(runner.run({trackIds:[item.trackId],trackSnapshot:[item]}), /Original capture failure/);
 });
 
-test('remote handoff ends the batch without reporting a user stop', async t => {
-  mockPage(t);
-  const runner = new CaptureOrchestrator({ bridge: { command: async () => ({}), getSnapshot: () => ({}) } });
-  runner.preflightQueue = async () => { runner.handoff(); runner.throwIfStopped(); };
-  await runner.run();
-  assert.equal(runner.isActive(), false);
-  assert.equal(runner.handingOff, true);
-});
 
 test('a captured end wins over next-track metadata even when the last poll was early', async () => {
   const states = [
@@ -207,15 +199,6 @@ test('recording observations are bounded even for a long song', async t => {
 });
 
 
-test('capture deduplicates playlist positions without renumbering its track snapshot', async t => {
-  mockPage(t);
-  const previous=Object.getOwnPropertyDescriptor(globalThis,'chrome');
-  Object.defineProperty(globalThis,'chrome',{configurable:true,value:{runtime:{sendMessage:async()=>({ok:true,result:[]})}}});
-  t.after(()=>previous ? Object.defineProperty(globalThis,'chrome',previous) : delete globalThis.chrome);
-  const runner=new CaptureOrchestrator({bridge:{}});
-  const queue=await runner.preflightQueue({events:[]},null,[{...item,rowIndex:0},{...item,rowIndex:2},{trackId:'other',trackName:'Other',rowIndex:3}]);
-  assert.deepEqual(queue.map(t=>[t.trackId,t.rowIndex]),[['actual-track',0],['other',3]]);
-});
 
 test('a pause 25 ms before the end waits for resume and natural completion', async t => {
   mockPage(t);
@@ -251,84 +234,6 @@ test('invalid capture reports its first failure immediately instead of waiting u
     getSnapshot: () => { throw new Error('must report invalid capture before other playback handling'); },
   } });
   await assert.rejects(runner.recordUntilBoundary(item, {}, { events: [] }), /song position 5\.000s; 0\.200s after capture began/);
-});
-
-function queuePage(t) {
-  const ids=['1111111111111111111111','2222222222222222222222'];
-  let current=ids[0];const selections=[];
-  class Row {
-    isConnected=true;
-    constructor(id){this.id=id;}
-    scrollIntoView(){}
-    getBoundingClientRect(){return{left:0,top:0,width:100,height:30};}
-    dispatchEvent(event){if(event.type==='dblclick'){current=this.id;selections.push(this.id);}}
-  }
-  class Button {
-    disabled=false;
-    getAttribute(){return 'Play';}
-    getBoundingClientRect(){return{width:20,height:20};}
-    click(){current=ids[1];selections.push('skip');}
-  }
-  const next=new Button();
-  const link={getAttribute:()=>`/track/${current}`};
-  const widget={contains:()=>true,querySelector:()=>null};
-  for(const[key,value]of Object.entries({
-    Element:Row,HTMLButtonElement:Button,MouseEvent:class {constructor(type){this.type=type;}},
-    document:{querySelector:selector=>selector.includes('now-playing-widget')?widget:selector.includes('skip-forward')?next:null,
-      querySelectorAll:selector=>selector.includes(' a')?[link]:[]},
-    location:{origin:'https://open.spotify.com'},
-    window:{location:{pathname:'/playlist/example',href:'https://open.spotify.com/playlist/example'},getComputedStyle:()=>({visibility:'visible',display:'block'})},
-  })){
-    const previous=Object.getOwnPropertyDescriptor(globalThis,key);
-    Object.defineProperty(globalThis,key,{value,writable:true,configurable:true});
-    t.after(()=>previous?Object.defineProperty(globalThis,key,previous):delete globalThis[key]);
-  }
-  return {ids,selections,get current(){return current;},set current(id){current=id;},
-    queue:ids.map((id,index)=>({trackId:id,trackName:`Song ${index+1}`,rowIndex:index,row:new Row(id),cached:false}))};
-}
-
-test('after saving, the batch selects the next queued song even if Spotify never auto-advanced',async t=>{
- const page=queuePage(t);t.mock.method(console,'log',()=>{});
- const runner=new CaptureOrchestrator({bridge:{inject:async()=>{},command:async()=>({}),getSnapshot:()=>({})}});
- runner.preflightQueue=async()=>page.queue;
- const captured=[];let releaseSave,saveStarted;
- const started=new Promise(resolve=>{saveStarted=resolve;});
- const saving=new Promise(resolve=>{releaseSave=resolve;});
- runner.beginAndAcceptItem=async item=>{assert.equal(page.current,item.trackId);return{source:item.trackId};};
- runner.recordUntilBoundary=async item=>{captured.push(item.trackId);return{};};
- runner.finishPageCapture=async()=>({});
- runner.storeCapturedTrack=async item=>{if(item.trackId===page.ids[0]){saveStarted();await saving;}return{};};
- const run=runner.run();await started;
- assert.deepEqual(runner.captureProgress,{trackId:page.ids[0],fraction:.99,phase:'saving'});
- assert.deepEqual(captured,[page.ids[0]],'never move on before the completed audio is saved');
- releaseSave();await run;
- assert.deepEqual(captured,page.ids);
- assert.deepEqual(page.selections,page.ids);
- assert.equal(runner.isActive(),false);
-});
-
-test('queue selection does not skip a song that Spotify already selected; virtualized rows use Next',t=>{
- const page=queuePage(t);const {runner}=recorder();
- page.current=page.ids[1];runner.selectQueuedItem(page.queue[1]);
- assert.deepEqual(page.selections,[]);
- page.current=page.ids[0];page.queue[1].row.isConnected=false;
- runner.selectQueuedItem(page.queue[1]);
- assert.deepEqual(page.selections,['skip']);
- assert.equal(page.current,page.ids[1]);
- runner.stopRequested=true;
- assert.throws(()=>runner.selectQueuedItem(page.queue[1]),/stopped/);
- assert.deepEqual(page.selections,['skip'],'stop must prevent even a redundant selection');
-});
-
-test('stopping during storage saves the completed track but never starts the next song',async t=>{
- const page=queuePage(t);t.mock.method(console,'log',()=>{});
- const runner=new CaptureOrchestrator({bridge:{inject:async()=>{},command:async()=>({}),getSnapshot:()=>({})}});
- runner.preflightQueue=async()=>page.queue;
- runner.beginAndAcceptItem=async()=>({});runner.recordUntilBoundary=async()=>({});runner.finishPageCapture=async()=>({});
- let stored=0;runner.storeCapturedTrack=async()=>{await runner.requestStop();stored++;return{};};
- await assert.rejects(runner.run(),/stopped/);
- assert.equal(stored,1);assert.deepEqual(page.selections,[page.ids[0]]);
- assert.equal(runner.captureProgress,null);assert.equal(runner.isActive(),false);
 });
 
 test('explicit Stop still cancels a single-song request and watchdog reasons are preserved', async t => {

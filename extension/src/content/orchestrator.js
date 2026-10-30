@@ -1,15 +1,11 @@
-import { readTransportDom } from './transport.js';
 import { startPreciseCapture, captureTiming } from './preciseCapture.js';
-import { CaptureRunProgress } from "./captureTitle.js";
+import { discoverTrackRows } from "./trackDiscovery.js";
 import { STORAGE_VERSION } from "./constants.js";
 import {
-  clickSkipForward,
-  collectTrackRows,
   dispatchSyntheticDoubleClick,
   isSupportedRoute,
   pausePlaybackCleanly,
-  resolveTrackRow,
-  scrollTracklistToStart
+  resolveTrackRow
 } from "./dom.js";
 import { resolveCurrentPlaybackTrack } from "./playbackState.js";
 import { readCachedTracks, writeTrackArtifact } from "./storage.js";
@@ -31,317 +27,70 @@ export class CaptureOrchestrator extends EventTarget {
     this.singleTrack = false;
     this.captureProgress = null;
     this.lastProgressAt = -Infinity;
-    this.overallProgress = new CaptureRunProgress(fraction => this.dispatchEvent(new CustomEvent("captureoverallprogress", { detail: fraction })));
   }
 
   isActive() {
     return this.active;
   }
 
-  async toggleRun(options = {}) {
-    if (this.active) {
-      await this.requestStop();
-      return;
-    }
-
-    await this.run(options);
-  }
-
-  handoff() { if (this.active) { this.stopRequested = true; this.handingOff = true; this.clearCaptureProgress(); this.overallProgress.reset(); } }
-
   async requestStop(reason = 'Capture run stopped by user.') {
     this.stopRequested = true;
     this.stopReason = reason;
-    this.overallProgress.reset();
     this.clearCaptureProgress();
     pausePlaybackCleanly();
   }
 
-  async run({ trackIds = null, trackSnapshot = null, timingTrace = null } = {}) {
-    if (this.active) {
-      return;
-    }
-
-    const runTimingTrace = normalizeTimingTrace(timingTrace);
-    markTiming(runTimingTrace, "orchestrator_run_start", {
-      requestedTrackCount: Array.isArray(trackIds) ? trackIds.length : null
-    });
-
-    this.active = true;
-    this.handingOff = false;
-    this.stopRequested = false;
+  async run({ trackIds, trackSnapshot, collection = null, timingTrace = null } = {}) {
+    if (this.active) throw new Error('Capture is already running.');
+    if (!Array.isArray(trackIds) || trackIds.length !== 1) throw new Error('Capture requires exactly one track.');
+    this.collection = collection;
+    this.active = true; this.stopRequested = false; this.singleTrack = true;
     this.stopReason = 'Capture run stopped by user.';
-    this.singleTrack = Array.isArray(trackIds) && trackIds.length === 1;
-    this.clearCaptureProgress();
-    this.dispatchEvent(new Event("activechange"));
-
-    const debug = {
-      extension: "ktv420",
-      startedAt: new Date().toISOString(),
-      route: window.location.href,
-      storageVersion: STORAGE_VERSION,
-      timingTrace: runTimingTrace,
-      events: [],
-      phase: 'preflight',
-      recentMediaStates: []
-    };
-
-    const summary = [];
-    const queuedTrackIds = [];
-    let hasLoggedFirstStartTiming = false;
-
+    this.clearCaptureProgress(); this.dispatchEvent(new Event('activechange'));
+    const debug = { extension:'ktv420', startedAt:new Date().toISOString(), route:window.location.href,
+      timingTrace:normalizeTimingTrace(timingTrace), events:[], phase:'preflight', recentMediaStates:[] };
     try {
-      if (!isSupportedRoute()) {
-        throw new Error("ktv420 runs only on Spotify album and playlist routes.");
-      }
-
-      markTiming(runTimingTrace, "orchestrator_preflight_start");
-      const queue = await this.preflightQueue(debug, trackIds, trackSnapshot);
+      if (!isSupportedRoute()) throw new Error('Open a Spotify album or playlist.');
+      const [item] = await this.preflightQueue(debug, trackIds, trackSnapshot);
       this.throwIfStopped();
-      this.overallProgress.begin(queue);
-      markTiming(runTimingTrace, "orchestrator_preflight_end", {
-        queueCount: queue.length,
-        cachedCount: queue.filter((item) => item.cached).length
-      });
-      if (queue.length === 0) {
-        throw new Error(trackIds
-          ? "No requested Spotify track rows need PCM capture on this page."
-          : "No Spotify track rows were found on this page.");
+      if (!item) throw new Error('The requested song was not found.');
+      debug.trackId=item.trackId; debug.trackName=item.trackName;
+      if (item.cached) { this.dispatchTrackStored(item.trackId,item.cachedMetadata); return; }
+      await this.bridge.inject(); this.throwIfStopped();
+      let row=resolveTrackRow(item);
+      if (!row) {
+        await discoverTrackRows({cancelled:()=>this.stopRequested || !!resolveTrackRow(item)});
+        row=resolveTrackRow(item);
       }
-
-      if (queue.every((item) => item.cached)) {
-        for (const item of queue) {
-          queuedTrackIds.push(item.trackId);
-          summary.push({
-            alreadyInLocalStorage: true,
-            metadata: item.cachedMetadata
-          });
-          this.dispatchTrackStored(item.trackId, item.cachedMetadata);
-        }
-
-        debug.events.push({ type: "all-cached", trackCount: queue.length, at: Date.now() });
-        this.dispatchCaptureComplete(queuedTrackIds);
-        markTiming(runTimingTrace, "spotify_capture_all_cached", {
-          trackCount: queue.length
-        });
-        console.log("[ktv420] Capture run complete", summary);
-        return;
-      }
-
-      markTiming(runTimingTrace, "page_hooks_inject_start");
-      await this.bridge.inject();
-      markTiming(runTimingTrace, "page_hooks_inject_end");
-
-      let firstRow = resolveTrackRow(queue[0]);
-      if (!firstRow) {
-        markTiming(runTimingTrace, "tracklist_scroll_to_start_start");
-        scrollTracklistToStart();
-        firstRow = await waitForTrackRow(queue[0], 150);
-        markTiming(runTimingTrace, "tracklist_scroll_to_start_end");
-      }
-
-      if (!firstRow) {
-        throw new Error("Could not resolve the first queued track row.");
-      }
-
-      debug.events.push({ type: "start-first-row", trackId: queue[0].trackId, at: Date.now() });
-      markTiming(runTimingTrace, "spotify_first_row_resolved", {
-        trackId: queue[0].trackId,
-        cached: Boolean(queue[0].cached)
-      });
-      dispatchSyntheticDoubleClick(firstRow);
-      markTiming(runTimingTrace, "spotify_first_row_doubleclick_dispatched", {
-        trackId: queue[0].trackId
-      });
-
-      let startInfo = null;
-      for (let index = 0; index < queue.length; index += 1) {
-        this.throwIfStopped();
-        const item = queue[index];
-        debug.trackId = item.trackId;
-        debug.trackName = item.trackName;
-        const nextItem = queue[index + 1] || null;
-
-        if (!startInfo) {
-          startInfo = await this.beginAndAcceptItem(item, debug, {
-            logFirstStartTiming: !hasLoggedFirstStartTiming
-          });
-          hasLoggedFirstStartTiming = true;
-        }
-
-        let pendingCapture = null;
-        if (item.cached) {
-          this.clearCaptureProgress();
-          queuedTrackIds.push(item.trackId);
-          summary.push({
-            alreadyInLocalStorage: true,
-            metadata: item.cachedMetadata
-          });
-          debug.events.push({ type: "skip-cached", trackId: item.trackId, at: Date.now() });
-          this.dispatchTrackStored(item.trackId, item.cachedMetadata);
-        } else {
-          const captureEnd = await this.recordUntilBoundary(item, startInfo, debug);
-          pendingCapture = { captureEnd, item };
-        }
-
-        startInfo = null;
-        if (pendingCapture) {
-          // Save this complete track before preparing another, so a failed next
-          // seek cannot discard good audio. Pause the new song while transferring.
-          this.markSaving(pendingCapture.item.trackId);
-          debug.phase = 'saving';
-          pausePlaybackCleanly();
-          pendingCapture.capture = await this.finishPageCapture();
-          const metadata = await this.storeCapturedTrack(pendingCapture.item, pendingCapture.capture, pendingCapture.captureEnd);
-          queuedTrackIds.push(pendingCapture.item.trackId);
-          summary.push({
-            alreadyInLocalStorage: false,
-            metadata
-          });
-          debug.events.push({
-            type: "stored-track",
-            trackId: pendingCapture.item.trackId,
-            audioByteLength: metadata.audioByteLength,
-            at: Date.now()
-          });
-          this.dispatchTrackStored(pendingCapture.item.trackId, metadata);
-        }
-        if (nextItem) {
-          this.selectQueuedItem(nextItem);
-          startInfo = await this.beginAndAcceptItem(nextItem, debug, {
-            logFirstStartTiming: !hasLoggedFirstStartTiming
-          });
-          hasLoggedFirstStartTiming = true;
-        }
-
-      }
-
+      this.throwIfStopped();
+      if (!row) throw new Error('Could not find the requested Spotify song.');
+      dispatchSyntheticDoubleClick(row);
+      const start=await this.beginAndAcceptItem(item,debug,{logFirstStartTiming:true});
+      const end=await this.recordUntilBoundary(item,start,debug);
+      this.markSaving(item.trackId); debug.phase='saving'; pausePlaybackCleanly();
+      const capture=await this.finishPageCapture();
+      // Once the natural end is verified, save it even if Stop is pressed during delivery.
+      const metadata=await this.storeCapturedTrack(item,capture,end);
+      this.dispatchTrackStored(item.trackId,metadata);
+      this.dispatchCaptureComplete([item.trackId]);
+    } catch(error) {
       pausePlaybackCleanly();
-      this.dispatchCaptureComplete(queuedTrackIds);
-      console.log("[ktv420] Capture run complete", summary);
-    } catch (error) {
-      this.clearCaptureProgress();
-      if (!this.handingOff) pausePlaybackCleanly();
-      await this.bridge.command("capture-abort").catch(() => {});
-      // A remote track/seek handoff intentionally continues in the listening
-      // controller; it is not a user Stop and must not show a stopped error.
-      if (this.handingOff && this.stopRequested) return;
-      markTiming(runTimingTrace, "orchestrator_run_error", {
-        error: error?.message || String(error)
-      });
-
-      const report = {
-        ...debug,
-        failedAt: new Date().toISOString(),
-        error: serializeError(error),
-        mediaSession: this.bridge.getSnapshot().mediaSession,
-        routePathname: window.location.pathname
-      };
-
-      // Keep the last failure through a Spotify refresh, without audio or any
-      // network upload. Storage denial must never replace the capture error.
-      try { window.sessionStorage.setItem('ktv420:last-capture-failure', JSON.stringify(report)); }
-      catch { /* Console diagnostics remain available if session storage is unavailable. */ }
-
-      if (!hasTimingOutcome(runTimingTrace)) {
-        markTiming(runTimingTrace, "spotify_first_track_start_failed", {
-          error: error?.message || String(error)
-        });
-      }
-      console.log("[ktv420] Capture run failed", report);
+      const report={...debug,failedAt:new Date().toISOString(),error:serializeError(error),mediaSession:this.bridge.getSnapshot().mediaSession};
+      try {window.sessionStorage.setItem('ktv420:last-capture-failure',JSON.stringify(report));}catch{/* retain console evidence */}
+      console.warn('[ktv420] Capture failed',report);
       throw error;
     } finally {
-      this.overallProgress.reset();
       this.clearCaptureProgress();
-      await this.bridge.command("capture-abort").catch(() => {});
-      this.active = false;
-      this.singleTrack = false;
-      this.stopRequested = false;
-      this.dispatchEvent(new Event("activechange"));
+      await this.bridge.command('capture-abort').catch(()=>{});
+      this.active=false;this.singleTrack=false;this.stopRequested=false;
+      this.dispatchEvent(new Event('activechange'));
     }
   }
 
-  async preflightQueue(debug, trackIds = null, trackSnapshot = null) {
-    const requestedTrackIds = new Set(Array.isArray(trackIds) ? trackIds : []);
-    const shouldFilterTracks = requestedTrackIds.size > 0;
-    let rows = normalizeTrackSnapshot(trackSnapshot);
-
-    if (rows.length > 0) {
-      markTiming(debug.timingTrace, "preflight_spotify_tracks_load_skipped", {
-        trackCount: rows.length,
-        source: "iframe_snapshot"
-      });
-    } else {
-      markTiming(debug.timingTrace, "preflight_spotify_tracks_load_start");
-      const spotifyTracks = await this.loadSpotifyTracks();
-      markTiming(debug.timingTrace, "preflight_spotify_tracks_load_end", {
-        trackCount: spotifyTracks.length
-      });
-      rows = spotifyTracks.length > 0 ? spotifyTracks : collectTrackRows();
-    }
-
-    const queue = [];
-    // The player keeps repeated playlist positions; capture each audio file once.
-    const seen = new Set();
-    const candidateRows = rows.filter(row => {
-      if (seen.has(row.trackId) || (shouldFilterTracks && !requestedTrackIds.has(row.trackId))) return false;
-      seen.add(row.trackId); return true;
-    });
-    const candidateTrackIds = candidateRows.map((row) => row.trackId);
-
-    markTiming(debug.timingTrace, "preflight_local_cache_scan_start", {
-      trackCount: candidateTrackIds.length
-    });
-    const cachedTracks = await readCachedTracks(candidateTrackIds);
-    markTiming(debug.timingTrace, "preflight_local_cache_scan_end", {
-      cachedCount: cachedTracks.size
-    });
-
-    for (const row of candidateRows) {
-      const cachedMetadata = cachedTracks.get(row.trackId) ?? null;
-      queue.push({
-        ...row,
-        cached: Boolean(cachedMetadata),
-        cachedMetadata
-      });
-    }
-
-    debug.events.push({
-      type: "preflight",
-      trackCount: queue.length,
-      pageTrackCount: rows.length,
-      requestedTrackCount: shouldFilterTracks ? requestedTrackIds.size : null,
-      cachedCount: queue.filter((item) => item.cached).length,
-      at: Date.now()
-    });
-
-    return queue;
-  }
-
-  async loadSpotifyTracks() {
-    const playlistUri = currentSpotifyPlaylistUri();
-    if (!playlistUri) {
-      return [];
-    }
-
-    try {
-      const result = await this.bridge.command("playlist-tracks", { playlistUri }, 15000);
-      return result?.ok && Array.isArray(result.tracks) ? result.tracks : [];
-    } catch (error) {
-      console.warn("[ktv420] Failed to load Spotify playlist tracks from page API", error);
-      return [];
-    }
-  }
-
-  selectQueuedItem(item) {
-    this.throwIfStopped();
-    // Saving pauses Spotify and may interrupt its own auto-advance. Select the
-    // queued song explicitly, but do not skip again if it already advanced.
-    if (readTransportDom().trackId === item.trackId) return;
-    const row = resolveTrackRow(item);
-    if (row) dispatchSyntheticDoubleClick(row);
-    else clickSkipForward();
-    // beginAndAcceptItem verifies the requested identity before recording.
+  async preflightQueue(_debug, trackIds, trackSnapshot) {
+    const rows=normalizeTrackSnapshot(trackSnapshot).filter(row=>trackIds.includes(row.trackId));
+    const cached=await readCachedTracks(trackIds);
+    return rows.slice(0,1).map(row=>({...row,cached:cached.has(row.trackId),cachedMetadata:cached.get(row.trackId)}));
   }
 
   markSaving(trackId) {
@@ -351,7 +100,6 @@ export class CaptureOrchestrator extends EventTarget {
   }
 
   dispatchTrackStored(trackId, metadata) {
-    if (!this.stopRequested) this.overallProgress.update(trackId, 1);
     if (this.captureProgress?.trackId === trackId) this.clearCaptureProgress();
     this.dispatchEvent(
       new CustomEvent("trackstored", {
@@ -384,7 +132,6 @@ export class CaptureOrchestrator extends EventTarget {
     const previous = this.captureProgress;
     if (previous?.trackId === item.trackId &&
       (previous.fraction === fraction || now - this.lastProgressAt < PROGRESS_INTERVAL_MS)) return;
-    this.overallProgress.update(item.trackId, fraction);
     this.captureProgress = { trackId: item.trackId, fraction };
     this.lastProgressAt = now;
     this.dispatchEvent(new CustomEvent("captureprogress", { detail: this.captureProgress }));
@@ -617,7 +364,7 @@ export class CaptureOrchestrator extends EventTarget {
       ...capture,
       md5: md5Hex(capture.bytes)
     };
-    const metadata = { ...buildMetadata(item, captureWithHash, captureEnd), ...timing };
+    const metadata = { ...buildMetadata(item, captureWithHash, captureEnd), ...timing, collection: this.collection };
     await writeTrackArtifact(item.trackId, capture.bytes, metadata);
     return metadata;
   }
@@ -662,27 +409,6 @@ function safeDuration(element) {
   return Number.isFinite(element?.duration) ? Math.max(0, element.duration) : Number.NaN;
 }
 
-function currentSpotifyPlaylistUri() {
-  const match = window.location.pathname.match(/^\/playlist\/([A-Za-z0-9]+)/);
-  return match ? `spotify:playlist:${match[1]}` : "";
-}
-
-async function waitForTrackRow(track, timeoutMs) {
-  const deadline = performance.now() + timeoutMs;
-  let row = resolveTrackRow(track);
-
-  while (!row && performance.now() < deadline) {
-    await nextAnimationFrame();
-    row = resolveTrackRow(track);
-  }
-
-  return row;
-}
-
-function nextAnimationFrame() {
-  return new Promise((resolve) => requestAnimationFrame(resolve));
-}
-
 function normalizeTrackSnapshot(value) {
   if (!Array.isArray(value)) {
     return [];
@@ -713,27 +439,6 @@ function normalizeTrackSnapshot(value) {
 
 function readString(value) {
   return typeof value === "string" ? value : "";
-}
-
-function hasTimingOutcome(trace) {
-  return Boolean(
-    trace?.events?.some((event) =>
-      event.name === "spotify_first_track_started" ||
-      event.name === "spotify_capture_all_cached" ||
-      event.name === "spotify_first_track_start_failed"
-    )
-  );
-}
-
-function summarizePageTiming(events) {
-  if (!Array.isArray(events)) {
-    return "";
-  }
-
-  return events
-    .filter((event) => event && typeof event.name === "string" && Number.isFinite(event.deltaMs))
-    .map((event) => `${event.name}:${event.deltaMs}`)
-    .join(",");
 }
 
 function mediaSessionMatchesItem(mediaSession, item) {

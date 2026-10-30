@@ -9,7 +9,7 @@ const signal=()=>new AbortController().signal;
 const collection={path:'album/1111111111111111111111',title:'Transfer album',artwork:'',trackIds:['songA','songB']};
 async function fixture() {
  const blob=new Blob(['untouched mp3 bytes']),sha256=await digest(blob);
- const bundle:Bundle={format:'ktv420-playlist',version:1,collection,tracks:collection.trackIds.map(id=>({id,title:id,artist:'Artist',sampleRate:44100,frames:44100,encoding:{sampleRate:44100,frames:44100,gain:.5},crop:'0-0',artworkUrl:'',files:Object.fromEntries(MP3_NAMES.map(name=>[name,{path:`tracks/${id}/${name}.mp3`,bytes:blob.size,sha256}])) as Bundle['tracks'][number]['files']}))};
+ const bundle:Bundle={format:'ktv420-playlist',version:2,collection,tracks:collection.trackIds.map(id=>({id,title:id,artist:'Artist',sampleRate:44100,frames:44100,encoding:{sampleRate:44100,frames:44100,gain:.5},crop:'0-0',artworkUrl:'',files:Object.fromEntries(MP3_NAMES.map(name=>[name,{path:`tracks/${id}/${name}.mp3`,bytes:blob.size,sha256}])) as Bundle['tracks'][number]['files']}))};
  return {blob,bundle};
 }
 async function zipFixture(bundle:Bundle,blob:Blob,change?:(path:string)=>Blob|undefined) {
@@ -20,7 +20,7 @@ async function zipFixture(bundle:Bundle,blob:Blob,change?:(path:string)=>Blob|un
 test('format validates versions, membership, paths, hashes, size, timing and complete five files',async()=>{
  const {bundle}=await fixture(); assert.deepEqual(parseBundle(bundle),bundle);
  const reject=(change:(v:Bundle)=>void)=>{const copy=structuredClone(bundle);change(copy);assert.throws(()=>parseBundle(copy));};
- reject(v=>{v.version=2 as 1;});reject(v=>{v.tracks[0].id='wrong';});reject(v=>{v.tracks[0].files.input.path='../input.mp3';});reject(v=>{v.tracks[0].files.input.bytes=MAX_AUDIO+1;});reject(v=>{v.tracks[0].encoding.frames++;});reject(v=>{v.tracks[0].encoding.gain=0;});reject(v=>{v.tracks[0].files.input.sha256='bad';});reject(v=>{delete (v.tracks[0].files as Partial<Bundle['tracks'][number]['files']>).input;});
+ reject(v=>{v.version=1 as 2;});reject(v=>{v.tracks[0].id='wrong';});reject(v=>{v.tracks[0].files.input.path='../input.mp3';});reject(v=>{v.tracks[0].files.input.bytes=MAX_AUDIO+1;});reject(v=>{v.tracks[0].encoding.frames++;});reject(v=>{v.tracks[0].encoding.gain=0;});reject(v=>{v.tracks[0].files.input.sha256='bad';});reject(v=>{delete (v.tracks[0].files as Partial<Bundle['tracks'][number]['files']>).input;});
 });
 test('ZIP and extracted folder preserve exact bytes; folder roots and macOS metadata are accepted',async()=>{
  const {bundle,blob}=await fixture();const zip=await zipFixture(bundle,blob);const source=await openZip(zip,signal());

@@ -234,7 +234,7 @@
         } else if (command === "listening-output") {
           if (!listeningEnabled) throw new Error('Open ktv420 before controlling audio.');
           if (!Number.isFinite(payload?.gain) || payload.gain < 0 || payload.gain > 1) throw new Error('Invalid listening volume.');
-          monitor = { gain: payload.gain, expires: performance.now() + 2500 };
+          monitor = { gain: payload.gain, expires: Infinity };
           updateMonitor(); result = { ok: true };
         } else if (command === "capture-prepare") {
           result = await controller.prepare(payload || {});

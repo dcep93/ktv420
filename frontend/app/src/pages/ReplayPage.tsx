@@ -1,36 +1,22 @@
 import { loadPerformance, savePerformance } from '../features/local/performanceFiles';
 import { useEffect, useState } from 'react';
 import { MAX_RECORDING_BYTES, parseRecordingText, type PerformanceRecording } from '../features/local/recording';
-import { extensionMessage, STORE_ID } from '../features/local/extensionConnection';
+import { localPlaylistLink } from '../features/local/playlistPage';
 export default function ReplayPage() {
   const [recording,setRecording] = useState<PerformanceRecording | null>(null);
   const [error,setError] = useState('');
-  const [installed,setInstalled] = useState<boolean | null>(null);
   const [busy,setBusy] = useState(false);
-  const [opened,setOpened] = useState(false);
   useEffect(() => {
     void loadPerformance('import').then(setRecording).catch(() => setError('Could not restore the file. Choose your recording again.'));
-    void extensionMessage({type:'ktv420:replay-ping'}).then(() => setInstalled(true)).catch(() => setInstalled(false));
   }, []);
-  async function open(value: PerformanceRecording) {
-    setBusy(true); setError('');
-    try {
-      const peer = await extensionMessage({type:'ktv420:replay-ping'});
-      const [major, minor] = (peer.version || '0.0').split('.').map(Number);
-      if (value.version === 3 && !(major > 6 || (major === 6 && minor >= 3))) { setInstalled(false); throw new Error('This recording needs ktv420 6.3 or later. Update the extension, then refresh.'); }
-      await extensionMessage({type:'ktv420:open-replay', recording:value}); setOpened(true); }
-    catch (e) { setError(String(e instanceof Error ? e.message : e)); }
-    finally { setBusy(false); }
-  }
-  // Refresh after installation completes the same handoff without reimporting.
-  useEffect(() => { if (installed && recording && !opened && !busy && !error) void open(recording); }, [installed,recording,opened,busy,error]);
+  function open(value:PerformanceRecording) { location.assign(`${localPlaylistLink(value.spotifyPath)}&replay=1`); }
   async function importFile(file?: File) {
     if (!file) return;
     setBusy(true);setError('');
     try {
       if (file.size > MAX_RECORDING_BYTES) throw new Error('Choose a recording smaller than 4 MB.');
       const value = parseRecordingText(await file.text());
-      await savePerformance('import',value);setRecording(value);setOpened(false);
+      await savePerformance('import',value);setRecording(value);
     } catch(e) { setError(e instanceof Error ? e.message : String(e)); }
     finally {setBusy(false);}
   }
@@ -39,9 +25,8 @@ export default function ReplayPage() {
     <p>Drop your friend’s JSON here.</p>
     <label className="primary-button">Choose recording<input type="file" accept=".json,application/json" onChange={e => void importFile(e.target.files?.[0])} /></label>
     {recording && <p>{recording.name} · {recording.tracks.length} songs</p>}
-    {installed===false && <><p>Install ktv420 in desktop Chrome, then come back here.</p><nav><a className="primary-button" target="_blank" rel="noreferrer" href={`https://chromewebstore.google.com/detail/ktv420/${STORE_ID}`}>Install / update extension</a><button onClick={() => location.reload()}>Refresh to continue</button></nav></>}
-    {installed && recording && <button disabled={busy} onClick={() => void open(recording)}>{busy ? 'Opening Spotify…' : opened ? 'Open again in Spotify' : 'Open in Spotify'}</button>}
-    {opened && <p>Continue in Spotify. Capture missing songs, then press Play recording.</p>}
+    {recording && <button disabled={busy} onClick={()=>open(recording)}>Open recording</button>}
+    <nav><a href="/transfer">Import playlist audio</a><a href="/catalog">Catalog</a></nav>
     {error && <p role="alert">{error}</p>}
     <small>Audio and recording instructions stay on your computer.</small>
   </section></main>;

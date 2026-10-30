@@ -1,39 +1,59 @@
-# ktv420 architecture
+# ktv420 architecture — version 7
 
-The website delivers the player code. Chrome runs it locally. Audio is never sent to a ktv420 server.
+The website is the music app. The optional extension integrates Spotify. Audio never goes to a ktv420 server.
 
 ```mermaid
-flowchart TD
-  Hosting["ktv420.web.app · Firebase Hosting\nPlayer, theme, visualizers, JS/WASM"] --> Player
-  Model["Pinned Demucs model download"] --> Worker
-  subgraph Machine["User's computer · Chrome"]
-    Spotify["Spotify web player"] -->|Captured PCM| Capture["Extension capture hooks"]
-    Capture --> Background["Extension background worker"]
-    Background --> Audio[("Extension IndexedDB\nOriginal recordings + stems")]
-    Spotify <-->|Track state and controls| Broker["Packaged extension bridge"]
-    Broker <--> Audio
-    Broker <-->|Validated local messages + audio Blobs| Player["Hosted player iframe\nInside the Spotify overlay"]
-    Player <-->|Samples and results| Worker["Local Demucs Web Worker\nWebGPU / WASM CPU"]
-    Worker <--> Cache[("Local model cache")]
-    Player --> Playback["Web Audio mixer + effects\nCanvas visualizers"]
-  end
+flowchart LR
+  Spotify[Spotify DOM + audio] --> Capture[Extension: precise capture]
+  Capture --> Queue[(Temporary capture queue)]
+  Queue -->|256 KiB chunks, retry + commit acknowledgment| Website[ktv420.web.app]
+  Website -->|One-song requests| Capture
+  Files[Playlist ZIP / folder] <--> Website
+  Website <--> Library[(Website IndexedDB: music + catalog)]
+  Website --> Worker[Local WebGPU / WASM separation]
+  Worker --> Encoder[Local 320 kbps MP3 encoder]
+  Encoder --> Library
+  Library --> Mixer[Mixer, replay, effects + visualizers]
 ```
 
-## Update boundaries
+There are no player/broker iframes. The website does not rely on storage sharing between an embedded origin and a top-level origin. `/` and `/catalog` render the catalog; `/playlist` renders the existing playlist and mixer directly. `/transfer` and `/replay` also work without the extension.
 
-| Change | Delivery |
+## Ownership and updates
+
+| Website deployment | Extension release |
 | --- | --- |
-| Homepage, player layout, labels, theme, visualizers, effects, local inference code | Website deployment; reload Spotify to load it |
-| Spotify capture hooks, injected launcher, background worker, extension permissions, bridge protocol | Extension update |
-| Audio recordings and saved stems | Stay in the same extension's local database |
+| Library, catalog, import/export, capture order, processing, mixer, effects, visuals and replay | Spotify DOM selectors/discovery, precise capture, temporary delivery storage and versioned operations |
 
-The hosted player runs inside two nested frames: Spotify → packaged extension bridge → website player. The website frame has no Chrome extension APIs. The bridge checks message origins, windows and protocol versions, and exposes a fixed set of local storage/control operations. A local processing lock prevents concurrent separation jobs from conflicting.
+The website’s fresh `ktv420-web-library-v1` IndexedDB database contains tracks, audio Blobs, collections, settings, incoming delivery chunks and commit receipts. Per-song MP3 commits replace raw audio atomically; imported files and metadata commit with collection membership. Processing status remains recoverable from raw input when a worker/tab closes. A website Web Lock excludes competing separation and import/deletion commits. Performance recordings and analysis/model caches remain website-local.
 
-The root URL is the installation guide; `/player/` is the app embedded in Spotify. Opening `/player/` directly shows a Spotify link because it has no extension bridge or audio access there.
+The extension’s new `ktv420-capture-delivery-v1` database contains only temporary capture manifests and chunks. Previous extension library/state databases are untouched and never opened. Completed queue entries have no automatic expiry. Starting a new capture may clear unfinished staging for that same Spotify tab, but never completed recordings awaiting acknowledgment.
 
-An internet connection loads the website and first model download. Once downloaded, computation uses the computer's GPU or CPU. Pending Float32 captures persist in extension IndexedDB; successful processing atomically replaces each original and its four stems with five 320 kbps MP3 files. Protocol v2 validates MPEG-1 CBR frames, finalized gapless metadata, rate, length and common playback gain before committing. The MP3 encoder runs only in a hosted worker; model caches belong to the website. Keeping the same Chrome profile, extension identity and installation folder preserves the audio library. Uninstalling the extension removes that library.
+## Protocol and scheduling
 
-Firebase Hosting remains as static website hosting. There is no Cloud Run processing service and no GCS audio storage. Model files are downloaded from the pinned external model source; captured audio never accompanies those requests. Active players aren't forcibly restarted by deployments, and retained hashed assets keep their code dependencies available.
+`ktv420-spotify`, version 1, is a new protocol. `chrome.runtime.sendMessage` connects a top-level `https://ktv420.web.app` document to its installed extension. The worker rejects other origins, subframes, versions, invalid IDs/indexes/volumes and operations outside the allowlist:
 
+- `hello`: protocol/extension version.
+- `discover`, `status`: an identified Spotify tab’s collection and capture state.
+- `capture`: one track ID, request UUID and collection path. Retrying the same request reports its status rather than starting another recording.
+- `cancel`, `volume`: stop the active primitive or adjust monitoring gain.
+- `pending`, `chunk`, `ack`: list completed deliveries, read one bounded chunk, and release a committed delivery.
 
-Playlist discovery verifies completeness before enabling a capture run. It uses Spotify’s paginated contents when available, or walks the virtualized DOM list and restores the scroll position. Partial rows can render while discovery continues. A verified snapshot replaces catalog membership in playlist order; partial observations cannot remove entries or reintroduce stale IDs after reconciliation. Membership changes never delete captured audio. Extension 6.7.3 carries completeness through the broker to the hosted capture controls.
+No arbitrary code, script injection requests, Chrome API relay or website access to old extension storage is exposed. Host access is limited to Spotify and the app origin (the latter permits reusing an existing app tab). No API permissions are requested.
+
+The website holds a capture-scheduler lock and issues one-song requests sequentially, skipping existing inputs. It does not depend on animation frames or an iframe heartbeat. Spotify’s content script verifies complete discovery, route and song identity before recording. Its minimal panel offers Open in ktv420, Stop, progress/error and monitor volume. Ordinary Spotify playback is untouched until capture is explicitly requested.
+
+If the website closes, no new requests are scheduled. The current single capture may finish into the durable queue. Reopening any website page reconnects delivery. The website stores one chunk at a time before requesting the next. Commit receipts prevent duplicate delivery and permit retrying a lost acknowledgment; a later user deletion cannot be undone by an old retry. Transaction failure leaves extension copies available.
+
+## Audio and GPU
+
+The precise capture/worklet pipeline retains its zero-start, sample-clock, source, natural-end and finite-sample checks. Monitor gain is downstream from capture and remains stable through a background website stall; it no longer expires because a hosted iframe missed a heartbeat. Finishing capture releases Spotify audio routing.
+
+The website assembles WAV Blob references without a second full PCM transfer buffer. Demucs and encoding still run in their existing workers. GPU-capable clients explicitly select WebGPU; a GPU initialization failure stays visible and the user can select CPU. Model revision, checksum, Float32 processing, shared MP3 gain and gapless timing are unchanged. Playback has its own clock and no Spotify mirror controller.
+
+Version-2 playlist packages preserve unique audio assets and ordered collection positions, including duplicates. SHA-256, MP3 structural/gapless validation, archive path checks and quotas are checked before committing a song. ZIP export streams, folder/ZIP import works per song, and existing prepared tracks are skipped. No old package support or migration path is included.
+
+## Hosting and verification
+
+Firebase Hosting serves static website/runtime files; model weights come from the pinned data source. No audio upload or backend processing is used. New pages load current code; existing sessions retain their code, with immutable assets retained across deployments.
+
+Automated checks cover delivery interruptions, lost acknowledgments, rollback, duplicates, origin validation, complete ZIP/folder round trips, quota/lock failures and interrupted processing recovery, alongside existing capture/audio/effect/visualizer tests. The standalone development fixture runs the production importer in a real browser. Real Spotify capture and GPU timings must be reported separately from simulated protocol tests.

@@ -8,7 +8,7 @@ export function parseCollection(value: unknown): Collection | null {
     typeof v.title !== 'string' || v.title.length > 500 || typeof v.artwork !== 'string' || v.artwork.length > 4096 ||
     !Array.isArray(v.trackIds) || !v.trackIds.length || v.trackIds.length > 10000 ||
     v.trackIds.some(id => typeof id !== 'string' || !/^[A-Za-z0-9]{1,100}$/.test(id))) return null;
-  return { path: v.path, title: v.title.trim(), artwork: /^https:\/\/(?:i|mosaic)\.scdn\.co\//.test(v.artwork) ? v.artwork : '', trackIds: [...new Set(v.trackIds)], ...(v.complete === true ? { complete: true } : {}) };
+  return { path: v.path, title: v.title.trim(), artwork: /^https:\/\/(?:i|mosaic)\.scdn\.co\//.test(v.artwork) ? v.artwork : '', trackIds: [...v.trackIds], ...(v.complete === true ? { complete: true } : {}) };
 }
 export function collectionLink(path: string) {
   return `https://open.spotify.com/${path}?ktv420`;

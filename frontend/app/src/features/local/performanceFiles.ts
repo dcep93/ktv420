@@ -1,5 +1,5 @@
 import { parseRecording, type PerformanceRecording } from './recording';
-/** Kept separately from audio; works in the installation page before an extension exists. */
+/** Kept separately from audio; owned by the website independently of the Spotify integration. */
 async function database() {
   return new Promise<IDBDatabase>((resolve,reject) => {
     const request=indexedDB.open('ktv420-performances',1);

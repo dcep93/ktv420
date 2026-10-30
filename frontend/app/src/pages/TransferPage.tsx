@@ -3,7 +3,7 @@ import { connectTransfer } from '../features/local/transfer/client';
 import { exportPlaylist, importPlaylist, type Progress } from '../features/local/transfer/transfer';
 import { openFolder, openZip, type PackageSource } from '../features/local/transfer/archive';
 import { localCatalogLink, localPlaylistLink, playlistPath } from '../features/local/playlistPage';
-import { STORE_URL } from '../features/local/extensionConnection';
+import { requestPersistence } from '../features/local/libraryClient';
 import type { Collection } from '../features/local/savedCollections';
 import './saved.css';
 
@@ -19,7 +19,7 @@ export default function TransferPage() {
   useEffect(()=>{
     let disposed=false;
     document.title=`${id?'Export playlist':'Import playlist'} · ktv420`;
-    const bridge=connectTransfer();client.current=bridge;
+    void requestPersistence(); const bridge=connectTransfer();client.current=bridge;
     void bridge.connected.then(async()=>{
       if(disposed)return;
       if(id){if(!path)throw new Error('Invalid playlist link.');const detail=await bridge.request<{collection:Collection;bytes:number}>('exportCollection',[path]);if(!disposed)setCollection(detail);}
@@ -71,10 +71,10 @@ export default function TransferPage() {
       </>}
       {busy&&<button onClick={()=>{controller.current?.abort();setResult('Stopping after the current storage operation…');}}>Cancel</button>}
     </div>
-    {!connected&&!error&&<p role="status">Connecting to extension…</p>}
+    {!connected&&!error&&<p role="status">Opening local library…</p>}
     {progress&&<div className="transfer-progress" aria-live="polite"><progress aria-label="Transfer progress" max={Math.max(1,progress.total)} value={Math.min(progress.bytes,progress.total)} /><p>{progress.label}</p><p>{progress.song} / {progress.songs} songs · {size(progress.bytes)} / {size(progress.total)}</p></div>}
     {result&&<p role="status">{result}</p>}{error&&<p role="alert">{error}</p>}
-    <nav className="transfer-actions">{imported&&<a href={localPlaylistLink(imported,extension)}>Open playlist</a>}<a href={catalog}>Catalog</a>{!connected&&error&&<a href={STORE_URL} target="_blank" rel="noreferrer">Update extension</a>}</nav>
+    <nav className="transfer-actions">{imported&&<a href={localPlaylistLink(imported,extension)}>Open playlist</a>}<a href={catalog}>Catalog</a></nav>
     {!id&&<p className="transfer-note">Keep this tab open while importing. If interrupted, select the same package to continue.</p>}
   </section></main>;
 }

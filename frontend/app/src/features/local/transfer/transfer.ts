@@ -2,7 +2,7 @@ import { MP3_NAMES, mp3Layout, type Mp3Files } from '../audio/mp3Types';
 import type { LocalTrack } from '../library';
 import type { PlaybackRecord } from '../../stems/player/types';
 import type { Collection } from '../savedCollections';
-import { captureStartSeconds } from '../listeningProtocol';
+import { captureStartSeconds } from '../captureAlignment';
 import { archiveWriter, type PackageSource } from './archive';
 import { MANIFEST, MAX_ART, MAX_AUDIO, MAX_MANIFEST, artworkUrl, digest, parseBundle, raster, type Asset, type Bundle, type BundleTrack } from './manifest';
 export type TransferClient = {request:<T>(method:string,args?:unknown[])=>Promise<T>};
@@ -29,7 +29,7 @@ export async function exportPlaylist(client:TransferClient,path:string,output:Wr
     await writer.add(path,blob,signal,done=>report({song,songs:collection.trackIds.length,bytes:bytes+done,total,label}));
     bytes+=blob.size;return {path,bytes:blob.size,sha256};
   };
-  for(const [index,id] of collection.trackIds.entries()) {
+  for(const [index,id] of [...new Set(collection.trackIds)].entries()) {
     signal.throwIfAborted();
     const {track,record}=await client.request<{track:LocalTrack;record:PlaybackRecord}>('exportTrack',[id]);
     const files={} as BundleTrack['files'];
@@ -37,10 +37,10 @@ export async function exportPlaylist(client:TransferClient,path:string,output:Wr
     const url=artworkUrl(track.metadata?.trackArtworkSrc) || artworkUrl(collection.artwork);
     const cover=record.artwork || await fetchArtwork(url,signal);
     if(url && !cover)missingArtwork++;
-    tracks.push({id,title:track.title,artist:track.artist,sampleRate:track.sampleRate,frames:track.frames,encoding:{...mp3Layout(track.sampleRate,track.frames),gain:record.playbackGain ?? 1},crop:`${captureStartSeconds(track.metadata)}-0`,artworkUrl:url,files,
+    tracks.push({id,...(track.metadata ? {metadata:track.metadata} : {}),title:track.title,artist:track.artist,sampleRate:track.sampleRate,frames:track.frames,encoding:{...mp3Layout(track.sampleRate,track.frames),gain:record.playbackGain ?? 1},crop:`${captureStartSeconds(track.metadata)}-0`,artworkUrl:url,files,
       ...(cover ? {artwork:await asset(`tracks/${id}/artwork`,await raster(cover),index+1,`${track.title} · artwork`)} : {})});
   }
-  const bundle:Bundle=parseBundle({format:'ktv420-playlist',version:1,collection,tracks});
+  const bundle:Bundle=parseBundle({format:'ktv420-playlist',version:2,collection,tracks});
   const manifest=new Blob([JSON.stringify(bundle)]);
   if(manifest.size>MAX_MANIFEST)throw new Error('Playlist manifest exceeds 16 MiB.');
   await writer.add(MANIFEST,manifest,signal);await writer.close(signal);

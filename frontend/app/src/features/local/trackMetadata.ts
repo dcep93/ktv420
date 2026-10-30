@@ -1,5 +1,5 @@
 import type { LocalTrack } from './library';
-import type { SpotifyTrack } from './useSpotifyOverlay';
+import type { SpotifyTrack } from './usePlaylist';
 
 export function withSpotifyMetadata(track: LocalTrack, row?: SpotifyTrack): LocalTrack {
   if (track.source !== 'spotify' || !row || track.id !== `spotify-${row.trackId}`) return track;

@@ -1,5 +1,5 @@
 import type { Collection } from './savedCollections';
-import type { SpotifyTrack } from './useSpotifyOverlay';
+import type { SpotifyTrack } from './usePlaylist';
 export type PlaylistDetail = Collection & { tracks: SpotifyTrack[] };
 export function playlistPath(id: string | null): string | null {
   const match = /^(album|playlist)\.([A-Za-z0-9]{22})$/.exec(id || '');

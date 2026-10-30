@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { SongClock, validPitch, validTempo } from '../stems/player/tempo';
 import { parseRecording, type PerformanceRecording } from './recording';
-import { parseTransportCommand, parseListeningState } from './listeningProtocol';
 test('song time integrates tempo changes, scheduled starts, seeks and pauses without changing elapsed performance time',()=>{
  let now=0;const clock=new SongClock(()=>now);
  clock.start(10,1,.02);assert.equal(clock.position,10);
@@ -23,12 +22,4 @@ test('v3 records independent tempo and pitch; v2 retains neutral defaults',()=>{
  delete (snapshot as {tempo?:number}).tempo;delete (snapshot as {pitch?:number}).pitch;
  assert.equal(parseRecording(value).version,2);
  value.version=3;assert.throws(()=>parseRecording(value),/missing tempo/);
-});
-test('rate transport validates bounds and ownership identity; legacy capabilities default safely',()=>{
- assert.deepEqual(parseTransportCommand({action:'rate',rate:1.25,trackId:'abc'}),{action:'rate',rate:1.25,trackId:'abc'});
- assert.equal(parseTransportCommand({action:'rate',rate:2,trackId:'abc'}),null);
- assert.equal(parseTransportCommand({action:'rate',rate:1}),null);
- const state={capability:1,trackId:'abc',generation:1,position:2,duration:10,playing:true,local:true,output:'stems',volume:.7,observedAt:1,error:''};
- assert.equal(parseListeningState(state)?.playbackRate,1);assert.equal(parseListeningState(state)?.tempoSupported,false);
- assert.equal(parseListeningState({...state,playbackRate:1.25,tempoSupported:true})?.playbackRate,1.25);
 });

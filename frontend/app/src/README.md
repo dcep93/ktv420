@@ -1,10 +1,10 @@
-# Frontend Source Layout
+# Frontend source layout
 
-The app is organized by responsibility:
+- `app/`: route wiring and website services.
+- `pages/`: catalog, playlist/mixer, transfer and replay screens.
+- `features/local/`: website IndexedDB, collections, processing, capture scheduling/delivery, imports, exports and recordings.
+- `features/stems/`: playback engine, effects, visualizers and analysis.
+- `shared/`: bounded capture format shared with the optional extension.
+- `extension/`: Spotify message dispatcher and temporary delivery queue only. Never import website app or library modules here.
 
-- `app/`: application wiring such as route definitions.
-- `pages/`: route entry components only. Keep this directory flat and TSX-only; page styling and UI composition belong in features.
-- `features/stems/`: shared stem domain code, including storage services, cached records, playback, object-tree utilities, and metadata.
-- `main.tsx`: React mount point only.
-
-Page files should stay thin. Put reusable domain behavior in `features/stems`, feature-specific state in that feature's `hooks/`, and presentational pieces and CSS in that feature's `components/`.
+The website must work without Chrome extension APIs. Keep Spotify requests isolated in `features/local/spotify`. Use atomic IndexedDB transactions for audio publication and the website separation lock for processing/import/deletion. Never acknowledge capture delivery until the website transaction commits.

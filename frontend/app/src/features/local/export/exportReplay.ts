@@ -1,5 +1,5 @@
 import { getPlaybackRecord, listTracks, withProcessingLock } from '../libraryClient';
-import { captureStartSeconds } from '../listeningProtocol';
+import { captureStartSeconds } from '../captureAlignment';
 import type { PerformanceRecording } from '../recording';
 import { compileExport, exportGain, checkExportMemory } from './timeline';
 import { renderSection } from './render';
@@ -19,7 +19,7 @@ export async function exportReplay(recording: PerformanceRecording, signal: Abor
     const track=tracks.find(track=>track.id===`spotify-${section.trackId}`)!;
     checkExportMemory(track.frames/track.sampleRate,section.events[0].snapshot!.stems.length,section.frames);
   }
-  // Also exclude separation in another player tab through the existing broker lock.
+  // Also exclude separation in another player tab through the existing library lock.
   return storage.withProcessingLock(async acquired=>{
     if(!acquired) throw new Error('Wait for separation to finish before exporting.');
     return navigator.locks.request('ktv420-mp3-export',{ifAvailable:true},async lock=>{

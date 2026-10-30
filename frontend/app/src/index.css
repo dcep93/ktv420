@@ -1043,3 +1043,6 @@
 
 .iframe-settings-source-header h2 a { color: inherit; text-decoration-color: var(--ww-border-strong); text-underline-offset: .2em; }
 .iframe-settings-source-header h2 a:hover { color: var(--ww-title-pink); }
+
+.storage-notice { position:fixed; bottom:1rem; left:1rem; right:1rem; z-index:100; background:#241c16; border:1px solid #a57b50; border-radius:12px; padding:12px 18px; color:#eee; max-width:850px; margin:auto; }
+.storage-notice button { float:right; margin-left:1rem; }

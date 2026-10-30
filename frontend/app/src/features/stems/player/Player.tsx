@@ -3,7 +3,6 @@ import { loadPlateArtwork, musicNoteArtwork } from './visuals/plateArtwork';
 import { CombinedVisualizerPanel } from './CombinedVisualizerPanel';
 import { settingsForTracks } from './mixerSettings';
 import { linkedVolumes } from './linkedVolumes';
-import { SpotifyRemoteObserver } from '../../local/spotifySync';
 import { resizeVisualizer, canvasVisible } from './visuals/canvas';
 import { createStereoTap, type StereoTap } from './visuals/analysis';
 import { drawSpectrogram, resetSpectrogram } from './visuals/spectrogram';
@@ -78,7 +77,7 @@ type SpotlightState = {
 export default function Player({
   record, replaying = false, keyboardPlayback = true, onControls, initialSettings, onSettingsChange,
   combinedVisualizerExpanded, onCombinedVisualizerExpandedChange,
-  masterVolume = 1, tempoSupported = true, transport, onTransportCommand, onPlaybackError,
+  masterVolume = 1, tempoSupported = true, onPlaybackError,
   title,
   trackMetadata,
   unavailableMessage,
@@ -1057,7 +1056,6 @@ export default function Player({
   const commitSeek = useCallback(
     async (targetTime: number) => {
       Object.values(canvasRefs.current).forEach(canvas => { if (canvas) resetSpectrogram(canvas); });
-      remoteObserver.current.commanded();
       const clampedTime = Math.max(0, Math.min(targetTime, duration || 0));
 
       if (isPlaying) {
@@ -1068,9 +1066,8 @@ export default function Player({
         startOffsetRef.current = clampedTime;
         setCurrentTime(clampedTime);
       }
-      onTransportCommand?.({ action: 'seek', position: clampedTime });
     },
-    [duration, isPlaying, schedulePlayback, stopAllSources, onTransportCommand]
+    [duration, isPlaying, schedulePlayback, stopAllSources]
   );
 
   const handleSeekChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -1157,7 +1154,6 @@ export default function Player({
   }, [stopAllSources]);
 
   const handlePlayPause = useCallback(async () => {
-    remoteObserver.current.commanded();
     if (!tracks.length) {
       return;
     }
@@ -1166,7 +1162,6 @@ export default function Player({
       const pausedAt = pausePlayback();
       pausedAtPerformanceTimeRef.current = performance.now();
       emitRecordingEvent("transport_pause", undefined, pausedAt);
-      onTransportCommand?.({action:'pause'});
       return;
     }
 
@@ -1180,13 +1175,12 @@ export default function Player({
     pausedAtPerformanceTimeRef.current = null;
     await schedulePlayback(startOffsetRef.current);
     emitRecordingEvent("transport_play", playPayload);
-    onTransportCommand?.({action:'play'});
   }, [
     emitRecordingEvent,
     isPlaying,
     pausePlayback,
     schedulePlayback,
-    tracks.length, onTransportCommand,
+    tracks.length,
   ]);
 
   useSpacePlayback(() => { if (!replaying) void handlePlayPause(); }, keyboardPlayback);
@@ -1384,28 +1378,7 @@ export default function Player({
     };
     update(); const timer = setInterval(update, 200); return () => clearInterval(timer);
   }, [masterVolume]);
-  const remoteObserver = useRef(new SpotifyRemoteObserver());
-  useEffect(() => {
-    const change = remoteObserver.current.observe(transport);
-    if (!change || !transport || !areTracksReady || record.md5 !== `spotify-${transport.trackId}`) return;
-    if (change.playing === false) {
-      const position = pausePlayback();
-      emitRecordingEvent('transport_pause', undefined, position);
-    }
-    if (change.position !== undefined) {
-      const position = Math.max(0, Math.min(duration, change.position));
-      stopAllSources(); startOffsetRef.current = position; setCurrentTime(position);
-      emitRecordingEvent('seek_commit', {source:'remote'}, position);
-    }
-    if (change.playing === true || (change.position !== undefined && isPlaying && change.playing !== false)) {
-      void schedulePlayback(startOffsetRef.current).then(() => {
-        if (change.playing === true) emitRecordingEvent('transport_play');
-      }).catch(reason => setTransportError(String(reason)));
-    }
-  }, [transport, areTracksReady, record.md5, duration, isPlaying, pausePlayback, schedulePlayback, stopAllSources, emitRecordingEvent]);
-  useEffect(() => {
-    if (transport && tracks.length && readyTrackIds.length < tracks.length && unavailableMessage) onPlaybackError?.(unavailableMessage);
-  }, [transport, tracks.length, readyTrackIds.length, unavailableMessage, onPlaybackError]);
+
   useEffect(() => {
     if (isRecording && areTracksReady) onRecordingEventRef.current?.({type:'mixer_snapshot',trackTimeSeconds:currentPlaybackTime(),payload:{snapshot:snapshot()}});
   }, [isRecording,areTracksReady,tempo,pitch,volumes,trackMuteStates,trackDeafenStates,trackLockStates,effectValues,effectTypes,effectSettings,visualizerType,spotlightState,snapshot,currentPlaybackTime]);
@@ -1455,8 +1428,6 @@ export default function Player({
   const handleRecordingButton = useCallback(async () => {
     if (isRecording) {
       flushDebouncedRecordingEvents();
-      remoteObserver.current.commanded();
-      onTransportCommand?.({action:'pause'});
       const stoppedAt = isPlaying ? pausePlayback() : currentPlaybackTime();
       pausedAtPerformanceTimeRef.current = null;
       await onStopRecording?.(
@@ -1481,12 +1452,9 @@ export default function Player({
 
     pausedAtPerformanceTimeRef.current = null;
     isRecordingRef.current = true;
-    remoteObserver.current.commanded();
     await schedulePlayback(startOffsetRef.current);
     emitRecordingEvent('transport_play');
-    onTransportCommand?.({action: 'play'});
   }, [
-    onTransportCommand,
     emitRecordingEvent,
     areTracksReady,
     snapshot,

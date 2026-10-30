@@ -1,6 +1,10 @@
+import { encodeMp3Set } from './audio/mp3';
 import 'fake-indexeddb/auto';
 import { MP3_NAMES } from './audio/mp3Types';
 const encoding={sampleRate:44100,frames:7,gain:0.5};
+const audio={left:new Float32Array(7),right:new Float32Array(7),sampleRate:44100};
+const validFiles=(await encodeMp3Set(audio,{bass:audio,drums:audio,other:audio,vocals:audio})).files;
+const encodedBytes=Object.values(validFiles).reduce((sum,b)=>sum+b.size,0);
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { saveInput, getTrack, getInput, saveMp3, deleteTrack, getPlaybackRecord, transaction } from './library.ts';
@@ -10,10 +14,10 @@ test('input survives reload, output commits atomically and deletion removes audi
   await saveInput({id, title:'test',artist:'',createdAt:1,sampleRate:44100,frames:7,status:'captured',bytes:100,source:'file'}, blob);
   assert.equal((await getInput(id)).size, 500);
   assert.equal((await getTrack(id))?.status, 'captured');
-  const stems = Object.fromEntries(MP3_NAMES.map(name => [name, blob])) as Record<typeof MP3_NAMES[number], Blob>;
+  const stems = Object.fromEntries(MP3_NAMES.map(name => [name, validFiles[name]])) as Record<typeof MP3_NAMES[number], Blob>;
   await saveMp3(id, stems, {}, encoding);
   assert.equal((await getTrack(id))?.status, 'ready');
-  assert.equal((await getTrack(id))?.bytes, 2500);
+  assert.equal((await getTrack(id))?.bytes, encodedBytes);
   assert.equal((await getPlaybackRecord(id)).files.length, 5);
   await deleteTrack(id);
   assert.equal(await getTrack(id), undefined);
@@ -38,9 +42,9 @@ test('missing or invalid stems cannot publish a ready track', async () => {
 test('successful MP3 commit removes raw and source originals and accounts exact bytes', async () => {
  const id=crypto.randomUUID();const wav=new Blob([new Uint8Array(500)]);const source=new Blob(['original bytes']);
  await saveInput({id,title:'source',artist:'',createdAt:1,sampleRate:44100,frames:7,status:'captured',bytes:0,source:'file'},wav,source);
- const stems=Object.fromEntries(MP3_NAMES.map(name=>[name,wav])) as Record<typeof MP3_NAMES[number],Blob>;
+ const stems=Object.fromEntries(MP3_NAMES.map(name=>[name,validFiles[name]])) as Record<typeof MP3_NAMES[number],Blob>;
  await saveMp3(id,stems,{},encoding);
- assert.equal((await getTrack(id))?.bytes,2500);
+ assert.equal((await getTrack(id))?.bytes,encodedBytes);
  assert.ok((await getPlaybackRecord(id)).files.every(file=>file.name.endsWith('.mp3')));
  await assert.rejects(getInput(id));
  assert.equal((await getPlaybackRecord(id)).playbackGain,0.5);
@@ -50,7 +54,7 @@ test('successful MP3 commit removes raw and source originals and accounts exact 
 test('abort after MP3 writes rolls back deletion, bytes, gain and ready status',async()=>{
  const id=crypto.randomUUID(),raw=new Blob([new Uint8Array(500)]),source=new Blob(['source']);
  await saveInput({id,title:'rollback',artist:'',createdAt:1,sampleRate:44100,frames:7,status:'captured',bytes:0,source:'file'},raw,source);
- const files=Object.fromEntries(MP3_NAMES.map(name=>[name,raw])) as Record<typeof MP3_NAMES[number],Blob>;
+ const files=Object.fromEntries(MP3_NAMES.map(name=>[name,validFiles[name]])) as Record<typeof MP3_NAMES[number],Blob>;
  const put=IDBObjectStore.prototype.put;
  IDBObjectStore.prototype.put=function(value,key){
   const request=put.call(this,value,key);
@@ -64,4 +68,12 @@ test('abort after MP3 writes rolls back deletion, bytes, gain and ready status',
  assert.equal((await getPlaybackRecord(id)).files.length,2);
  assert.equal((await getInput(id)).size,raw.size);
  await deleteTrack(id);
+});
+
+test('invalid timing or structurally corrupt MP3 retains the original input', async()=>{
+ const id=crypto.randomUUID(),raw=new Blob(['raw']);
+ await saveInput({id,title:'validation',artist:'',createdAt:1,sampleRate:44100,frames:7,status:'captured',bytes:0,source:'file'},raw);
+ await assert.rejects(saveMp3(id,validFiles,{}, {...encoding,frames:8}),/does not match/);
+ await assert.rejects(saveMp3(id,{...validFiles,bass:new Blob([new Uint8Array(500)])},{},encoding),/MP3/);
+ assert.equal((await getTrack(id))?.status,'captured');assert.equal(await (await getInput(id)).text(),'raw');await deleteTrack(id);
 });

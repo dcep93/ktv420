@@ -1,9 +1,9 @@
-import { cp, mkdir, rm, readFile, writeFile, rename } from 'node:fs/promises';
+import { cp, mkdir, rm, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { writeAssetManifest } from './player-assets.mjs';
 const root = new URL('../', import.meta.url);
-// Never replace a working install with a broker for an unpublished website.
+// Stage the updated Spotify integration alongside the website build.
 const output = new URL('dist/extension-candidate/', root);
 await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
@@ -11,18 +11,13 @@ for (const directory of ['src', 'assets']) {
   await cp(new URL(`extension/${directory}/`, root), new URL(`${directory}/`, output), { recursive: true });
 }
 const manifest = JSON.parse(await readFile(new URL('extension/manifest.json', root), 'utf8'));
-manifest.description = 'Capture Spotify and keep audio locally. The ktv420 hosted player handles listening, DJing and local separation.';
-manifest.host_permissions = ['https://open.spotify.com/*'];
-manifest.content_security_policy.extension_pages = "script-src 'self'; object-src 'none'; frame-src https://ktv420.web.app; connect-src 'none'; img-src 'self';";
-delete manifest.cross_origin_embedder_policy;
-delete manifest.cross_origin_opener_policy;
 await writeFile(new URL('manifest.json', output), `${JSON.stringify(manifest, null, 2)}\n`);
 await cp(new URL('frontend/app/dist-extension/', root), new URL('build/', output), { recursive: true });
-await rename(new URL('build/broker.html', output), new URL('build/index.html', output));
 await cp(new URL('THIRD_PARTY_NOTICES.md', root), new URL('THIRD_PARTY_NOTICES.md', output));
 const hosted = new URL('site/player/', root);
 await rm(hosted, { recursive: true, force: true });
 await cp(new URL('frontend/app/dist/', root), hosted, { recursive: true });
+await cp(new URL('frontend/app/dist/index.html', root), new URL('site/index.html', root));
 await rm(new URL('benchmark-reference.f32', hosted), { force: true });
 await writeAssetManifest(hosted.pathname);
 const theme = new URL('site/theme/', root);

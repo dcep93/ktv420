@@ -1,6 +1,7 @@
 import { localPlaylistLink } from '../features/local/playlistPage';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { extensionMessage, STORE_URL } from '../features/local/extensionConnection';
+import { savedCollections, deleteCollectionAudio } from '../features/local/collections';
+import { STORE_URL } from '../features/local/extensionConnection';
 import { collectionLink, type SavedCollectionSummary } from '../features/local/savedCollections';
 import OverlayIcon from './OverlayIcon';
 import './saved.css';
@@ -16,7 +17,7 @@ export default function SavedPage() {
   const refresh = useCallback(async () => {
     const revision = ++refreshRevision.current;
     try {
-      const response = await extensionMessage<{ok: boolean; collections: SavedCollectionSummary[]}>({type: 'ktv420:saved-collections'});
+      const response = {collections:await savedCollections()};
       if (revision === refreshRevision.current) { setCollections(response.collections); setError(''); }
     } catch (reason) { if (revision === refreshRevision.current) setError(reason instanceof Error ? reason.message : String(reason)); }
   }, []);
@@ -24,7 +25,7 @@ export default function SavedPage() {
     if (deleting) return;
     setDeleting(path); setDeleteError('');
     try {
-      await extensionMessage({ type: 'ktv420:delete-collection-audio', path, confirmed: true });
+      await deleteCollectionAudio(path);
       setConfirmDelete('');
       await refresh();
     } catch (reason) { setDeleteError(reason instanceof Error ? reason.message : String(reason)); }
@@ -39,15 +40,15 @@ export default function SavedPage() {
     return () => { clearTimeout(timer); clearInterval(poll); window.removeEventListener('focus', visible); };
   }, [refresh]);
   return <main className="iframe-page saved-page"><section className="saved-content">
-    <header><a className="app-title" href="/">ktv420</a><h1>Catalog</h1><p>Playlists and albums on this computer.</p><a className="transfer-import" href={transferLink()}>Import playlist</a></header>
-    {error ? <div className="saved-empty"><p role="status">{error}</p><nav><a href={STORE_URL} target="_blank" rel="noreferrer">Install / update extension</a><button onClick={() => void refresh()}>Refresh</button></nav></div>
+    <header><a className="app-title" href="/">ktv420</a><h1>Catalog</h1><p>Playlists and albums on this computer.</p><a className="transfer-import" href={transferLink()}>Import playlist</a><a href={STORE_URL} target="_blank" rel="noreferrer">Spotify extension</a></header>
+    {error ? <div className="saved-empty"><p role="status">{error}</p><nav><button onClick={() => void refresh()}>Refresh</button></nav></div>
       : collections === null ? <p role="status">Loading…</p> : collections.length === 0 ? <div className="saved-empty"><p>Capture or import a playlist or album to add it here.</p><a href="https://open.spotify.com/">Open Spotify</a></div>
-      : <ol className="saved-collections">{collections.map(collection => <li key={collection.path}><div className="saved-row"><a href={collectionLink(collection.path)}>
+      : <ol className="saved-collections">{collections.map(collection => <li key={collection.path}><div className="saved-row"><a href={localPlaylistLink(collection.path, new URLSearchParams(location.search).get('extension'))}>
         {collection.artwork ? <img src={collection.artwork} alt="" /> : <span className="saved-artwork"><OverlayIcon name="music" /></span>}
         <span className="saved-copy"><strong>{collection.title || (collection.path.startsWith('album/') ? 'Saved album' : 'Saved playlist')}</strong>
           <span>{collection.captured} of {collection.total} captured · {collection.ready} ready</span></span>
         <span className="saved-arrow" aria-hidden="true">↗</span>
-      </a><a className="saved-local-link" href={localPlaylistLink(collection.path, new URLSearchParams(location.search).get('extension'))} aria-label={`Open ${collection.title || 'collection'} in ktv420`}>ktv420</a><a className="saved-local-link" href={transferLink(collection.path)} aria-label={`Export ${collection.title || 'collection'}`}>Export</a><button className="saved-delete" aria-label={`Delete local audio for ${collection.title || 'this collection'}`} title="Delete local audio"
+      </a><a className="saved-local-link" href={collectionLink(collection.path)} aria-label={`Open ${collection.title || 'collection'} in Spotify`}>Spotify</a><a className="saved-local-link" href={transferLink(collection.path)} aria-label={`Export ${collection.title || 'collection'}`}>Export</a><button className="saved-delete" aria-label={`Delete local audio for ${collection.title || 'this collection'}`} title="Delete local audio"
         disabled={!collection.captured || !!deleting} onClick={() => { setConfirmDelete(collection.path); setDeleteError(''); }}><OverlayIcon name="trash" /></button></div>
       {confirmDelete === collection.path && <div className="saved-confirm">
         <p>Delete this collection’s local originals and stems? Shared songs will also be unavailable in other playlists. The catalog link stays.</p>

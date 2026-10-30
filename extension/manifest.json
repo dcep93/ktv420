@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "ktv420",
-  "version": "6.7.3",
+  "version": "7.0.0",
   "minimum_chrome_version": "121",
-  "description": "Capture Spotify and keep audio locally. The ktv420 hosted player handles listening, DJing and local separation.",
+  "description": "Spotify capture for ktv420. Import, separate, mix and visualize music locally at ktv420.web.app.",
   "icons": {
     "16": "assets/icon-16.png",
     "32": "assets/icon-32.png",
@@ -11,7 +11,8 @@
     "128": "assets/icon-128.png"
   },
   "host_permissions": [
-    "https://open.spotify.com/*"
+    "https://open.spotify.com/*",
+    "https://ktv420.web.app/*"
   ],
   "action": {
     "default_title": "Open ktv420 on Spotify"
@@ -21,7 +22,7 @@
     "type": "module"
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'none'; frame-src https://ktv420.web.app; connect-src 'none'; img-src 'self';"
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'none';"
   },
   "content_scripts": [
     {
@@ -37,7 +38,6 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "build/index.html",
         "assets/favicon.svg",
         "assets/icon-*.png",
         "src/content/*.js",
@@ -45,14 +45,6 @@
       ],
       "matches": [
         "https://open.spotify.com/*"
-      ]
-    },
-    {
-      "resources": [
-        "build/index.html"
-      ],
-      "matches": [
-        "https://ktv420.web.app/*"
       ]
     }
   ],

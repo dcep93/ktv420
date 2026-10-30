@@ -1,6 +1,6 @@
 import type { LocalTrack } from './library';
 
-/** Called only while holding the extension-wide separation lock. */
+/** Called only while holding the website-wide separation lock. */
 export async function drainSpotifyQueue(options: {
   list: () => Promise<LocalTrack[]>;
   process: (id: string) => Promise<void>;

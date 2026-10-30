@@ -6,7 +6,7 @@ const runtimeVersion = JSON.parse(readFileSync(new URL('./node_modules/onnxrunti
 export default defineConfig(({ mode, command }) => {
   const extension = mode === 'extension';
   const input: Record<string, string> = extension
-    ? { broker: fileURLToPath(new URL('./broker.html', import.meta.url)), background: fileURLToPath(new URL('./src/extension/background.ts', import.meta.url)) }
+    ? { background: fileURLToPath(new URL('./src/extension/background.ts', import.meta.url)) }
     : { index: fileURLToPath(new URL('./index.html', import.meta.url)) };
   return {
     base: command === 'serve' || extension ? './' : '/player/', plugins: [react()],

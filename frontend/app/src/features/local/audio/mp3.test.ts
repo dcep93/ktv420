@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { encodeMp3Set } from './mp3.ts';
 import { MP3_NAMES } from './mp3Types.ts';
-import { validateMp3 } from '../../../extension/mp3Validation.ts';
+import { validateMp3 } from './mp3Validation.ts';
 
 for (const rate of [32000, 44100, 48000, 22050]) test(`real LAME output is aligned 320 kbps stereo at ${rate} Hz`, async () => {
   const left = Float32Array.from({ length: 2401 }, (_, i) => 2 * Math.sin(i * 0.03));

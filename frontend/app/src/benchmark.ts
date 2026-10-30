@@ -12,7 +12,11 @@ run.addEventListener('click', async () => {
     const right = Float32Array.from({length:frames}, (_,i) => 0.17 * Math.sin(2*Math.PI*330*i/sampleRate));
     worker?.dispose();
     worker = new LocalSeparator({ backend: document.querySelector<HTMLSelectElement>('#backend')!.value as 'wasm' | 'webgpu' });
-    const result = await worker.separateStereo({left,right,sampleRate}, p => { status.textContent = `${((performance.now()-start)/1000).toFixed(1)}s ${p.message} ${Math.round(p.fraction*100)}%`; });
+    let result = await worker.separateStereo({left,right,sampleRate}, p => { status.textContent = `${((performance.now()-start)/1000).toFixed(1)}s ${p.message} ${Math.round(p.fraction*100)}%`; });
+    const coldSeconds=(performance.now()-start)/1000;
+    const warmStart=performance.now();
+    result=await worker.separateStereo({left,right,sampleRate},p=>{status.textContent=`Warm run: ${p.message} ${Math.round(p.fraction*100)}%`;});
+    const warmSeconds=(performance.now()-warmStart)/1000;
     const stats = Object.fromEntries(['drums','bass','other','vocals'].map(name => {
       const audio = result[name as 'drums']; let sum=0, peak=0, finite=true;
       for (const channel of [audio.left,audio.right]) for (const value of channel) {sum += value*value; peak = Math.max(peak, Math.abs(value)); finite &&= Number.isFinite(value);}
@@ -29,7 +33,7 @@ run.addEventListener('click', async () => {
       }
       parity={samples:offset,maxError,rmsError:Math.sqrt(squaredError/offset),pass:offset===reference.length && maxError<0.001};
     }
-    status.textContent = JSON.stringify({parity,wallSeconds:(performance.now()-start)/1000, metadata:result.metadata,stats},null,2);
+    status.textContent = JSON.stringify({parity,coldSeconds,warmSeconds,wallSeconds:(performance.now()-start)/1000, metadata:result.metadata,stats},null,2);
   } catch(error) { status.textContent = `FAILED after ${((performance.now()-start)/1000).toFixed(1)}s: ${error instanceof Error ? error.stack : String(error)}`; }
   finally {run.disabled=false;}
 });

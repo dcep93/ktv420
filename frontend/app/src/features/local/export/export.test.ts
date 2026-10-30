@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { compileExport, eventQuanta, EXPORT_RATE, exportGain, checkExportMemory } from './timeline';
 import { encodePerformance } from './encode';
-import { validateMp3 } from '../../../extension/mp3Validation';
+import { validateMp3 } from '../audio/mp3Validation';
 import { getLogarithmicVolumeGain } from '../../stems/player/mixerGain';
 import type { PerformanceRecording, MixerSnapshot } from '../recording';
 const id='1111111111111111111111',id2='2222222222222222222222';
