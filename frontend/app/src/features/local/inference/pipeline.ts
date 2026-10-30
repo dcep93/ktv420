@@ -45,6 +45,8 @@ export async function separateWithRunner(
     packed.fill(0)
     packed.set(audio.left.subarray(start, start + count))
     packed.set(audio.right.subarray(start, start + count), segmentFrames)
+    // Report the operation in flight without claiming unfinished samples as done.
+    onProgress({ phase: 'separating', fraction: chunk / chunks, chunk, totalChunks: chunks, message: `Separating segment ${chunk + 1} of ${chunks}` })
     const separated = await runSegment(packed, segmentFrames)
     if (!(separated instanceof Float32Array) || separated.length !== segmentFrames * 8) {
       throw new Error('The model returned an unexpected four-stem tensor.')
@@ -59,7 +61,7 @@ export async function separateWithRunner(
       }
     }
     for (let i = 0; i < count; i++) weights[start + i] += window[i]
-    onProgress({ phase: 'separating', fraction: (chunk + 1) / chunks, chunk: chunk + 1, totalChunks: chunks, message: `Separating segment ${chunk + 1} of ${chunks}` })
+    onProgress({ phase: 'separating', fraction: (chunk + 1) / chunks, chunk: chunk + 1, totalChunks: chunks, message: `Completed segment ${chunk + 1} of ${chunks}` })
   }
   const output = {} as StemAudio
   for (let stem = 0; stem < STEM_NAMES.length; stem++) {
