@@ -83,7 +83,8 @@ export class CaptureOrchestrator extends EventTarget {
       if (this.tearingDown) throw new DOMException('Spotify page is closing.', 'AbortError');
       const report={...debug,failedAt:new Date().toISOString(),error:serializeError(error),mediaSession:this.bridge.getSnapshot().mediaSession};
       try {window.sessionStorage.setItem('ktv420:last-capture-failure',JSON.stringify(report));}catch{/* retain console evidence */}
-      console.warn(`[ktv420] Capture failed: ${report.error.message}\n${JSON.stringify(report)}`);
+      console.warn(`[ktv420] Capture failed: ${report.error.message}`);
+      console.debug('[ktv420] Capture diagnostic', report);
       throw error;
     } finally {
       this.clearCaptureProgress();
@@ -271,6 +272,12 @@ export class CaptureOrchestrator extends EventTarget {
           duration,
           reason: "media-ended"
         };
+      }
+
+      // An emptied media element reports zero with no duration. That is loss of
+      // the loaded recording source, not evidence of seeking back to the start.
+      if (mediaState.readyState === 0 && mediaState.duration === null) {
+        throw new Error(`Spotify unloaded the audio during ${item.trackName} at ${lastMediaTime.toFixed(1)}s. Nothing was saved; capture this song again.`);
       }
 
       if (currentTime + END_TOLERANCE_SECONDS < lastMediaTime) {

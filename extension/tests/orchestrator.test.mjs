@@ -122,7 +122,8 @@ test('run errors and cached completion reset progress', async t => {
 
 test('the last capture failure survives refresh and unavailable diagnostic storage cannot mask it', async t => {
   mockPage(t);
-  t.mock.method(console, 'log', () => {});
+  const warnings = t.mock.method(console, 'warn', () => {});
+  const diagnostics = t.mock.method(console, 'debug', () => {});
   const stored = new Map();
   window.sessionStorage = { setItem: (key, value) => stored.set(key, value) };
   const runner = new CaptureOrchestrator({ bridge: { command: async () => ({}), getSnapshot: () => ({}) } });
@@ -137,6 +138,9 @@ test('the last capture failure survives refresh and unavailable diagnostic stora
   assert.equal(report.phase, 'recording');
   assert.equal(report.trackName, 'Unwritten');
   assert.equal(report.recentMediaStates[0].previousPosition, 100);
+  assert.deepEqual(warnings.mock.calls[0].arguments, ['[ktv420] Capture failed: Original capture failure']);
+  assert.equal(diagnostics.mock.calls[0].arguments[0], '[ktv420] Capture diagnostic');
+  assert.deepEqual(JSON.parse(JSON.stringify(diagnostics.mock.calls[0].arguments[1])), report);
   window.sessionStorage.setItem = () => { throw Error('Storage unavailable'); };
   await assert.rejects(runner.run({trackIds:[item.trackId],trackSnapshot:[item]}), /Original capture failure/);
 });
@@ -188,6 +192,18 @@ test('confirmed backward movement logs positions and stops instead of saving dam
   await assert.rejects(runner.recordUntilBoundary(item, {}, debug), /100\.000s → 90\.100s/);
   assert.equal(debug.phase, 'recording');
   assert.deepEqual(debug.recentMediaStates.map(state => state.currentTime), [90, 90.1]);
+});
+
+test('an unloaded source is not misreported as a backward seek', async () => {
+  const states = [
+    { source: 'audio', currentTime: 64.246712, duration: 231.310068, readyState: 4 },
+    { source: 'audio', currentTime: 0, duration: null, paused: true, readyState: 0, invalid: false },
+  ];
+  const runner = new CaptureOrchestrator({ bridge: { command: async () => states.shift() } });
+  const debug = { events: [] };
+  await assert.rejects(runner.recordUntilBoundary(item, {}, debug), /unloaded the audio.*64\.2s.*capture this song again/);
+  assert.equal(debug.recentMediaStates[0].readyState, 0);
+  assert.equal(debug.recentMediaStates[0].duration, null);
 });
 
 test('an actual seek remains fatal immediately and retains its media evidence', async () => {
