@@ -8,7 +8,7 @@ import { getTrack } from './library';
 import { loadPerformance } from './performanceFiles';
 import type { PerformanceRecording } from './recording';
 import type { CaptureProgress } from './captureProgress';
-import type { Collection } from './savedCollections';
+import { discoverPlaylist, type PlaylistSnapshot } from './spotify/discover';
 export type SpotifyTrack = TrackRow;
 type Status = {
   request: { id: string; state: string; error: string } | null;
@@ -42,19 +42,9 @@ export function usePlaylist(onClose?: () => void) {
       try {
         let collection;
         if (embeddedSpotify) {
-          const snapshot = await spotifyRequest<{
-            collection: Collection;
-            tracks: TrackRow[];
-            complete: boolean;
-          }>('discover');
-          if (snapshot.collection.path !== path)
-            throw new Error(
-              'Spotify is showing a different playlist. Open ktv420 from that page again.',
-            );
-          if (!snapshot.complete)
-            throw new Error(
-              'Spotify’s complete track list is not available yet. Refresh to retry.',
-            );
+          const snapshot = await discoverPlaylist(path,
+            () => spotifyRequest<PlaylistSnapshot>('discover'), () => disposed);
+          if (!snapshot) return;
           await rememberCollection(snapshot.collection, snapshot.tracks);
           collection = { ...snapshot.collection, tracks: snapshot.tracks };
         } else collection = await savedCollection(path);
