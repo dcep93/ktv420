@@ -15,6 +15,7 @@ export function separationStatus(track: LibrarySummary | undefined, enabled: boo
       busy: state === 'processing', failed: state === 'error',
     };
   }
+  if (track.retryAt) return { label: `Retrying separation${track.retryAt > now ? ` in ${Math.ceil((track.retryAt - now) / 1000)}s` : '…'}`, detail: track.error || '', busy: false, failed: false };
   if (failure || track.status === 'error') return { label: 'Needs retry', detail: failure || track.error || 'Retry separation in Settings.', busy: false, failed: true };
   if (track.location === 'extension') {
     // Another Spotify overlay may own the active claim, independently of this view's pause switch.

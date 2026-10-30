@@ -48,10 +48,10 @@ export default function SavedPage() {
         <span className="saved-copy"><strong>{collection.title || (collection.path.startsWith('album/') ? 'Saved album' : 'Saved playlist')}</strong>
           <span>{collection.captured} of {collection.total} captured · {collection.ready} ready</span></span>
         <span className="saved-arrow" aria-hidden="true">↗</span>
-      </a><a className="saved-local-link" href={collectionLink(collection.path)} aria-label={`Open ${collection.title || 'collection'} in Spotify`}>Spotify</a><a className="saved-local-link" href={transferLink(collection.path)} aria-label={`Export ${collection.title || 'collection'}`}>Export</a><button className="saved-delete" aria-label={`Delete local audio for ${collection.title || 'this collection'}`} title="Delete local audio"
+      </a><a className="saved-local-link" href={collectionLink(collection.path)} aria-label={`Open ${collection.title || 'collection'} in Spotify`}>{collection.captured < collection.total ? 'Finish capturing in Spotify' : 'Spotify'}</a><a className="saved-local-link" href={transferLink(collection.path)} aria-label={`Export ${collection.title || 'collection'}`}>Export</a><button className="saved-delete" aria-label={`Delete local audio for ${collection.title || 'this collection'}`} title="Delete local audio"
         disabled={!collection.captured || !!deleting} onClick={() => { setConfirmDelete(collection.path); setDeleteError(''); }}><OverlayIcon name="trash" /></button></div>
       {confirmDelete === collection.path && <div className="saved-confirm">
-        <p>Delete this collection’s local originals and stems? Shared songs will also be unavailable in other playlists.</p>
+        <p>Delete this collection’s local originals and stems? Songs shared with other playlists will be kept.</p>
         {deleteError && <p role="alert">{deleteError}</p>}
         <div><button className="saved-delete-confirm" disabled={!!deleting} onClick={() => void removeAudio(collection.path)}>{deleting === collection.path ? 'Deleting…' : 'Delete local audio'}</button>
           <button disabled={!!deleting} onClick={() => { setConfirmDelete(''); setDeleteError(''); }}>Cancel</button></div>

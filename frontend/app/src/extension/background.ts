@@ -1,3 +1,5 @@
+import { recoverQueue, recoverCaptureDocument } from './queueRecovery';
+import { ensureWorkerHost } from './workerHost';
 import { workState, configureWork, claimWork, failWork, recoverWorker, type WorkerOwner } from './workQueue';
 import { beginReturnedCapture, appendReturnedCapture, finishReturnedCapture } from './returnedCapture';
 import { listStagedAudio, deleteStagedAudio } from './stagedLibrary';
@@ -10,27 +12,27 @@ import {
   finishCapture,
   pendingCaptures,
   readChunk,
-  readLibrarySummary,
   publishLibrarySummary,
   rememberPlayerCollection,
   playerCollections,
   acknowledgePlayerCollection,
 } from './queue';
-async function request(message: unknown, tabId?: number, websiteTabId?: number, documentId?: string) {
+async function request(message: unknown, tabId?: number, websiteTabId?: number, documentId?: string, backgroundWorker = false) {
   const r = parseRequest(message);
   if (String(r.operation).startsWith('work-')) {
     if (r.operation === 'work-state') return workState();
-    if (r.operation === 'work-config') return configureWork(r.enabled as boolean, r.retry === true, r.backend as 'auto' | 'wasm' | undefined);
+    if (r.operation === 'work-config') { await configureWork(r.enabled as boolean, r.retry === true, r.backend as 'auto' | 'wasm' | undefined); await ensureWorkerHost(); return; }
     const boundTab = tabId ?? websiteTabId;
-    if (boundTab === undefined) throw new Error('A ktv420 view must own the worker.');
-    const owner: WorkerOwner = `worker:${boundTab}`;
+    if (!backgroundWorker && !['work-state', 'work-config', 'work-pending'].includes(String(r.operation))) throw new Error('Separation runs in the extension background. Refresh this view.');
+    if (!backgroundWorker && boundTab === undefined) throw new Error('A ktv420 view must own the worker.');
+    const owner: WorkerOwner = backgroundWorker ? 'worker:background' : `worker:${boundTab!}`;
     if (r.operation === 'work-recover') {
       if (!documentId) throw new Error('Reload this page to reconnect separation.');
       return recoverWorker(owner, documentId);
     }
     const id = String(r.id), token = String(r.token);
     switch (r.operation) {
-      case 'work-failure': return failWork(id, token, owner, String(r.error), r.recoverOnReload === true);
+      case 'work-failure': return failWork(id, token, owner, String(r.error), r.recoverOnReload === true, r.transient === true);
       case 'work-pending': return pendingCaptures();
       case 'work-claim': return claimWork(id, owner, documentId);
       case 'work-touch': return touchClaim(id, token, owner, r.progress as { fraction: number; message: string } | undefined);
@@ -53,17 +55,13 @@ async function request(message: unknown, tabId?: number, websiteTabId?: number, 
     case 'staging-delete':
       if (tabId === undefined) throw new Error('Only the Spotify overlay manages extension audio.');
       return r.operation === 'staging-list' ? listStagedAudio() : deleteStagedAudio(r.ids as string[]);
-    case 'hello': return { version: 1, extensionVersion: chrome.runtime.getManifest().version, extensionId: chrome.runtime.id, stagedAudio: true, stagedAudioControls: true, extensionQueue: true, workRecovery: true };
+    case 'hello': await ensureWorkerHost(); return { version: 1, extensionVersion: chrome.runtime.getManifest().version, extensionId: chrome.runtime.id, stagedAudio: true, stagedAudioControls: true, extensionQueue: true, workRecovery: true, backgroundQueue: true };
     case 'ack-collection': {
       if (tabId !== undefined) throw new Error('Only the website receives playlist metadata.');
       return acknowledgePlayerCollection(String(r.path), String(r.requestId));
     }
     case 'collections': return playerCollections();
-    case 'library-summary': {
-      const tracks = new Map((await readLibrarySummary()).map(t => [t.id, t]));
-      for (const t of await stagedSummary()) if (tracks.get(t.id)?.status !== 'ready') tracks.set(t.id, { ...t, location: 'extension' });
-      return [...tracks.values()];
-    }
+    case 'library-summary': return stagedSummary(true);
     case 'claim-capture':
     case 'release-capture':
     case 'pending':
@@ -71,10 +69,10 @@ async function request(message: unknown, tabId?: number, websiteTabId?: number, 
     case 'ack': throw new Error('Raw captures stay in the extension until separation finishes. Refresh ktv420.');
     case 'prepared': if (tabId !== undefined) throw new Error('Only the website imports audio.'); return preparedCaptures();
     case 'prepared-chunk': if (tabId !== undefined) throw new Error('Only the website imports audio.'); return preparedChunk(String(r.id), r.name as AudioName, Number(r.index));
-    case 'ack-prepared': if (tabId !== undefined) throw new Error('Only the website imports audio.'); return acknowledgePrepared(String(r.id));
+    case 'ack-prepared': if (tabId !== undefined) throw new Error('Only the website imports audio.'); return acknowledgePrepared(String(r.id), r.discarded === true);
     case 'publish-library': {
       if (tabId !== undefined) throw new Error('Only the standalone website publishes library status.');
-      return publishLibrarySummary(r.tracks);
+      return publishLibrarySummary(r.tracks, r.revision as number | undefined);
     }
     default: {
       if (tabId === undefined) throw new Error('Open ktv420 over a Spotify playlist to capture.');
@@ -104,6 +102,13 @@ chrome.action.onClicked.addListener((tab) => {
   else void chrome.tabs.create({ url: APP_ORIGIN });
 });
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
+  if (sender.id === chrome.runtime.id && sender.tab === undefined && sender.url === chrome.runtime.getURL('src/worker/index.html') &&
+      message?.type === 'ktv420:worker-request' && /^[a-f0-9-]{36}$/.test(message.session || '') &&
+      ['hello', 'work-state', 'work-recover', 'work-pending', 'work-claim', 'work-touch', 'work-chunk', 'work-begin', 'work-append', 'work-finish', 'work-failure', 'work-release'].includes(message.request?.operation)) {
+    void request(message.request, undefined, undefined, `${sender.documentId}/${message.session}`, true).then(
+      result => respond({ ok: true, result }), error => respond({ ok: false, error: String(error.message || error) }));
+    return true;
+  }
   if (sender.documentLifecycle && sender.documentLifecycle !== 'active') return false;
   if (sender.id === chrome.runtime.id && typeof sender.tab?.id === 'number' &&
       (sender.frameId ?? 0) > 0 && sender.url?.split('?')[0] === chrome.runtime.getURL('src/overlay/index.html') &&
@@ -126,14 +131,17 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   const tabId = sender.tab.id;
   const handle = async () => {
     switch (message.type) {
+      case 'ktv420:page-ready':
+        if (sender.documentId) await recoverCaptureDocument(tabId, sender.documentId);
+        return;
       case 'ktv420:cached':
         return (await pendingCaptures()).map((c) => c.metadata);
       case 'ktv420:capture-begin':
-        return beginCapture(tabId, message.metadata, message.bytes);
+        return beginCapture(tabId, message.metadata, message.bytes, sender.documentId);
       case 'ktv420:capture-chunk':
         return appendCapture(tabId, message.id, message.index, message.base64);
       case 'ktv420:capture-finish':
-        return finishCapture(tabId, message.id);
+        await finishCapture(tabId, message.id); await ensureWorkerHost(); return;
       default:
         throw new Error('Unknown Spotify integration operation.');
     }
@@ -156,3 +164,8 @@ chrome.runtime.onMessageExternal.addListener((message, sender, respond) => {
   );
   return true;
 });
+
+chrome.runtime.onStartup?.addListener(() => { void ensureWorkerHost().catch(() => {}); });
+chrome.runtime.onInstalled?.addListener(() => { void ensureWorkerHost().catch(() => {}); });
+
+chrome.tabs.onRemoved?.addListener(() => { void chrome.tabs.query({}).then(tabs => recoverQueue(new Set(tabs.flatMap(t => t.id === undefined ? [] : [t.id])))).catch(() => {}); });

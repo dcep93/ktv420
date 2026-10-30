@@ -17,16 +17,20 @@ export function listCollections(): Promise<LibraryCollection[]> {
 export async function rememberCollection(value: unknown, rows?: TrackRow[]) {
   const collection = parseCollection(value);
   if (!collection) throw new Error('Invalid collection.');
-  await transaction(['collections'], 'readwrite', (tx) => {
+  await transaction(['collections', 'settings'], 'readwrite', (tx) => {
     const store = tx.objectStore('collections'),
       r = store.get(collection.path);
-    r.onsuccess = () =>
+    const deleted = tx.objectStore('settings').get(`deleted-collection/${collection.path}`);
+    deleted.onsuccess = () => {
+      if (deleted.result && (collection.observedAt || 0) <= deleted.result) return;
+      if ((r.result?.observedAt || 0) > (collection.observedAt || 0)) return;
       store.put({
         ...collection,
         tracks: rows || r.result?.tracks,
         savedAt: r.result?.savedAt ?? Date.now(),
         startedAt: r.result?.startedAt ?? Date.now(),
       });
+    };
   });
 }
 export async function savedCollections() {
@@ -69,6 +73,12 @@ export async function deleteCollectionAudio(path: unknown) {
   await navigator.locks.request('ktv420-separation', { ifAvailable: true }, async (lock) => {
     if (!lock) throw new Error('Pause separation before deleting audio.');
     const { deleteTracks } = await import('./library');
-    await deleteTracks(collection.trackIds.map((id) => `spotify-${id}`));
+    const others = (await listCollections()).filter(c => c.path !== collection.path);
+    const shared = new Set(others.flatMap(c => c.trackIds));
+    await deleteTracks(collection.trackIds.filter(id => !shared.has(id)).map(id => `spotify-${id}`));
+    await transaction(['collections', 'settings'], 'readwrite', tx => {
+      tx.objectStore('collections').delete(collection.path);
+      tx.objectStore('settings').put(Date.now(), `deleted-collection/${collection.path}`);
+    });
   });
 }

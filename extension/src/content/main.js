@@ -1,3 +1,4 @@
+import { sendLocalMessage } from './storage.js';
 import { createPageBridge } from './pageBridge.js';
 import { CaptureOrchestrator } from './orchestrator.js';
 import { collectTrackRows, isSupportedRoute, pausePlaybackCleanly } from './dom.js';
@@ -7,6 +8,8 @@ import { createVolumeMonitor } from './volume.js';
 import { SELECTORS } from './constants.js';
 import { createOverlay } from './overlay.js';
 
+// Reconcile abandoned upload chunks from the previous document, quietly on load.
+void sendLocalMessage({ type: 'ktv420:page-ready' }).catch(() => {});
 const bridge = createPageBridge(),
   runner = new CaptureOrchestrator({ bridge });
 let collection = null,
@@ -85,7 +88,7 @@ async function discover() {
   if (location.pathname.slice(1).replace(/\/$/, '') !== path)
     throw new Error('Spotify changed pages during discovery.');
   tracks = serialRows(rows);
-  collection = { path, ...header(), trackIds: tracks.map((t) => t.trackId), tracks, complete };
+  collection = { path, observedAt: Date.now(), ...header(), trackIds: tracks.map((t) => t.trackId), tracks, complete };
   return { collection, tracks, complete };
 }
 async function capture(request) {

@@ -48,6 +48,10 @@ export function useHostedCapture(options: Options) {
               saved.add(id);
             },
             () => setActive(queue.current.active),
+            { retries: 1, failed: (id, message) => {
+              const title = latest.current.spotify.tracks.find(t => t.trackId === id)?.trackName || 'Song';
+              latest.current.onError(`${title} needs recapture: ${message}`);
+            } },
           );
         } catch (reason) {
           latest.current.onError(reason instanceof Error ? reason.message : String(reason));

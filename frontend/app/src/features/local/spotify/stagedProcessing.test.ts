@@ -170,3 +170,29 @@ test('shared queue worker respects pause and resumes without a website-owned raw
     enabled = true; await processed.promise; assert.equal(claimed, 1);
   } finally { stop(); }
 });
+
+test('sequential songs reuse the model worker and normal view closure does not claim background work', async () => {
+  let created = 0, disposed = 0, processed = 0;
+  const finished = deferred<void>();
+  const stop = startStagedProcessing(error => assert.fail(error), () => {}, {
+    request: async <T>(op: string): Promise<T> => {
+      if (op === 'hello') return { stagedAudio: true, extensionQueue: true } as T;
+      if (op === 'work-state') return { enabled: true, backend: 'auto' } as T;
+      if (op === 'work-pending') return [1, 2].map(n => ({ id: String(n), metadata: { trackId: `song${n}` } })) as T;
+      if (op === 'work-claim') return 'token' as T;
+      if (op === 'work-release') { if (processed === 2) finished.resolve(); return undefined as T; }
+      if (op === 'work-touch') return undefined as T;
+      throw new Error(op);
+    },
+    createSeparator: () => { created++; return { dispose: () => { disposed++; }, separateStereo: async () => { throw new Error('unused'); } }; },
+    process: async () => { processed++; },
+  });
+  await finished.promise; assert.equal(created, 1); assert.equal(disposed, 0); stop(); assert.equal(disposed, 1);
+  Object.defineProperty(globalThis, 'location', { configurable: true, value: { pathname: '/playlist' } });
+  const observed = deferred<void>();
+  const stopView = startStagedProcessing(error => assert.fail(error), () => {}, {
+    request: async <T>(op: string): Promise<T> => { assert.equal(op, 'hello'); observed.resolve(); return { stagedAudio: true, backgroundQueue: true } as T; },
+    createSeparator: () => { throw new Error('Visible view must never own inference'); },
+  });
+  await observed.promise; stopView();
+});

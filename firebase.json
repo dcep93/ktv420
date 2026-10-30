@@ -10,6 +10,10 @@
     ],
     "rewrites": [
       {
+        "source": "/separation-worker",
+        "destination": "/player/index.html"
+      },
+      {
         "source": "/transfer{,/**}",
         "destination": "/player/index.html"
       },
@@ -152,6 +156,15 @@
       },
       {
         "source": "/transfer{,/**}",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      },
+      {
+        "source": "/separation-worker",
         "headers": [
           {
             "key": "Cache-Control",

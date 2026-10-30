@@ -6,7 +6,7 @@ import {
   getProcessingEnabled,
   requestPersistence,
 } from '../features/local/libraryClient';
-import { listTracks } from '../features/local/library';
+import { libraryPublication } from '../features/local/libraryPublication';
 /** Reconnect delivery on any website page; no installed extension is needed for the library. */
 export default function AppServices() {
   const [notice, setNotice] = useState('');
@@ -31,16 +31,16 @@ export default function AppServices() {
         const { spotifyRequest } = await import('../features/local/spotify/client');
         let connected = false;
         try {
-          const capability = await spotifyRequest<{ extensionQueue?: boolean }>('hello');
+          const capability = await spotifyRequest<{ extensionQueue?: boolean; backgroundQueue?: boolean }>('hello');
           connected = true;
-          if (capability.extensionQueue && !stopWorker && !cancelled) stopWorker = startStagedProcessing(message => { if (!cancelled) setNotice(message); }, () => {});
+          if (capability.extensionQueue && !capability.backgroundQueue && !stopWorker && !cancelled) stopWorker = startStagedProcessing(message => { if (!cancelled) setNotice(message); }, () => {});
         } catch {
           /* website works independently */
         }
         if (connected)
           try {
             await drainDeliveries();
-            if (!cancelled) setNotice(previous => previous.startsWith('Capture delivery paused:') ? '' : previous);
+            if (!cancelled) setNotice(previous => previous.startsWith('Storage is not persistent.') ? previous : '');
           } catch (reason) {
             if (!cancelled)
               setNotice(
@@ -53,15 +53,18 @@ export default function AppServices() {
         busy = false;
       }
     };
+    let publishing = false;
     const publish = async () => {
+      if (publishing || cancelled) return; publishing = true;
       try {
         const { spotifyRequest } = await import('../features/local/spotify/client');
         const enabled = await getProcessingEnabled();
-        const tracks = (await listTracks()).filter(t => t.source === 'spotify').map(({ id, status }) => ({ id, status,
+        const snapshot = await libraryPublication();
+        const tracks = snapshot.tracks.map(({ id, status }) => ({ id, status,
           ...(status !== 'ready' ? { separation: status === 'error' ? 'error' : !enabled ? 'paused' : status === 'processing' ? 'processing' : 'queued' } : {}),
         }));
-        await spotifyRequest('publish-library', { tracks });
-      } catch { /* Capture extension is optional. */ }
+        await spotifyRequest('publish-library', { tracks, revision: snapshot.revision });
+      } catch { /* Capture extension is optional. */ } finally { publishing = false; }
     };
     void publish();
     const summaryTimer = setInterval(() => void publish(), 2500);

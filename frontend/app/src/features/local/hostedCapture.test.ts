@@ -34,3 +34,14 @@ test('album capture includes rows that arrive after the run starts', async () =>
   assert.equal(queue.total, 4);
   assert.equal(queue.completed, 4);
 });
+
+test('capture recovery retries from scratch once, records the failure, and continues other songs', async () => {
+  const q = new HostedCaptureQueue(), calls: string[] = [], failed: string[] = [];
+  await q.run(['bad', 'good'], () => new Set(), async id => { calls.push(id); if (id === 'bad') throw new Error('Timing could not be verified'); }, () => {}, { retries: 1, failed: id => failed.push(id) });
+  assert.deepEqual(calls, ['bad', 'bad', 'good']); assert.deepEqual(failed, ['bad']);
+});
+test('a user stop never retries or advances even when recovery is enabled', async () => {
+  const q = new HostedCaptureQueue(), calls: string[] = [];
+  await assert.rejects(q.run(['first', 'next'], () => new Set(), async id => { calls.push(id); throw new Error('Capture stopped.'); }, () => {}, { retries: 1, failed: () => assert.fail('User stop is not a failed song') }));
+  assert.deepEqual(calls, ['first']);
+});

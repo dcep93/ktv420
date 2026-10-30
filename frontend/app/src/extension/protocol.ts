@@ -41,6 +41,7 @@ export function parseRequest(value: unknown) {
   )
     throw new Error('Update the ktv420 Spotify extension.');
   if (r.operation === 'ack-collection' && (typeof r.path !== 'string' || !/^(album|playlist)\/[A-Za-z0-9]{22}$/.test(r.path) || typeof r.requestId !== 'string' || !/^[a-f0-9-]{36}$/.test(r.requestId))) throw new Error('Invalid collection acknowledgment.');
+  if ('revision' in r && (!Number.isSafeInteger(r.revision) || Number(r.revision) < 0)) throw new Error('Invalid library revision.');
   if (r.operation === 'publish-library') r.tracks = parseLibrarySummary(r.tracks);
   if (r.operation === 'open-player' && (typeof r.path !== 'string' || !/^(album|playlist)\/[A-Za-z0-9]{22}$/.test(r.path) || (r.trackIndex !== null && (!Number.isSafeInteger(r.trackIndex) || Number(r.trackIndex) < 1 || Number(r.trackIndex) > 10000)))) throw new Error('Invalid player link.');
   if (r.operation === 'staging-delete' && (!Array.isArray(r.ids) || !r.ids.length || r.ids.length > 10000 ||
@@ -48,6 +49,8 @@ export function parseRequest(value: unknown) {
   if (r.operation === 'work-config' && (typeof r.enabled !== 'boolean' || ('retry' in r && typeof r.retry !== 'boolean'))) throw new Error('Invalid queue preference.');
   if ('backend' in r && !['auto', 'wasm'].includes(String(r.backend))) throw new Error('Invalid separation device.');
   if (r.operation === 'work-failure' && (typeof r.error !== 'string' || !r.error.length || r.error.length > 500)) throw new Error('Invalid processing error.');
+  if ('discarded' in r && typeof r.discarded !== 'boolean') throw new Error('Invalid delivery acknowledgment.');
+  if ('transient' in r && typeof r.transient !== 'boolean') throw new Error('Invalid retry classification.');
   if ('recoverOnReload' in r && typeof r.recoverOnReload !== 'boolean') throw new Error('Invalid recovery flag.');
   if (r.operation.startsWith('return-')) {
     if (typeof r.id !== 'string' || !/^[a-f0-9-]{36}$/.test(r.id)) throw new Error('Invalid returned capture ID.');
@@ -118,7 +121,7 @@ export function parseRequest(value: unknown) {
       'id',
       'index',
       'volume',
-      'ids', 'tracks', 'token', 'name', 'manifest', 'base64', 'progress', 'enabled', 'retry', 'backend', 'error', 'metadata', 'bytes', 'recoverOnReload',
+      'ids', 'tracks', 'revision', 'token', 'name', 'manifest', 'base64', 'progress', 'enabled', 'retry', 'backend', 'error', 'metadata', 'bytes', 'recoverOnReload', 'transient', 'discarded',
     ]
       .filter((key) => key in r)
       .map((key) => [key, r[key]]),

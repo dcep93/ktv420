@@ -17,3 +17,5 @@ __pycache__/
 /frontend/app/dist-tempo-validation/
 
 .DS_Store
+
+/_codex_output/

@@ -27,7 +27,7 @@ export function overlayReady() {
 export function overlayRequest<T>(request: Record<string, unknown>): Promise<T> {
   return new Promise((resolve, reject) => {
     const id = crypto.randomUUID();
-    const timer = setTimeout(() => { requests.delete(id); reject(new Error('Spotify did not respond. Reload its tab and retry.')); }, 90000);
+    const timer = setTimeout(() => { requests.delete(id); reject(new Error('Spotify did not respond. Reload its tab and retry.')); }, request.operation === 'work-finish' ? 300000 : 90000);
     requests.set(id, { resolve: value => resolve(value as T), reject, timer });
     parent.postMessage({ source: 'ktv420-overlay-app', type: 'request', id, request }, parentOrigin);
   });

@@ -2,6 +2,7 @@ export const CHUNK_BYTES = 256 * 1024;
 export type QueuedCapture = {
   id: string;
   tabId: number;
+  documentId?: string;
   metadata: Record<string, unknown>;
   expectedBytes: number;
   receivedBytes: number;
@@ -9,6 +10,8 @@ export type QueuedCapture = {
   createdAt: number;
   complete: boolean;
   processingError?: string;
+  retryAt?: number;
+  attempts?: number;
   retryAfterReload?: { owner: string; documentId: string };
 };
 export function validateCapture(metadata: Record<string, unknown>, bytes: number) {

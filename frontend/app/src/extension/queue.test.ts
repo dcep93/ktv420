@@ -101,7 +101,9 @@ test('capture metadata bridges delivery and website processing without a second 
   await acknowledgeCapture(id);
   assert.deepEqual((await readLibrarySummary()).find(t => t.id === 'spotify-summarySong'), { id: 'spotify-summarySong', status: 'captured' });
   await publishLibrarySummary([{ id: 'spotify-summarySong', status: 'ready', audio: 'must not be stored' }]);
-  assert.deepEqual(await readLibrarySummary(), [{ id: 'spotify-summarySong', status: 'ready' }]);
+  const summary = await readLibrarySummary();
+  assert.deepEqual(summary.map(({ id, status }) => ({ id, status })), [{ id: 'spotify-summarySong', status: 'ready' }]);
+  assert.equal(summary[0].location, 'website'); assert.ok(summary[0].updatedAt); assert.equal('audio' in summary[0], false);
   await publishLibrarySummary([]); // Website deletion clears the status cache too.
   assert.deepEqual(await readLibrarySummary(), []);
 });
@@ -134,4 +136,12 @@ test('published separation state has relay-assigned freshness and website owners
   assert.equal(row.separation, 'paused');
   assert.equal(row.location, 'website');
   assert.ok(row.updatedAt! >= before);
+});
+
+test('late website snapshots cannot overwrite a newer deletion', async () => {
+  const revision = Date.now() * 1024 + 100;
+  await publishLibrarySummary([{ id: 'spotify-stale', status: 'ready' }], revision);
+  await publishLibrarySummary([], revision + 2);
+  await publishLibrarySummary([{ id: 'spotify-stale', status: 'ready' }], revision + 1);
+  assert.equal((await readLibrarySummary()).some(t => t.id === 'spotify-stale'), false);
 });

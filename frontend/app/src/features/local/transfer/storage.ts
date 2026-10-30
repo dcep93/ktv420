@@ -66,7 +66,7 @@ export async function exportTrack(id: unknown) {
 }
 export async function beginImport(value: unknown) {
   const bundle = parseBundle(value);
-  await rememberCollection(bundle.collection);
+  await rememberCollection({ ...bundle.collection, observedAt: Date.now() });
   const tracks = await listTracks();
   const ready: string[] = [];
   for (const track of tracks) {

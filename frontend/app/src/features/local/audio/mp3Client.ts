@@ -8,15 +8,19 @@ export function encodeMp3InWorker(input: StereoAudio, stems: StemAudio, cancelle
     if (cancelled()) { reject(new DOMException('Encoding cancelled.', 'AbortError')); return; }
     const worker = new Worker(new URL('./mp3Worker.ts', import.meta.url), { type: 'module' });
     const finish = (error?: Error, result?: Mp3Result) => {
-      clearInterval(timer); worker.terminate();
+      clearInterval(timer); clearTimeout(watchdog); worker.terminate();
       if (error) reject(error); else resolve(result!);
     };
+    let watchdog: ReturnType<typeof setTimeout>;
+    const arm = () => { clearTimeout(watchdog); watchdog = setTimeout(() => finish(new DOMException('MP3 encoding stopped responding. The original recording is saved.', 'TimeoutError')), 120000); };
+    arm();
     const timer = setInterval(() => { if (cancelled()) finish(new DOMException('Encoding cancelled.', 'AbortError')); }, 50);
     worker.onmessage = ({ data }: MessageEvent<{ type: string; result: Mp3Result; progress: SeparationProgress; message: string }>) => {
-      if (data.type === 'progress') progress(data.progress);
+      if (data.type === 'progress') { arm(); progress(data.progress); }
       else if (data.type === 'result') finish(undefined, data.result);
       else finish(new Error(data.message));
     };
+    worker.onmessageerror = () => finish(new Error('MP3 worker returned an unreadable response.'));
     worker.onerror = event => finish(new Error(event.message || 'MP3 encoding worker stopped.'));
     try {
       // Processing owns these arrays and no longer uses them after encoding.

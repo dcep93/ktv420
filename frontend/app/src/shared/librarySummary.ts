@@ -4,6 +4,7 @@ export type LibrarySummary = {
   separation?: 'paused' | 'queued' | 'processing' | 'error';
   location?: 'website' | 'extension';
   updatedAt?: number;
+  retryAt?: number;
   progress?: { fraction: number; message: string };
   error?: string;
 };

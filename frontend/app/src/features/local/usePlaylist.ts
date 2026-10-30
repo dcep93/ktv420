@@ -83,6 +83,8 @@ export function usePlaylist(onClose?: () => void) {
       void loadPerformance('import').then((value) => {
         if (!disposed) setReplay(value);
       });
+    const refreshRows = () => { if (!embeddedSpotify) void savedCollection(path).then(c => { if (!disposed) { setTracks(previous => JSON.stringify(previous) === JSON.stringify(c.tracks) ? previous : c.tracks); setComplete(true); } }).catch(() => {}); };
+    const rowsTimer = setInterval(refreshRows, 2500);
     const pop = () =>
       setNavigation((n) => ({
         open: true,
@@ -91,7 +93,7 @@ export function usePlaylist(onClose?: () => void) {
       }));
     window.addEventListener('popstate', pop);
     return () => {
-      disposed = true;
+      disposed = true; clearInterval(rowsTimer);
       window.removeEventListener('popstate', pop);
     };
   }, []);
@@ -110,6 +112,7 @@ export function usePlaylist(onClose?: () => void) {
         const summary = await spotifyRequest<LibrarySummary[]>('library-summary');
         if (!disposed) {
           setLibrarySummary(summary); setSummaryReady(true);
+          setError('');
           const ids = new Set(summary.map(track => track.id.replace(/^spotify-/, '')));
           setSavingTrackIds(previous => previous.filter(id => !ids.has(id)));
         }

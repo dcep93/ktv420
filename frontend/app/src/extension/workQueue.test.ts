@@ -96,3 +96,50 @@ test('reload retries interrupted workers once per document, but retains genuine 
   await recoverWorker('worker:1', 'newer');
   assert.equal((await pendingCaptures())[0].processingError, 'Invalid recording');
 });
+
+test('background owner survives UI closure and replaces an interrupted worker session immediately', async () => {
+  const id = await recording(1);
+  await recoverWorker('worker:background', 'session-a');
+  const token = await claimWork(id, 'worker:background', 'session-a'); assert.ok(token);
+  const { recoverQueue } = await import('./queueRecovery');
+  await recoverQueue(new Set()); // all visible tabs closed
+  await touchClaim(id, token, 'worker:background');
+  await recoverWorker('worker:background', 'session-b');
+  await assert.rejects(touchClaim(id, token, 'worker:background'));
+  assert.equal(await claimWork(id, 'worker:background', 'session-a'), null);
+  assert.ok(await claimWork(id, 'worker:background', 'session-b'));
+  assert.equal((await pendingCaptures()).length, 1);
+});
+test('transient failures back off, retry within the same session, and eventually stop instead of looping', async () => {
+  const id = await recording(1);
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    const token = await claimWork(id, 'worker:background', 'session'); assert.ok(token);
+    await failWork(id, token, 'worker:background', 'Connection interrupted', false, true);
+    await releaseClaim(id, token, 'worker:background');
+    assert.equal(await claimWork(id, 'worker:background', 'session'), null);
+    const c = (await pendingCaptures())[0]; assert.equal(c.attempts, attempt);
+    if (attempt < 4) { assert.ok(c.retryAt! > Date.now()); await queueTransaction(['captures'], 'readwrite', tx => tx.objectStore('captures').put({ ...c, retryAt: Date.now() - 1 })); }
+    else assert.equal(c.retryAt, undefined);
+  }
+});
+test('recovery removes incomplete transfers from gone tabs, preserving live transfers and every complete recording', async () => {
+  const done = await recording(1);
+  const metadata = { ...(await pendingCaptures())[0].metadata };
+  const orphan = await beginCapture(2, metadata, 16), live = await beginCapture(3, metadata, 16);
+  await appendCapture(2, orphan, 0, btoa('\0'.repeat(16)));
+  const { recoverQueue } = await import('./queueRecovery'); await recoverQueue(new Set([3]));
+  await queueTransaction(['captures', 'chunks'], 'readonly', (tx, finish) => {
+    const a = tx.objectStore('captures').getAll(), b = tx.objectStore('chunks').index('captureId').getAll(orphan);
+    b.onsuccess = () => { assert.deepEqual(new Set(a.result.map(c => c.id)), new Set([done, live])); assert.equal(b.result.length, 0); finish(undefined); };
+  });
+});
+
+test('same-tab refresh removes abandoned upload chunks but never completed recordings', async () => {
+  const done = await recording(1), metadata = (await pendingCaptures())[0].metadata;
+  const incomplete = await beginCapture(1, metadata, 16, 'old-document');
+  await appendCapture(1, incomplete, 0, btoa('\0'.repeat(16)));
+  const { recoverCaptureDocument } = await import('./queueRecovery');
+  await recoverCaptureDocument(1, 'new-document');
+  assert.deepEqual((await pendingCaptures()).map(c => c.id), [done]);
+  await assert.rejects(finishCapture(1, incomplete));
+});

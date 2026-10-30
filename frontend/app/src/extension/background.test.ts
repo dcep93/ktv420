@@ -116,3 +116,19 @@ test('only the packaged overlay may list and delete extension-stored audio', asy
     assert.equal((await call({ type: 'ktv420:overlay-request', request: r })).ok, true);
   }
 });
+
+test('only the packaged background worker may claim inference; a view cannot cancel it', async () => {
+  const { beginCapture, appendCapture, finishCapture } = await import('./queue');
+  const id = await beginCapture(7, { trackId: 'backgroundSong', audioSampleRate: 44100, audioChannelCount: 2, audioSampleFormat: 'PCM_F32LE', audioByteLength: 16, captureStartVerified: true, captureEndVerified: true }, 16);
+  await appendCapture(7, id, 0, btoa('\0'.repeat(16))); await finishCapture(7, id);
+  const claim = { ...request, operation: 'work-claim', id };
+  assert.equal((await call({ type: 'ktv420:overlay-request', request: claim })).ok, false);
+  assert.equal((await call(claim, { ...sender, url: 'https://ktv420.web.app/catalog', frameId: 0 }, external)).ok, false);
+  const from = { ...sender, tab: undefined, url: `chrome-extension://${extensionId}/src/worker/index.html`, documentId: 'worker' } as unknown as typeof sender;
+  const message = { type: 'ktv420:worker-request', session: crypto.randomUUID(), request: claim };
+  const result = await call(message, from) as { ok: boolean; result: string };
+  assert.equal(result.ok, true); assert.ok(result.result);
+  assert.equal((await call(message, { ...from, url: host })).ok, false);
+  assert.equal((await call({ ...message, request: { ...request, operation: 'volume', volume: 0 } }, from)).ok, false);
+  assert.equal((await call({ type: 'ktv420:overlay-request', request: { ...request, operation: 'work-release', id, token: result.result } })).ok, false);
+});

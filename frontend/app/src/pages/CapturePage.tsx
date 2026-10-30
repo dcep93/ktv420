@@ -85,7 +85,7 @@ export default function CapturePage() {
     <div className="iframe-content">
       {settings ? <section className="iframe-settings-view" aria-label="Settings view"><section className="iframe-settings-source">
         <header className="iframe-settings-source-header"><h2>Capture</h2></header>
-        <p className="iframe-settings-help">Volume changes what you hear, not the recording. Songs separate here as capture continues, then finished songs move into ktv420 when you open it.</p>
+        <p className="iframe-settings-help">Volume changes what you hear, not the recording. Songs separate in the background, then move into ktv420 when you open it.</p>
         <button onClick={() => { setError(''); if (processingEnabled) { void spotify.configureQueue(false).then(() => setProcessing(null)).catch(reason => setError(String(reason))); } else resume(); }}>{processingEnabled ? 'Pause separation' : 'Resume separation'}</button>
         {(Object.keys(failures).length > 0 || spotify.librarySummary.some(track => track.status === 'error' && track.location === 'extension')) && <button onClick={resume}>Retry separation</button>}
         <button onClick={() => open(null)}>Open playlist in ktv420</button>

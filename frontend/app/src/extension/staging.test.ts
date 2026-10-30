@@ -188,3 +188,37 @@ test('one failed song does not block other prepared imports', async () => {
   assert.ok(!(await preparedCaptures()).some(p => p.id === second.id));
   assert.equal((await getTrack(`spotify-${second.trackId}`))?.status, 'ready');
 });
+
+test('deletion during a pending import wins durably and discards redundant extension audio', async () => {
+  const f = await fixture(); await upload(f);
+  const { deleteTrack } = await import('../features/local/library');
+  await deleteTrack(`spotify-${f.trackId}`);
+  let copied = 0;
+  await receivePrepared(f.p, async <T>(op: string, args: Record<string, unknown> = {}): Promise<T> => {
+    if (op === 'prepared-chunk') copied++;
+    if (op === 'ack-prepared') { assert.equal(args.discarded, true); return await acknowledgePrepared(String(args.id), true) as T; }
+    return read<T>(op, args);
+  });
+  assert.equal(copied, 0); assert.equal(await getTrack(`spotify-${f.trackId}`), undefined);
+  assert.equal((await stagedSummary(true)).some(t => t.id === `spotify-${f.trackId}`), false);
+});
+test('a newer capture replaces ready audio and old capture metadata cannot undo newer playlist membership', async () => {
+  const f = await fixture(); await upload(f); await receivePrepared(f.p, read);
+  const { rememberCollection } = await import('../features/local/collections');
+  const collection = f.p.capture.metadata.collection as { path: string; trackIds: string[] };
+  await rememberCollection({ ...collection, trackIds: [f.trackId, 'added'], observedAt: Date.now() + 10000 });
+  const next = await fixture();
+  next.p.capture.metadata = { ...f.p.capture.metadata, trackName: 'New recording' };
+  next.p.capture.createdAt = f.p.capture.createdAt + 1;
+  await queueTransaction(['captures'], 'readwrite', tx => tx.objectStore('captures').put(next.p.capture));
+  await upload(next); await receivePrepared(next.p, read);
+  assert.equal((await getTrack(`spotify-${f.trackId}`))?.title, 'New recording');
+  assert.deepEqual((await savedCollection(collection.path)).trackIds, [f.trackId, 'added']);
+});
+test('a stale receipt cannot acknowledge missing audio as successfully imported', async () => {
+  const f = await fixture(); await upload(f);
+  const { transaction } = await import('../features/local/library');
+  await transaction(['receipts'], 'readwrite', tx => tx.objectStore('receipts').put({ id: `prepared/${f.id}`, trackId: `spotify-${f.trackId}` }));
+  await receivePrepared(f.p, read);
+  assert.equal((await getTrack(`spotify-${f.trackId}`))?.status, 'ready');
+});

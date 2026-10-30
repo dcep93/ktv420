@@ -1,4 +1,4 @@
-export type Collection = { path: string; title: string; artwork: string; trackIds: string[]; complete?: boolean };
+export type Collection = { path: string; title: string; artwork: string; trackIds: string[]; complete?: boolean; observedAt?: number };
 export type SavedCollection = Collection & { savedAt: number; startedAt?: number };
 export type SavedCollectionSummary = Omit<SavedCollection, 'trackIds'> & { captured: number; ready: number; total: number };
 export function parseCollection(value: unknown): Collection | null {
@@ -8,7 +8,7 @@ export function parseCollection(value: unknown): Collection | null {
     typeof v.title !== 'string' || v.title.length > 500 || typeof v.artwork !== 'string' || v.artwork.length > 4096 ||
     !Array.isArray(v.trackIds) || !v.trackIds.length || v.trackIds.length > 10000 ||
     v.trackIds.some(id => typeof id !== 'string' || !/^[A-Za-z0-9]{1,100}$/.test(id))) return null;
-  return { path: v.path, title: v.title.trim(), artwork: /^https:\/\/(?:i|mosaic)\.scdn\.co\//.test(v.artwork) ? v.artwork : '', trackIds: [...v.trackIds], ...(v.complete === true ? { complete: true } : {}) };
+  return { path: v.path, title: v.title.trim(), artwork: /^https:\/\/(?:i|mosaic)\.scdn\.co\//.test(v.artwork) ? v.artwork : '', trackIds: [...v.trackIds], ...(Number.isSafeInteger(v.observedAt) && Number(v.observedAt) > 0 ? { observedAt: Number(v.observedAt) } : {}), ...(v.complete === true ? { complete: true } : {}) };
 }
 export function collectionLink(path: string) {
   return `https://open.spotify.com/${path}?ktv420`;

@@ -245,8 +245,9 @@ export function deleteTrack(id: string): Promise<void> {
 }
 
 export function deleteTracks(ids: string[]): Promise<void> {
-  return transaction(['tracks', 'audio'], 'readwrite', (tx) => {
+  return transaction(['tracks', 'audio', 'settings', 'receipts'], 'readwrite', (tx) => {
     for (const id of new Set(ids)) {
+      tx.objectStore('settings').put(Date.now(), `deleted/${id}`);
       tx.objectStore('tracks').delete(id);
       const request = tx.objectStore('audio').index('trackId').openKeyCursor(IDBKeyRange.only(id));
       request.onsuccess = () => {

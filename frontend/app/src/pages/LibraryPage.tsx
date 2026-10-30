@@ -1,3 +1,4 @@
+import { collectionLink } from '../features/local/savedCollections';
 import { separationStatus, separationProgressLabel } from '../features/local/separationStatus';
 import { libraryChanges } from '../features/local/libraryChanges';
 import { missingTrackLabel } from '../features/local/missingTrackLabel';
@@ -127,9 +128,10 @@ export default function LibraryPage() {
   const refreshRevision = useRef(0);
   const refresh = useCallback(async () => {
     const revision = ++refreshRevision.current;
-    const [savedTracks, cached, enabled] = await Promise.all([listTracks(), getModelCacheStatus(), getProcessingEnabled()]);
+    const [savedTracks, enabled] = await Promise.all([listTracks(), getProcessingEnabled()]);
     if (revision !== refreshRevision.current) return;
-    setTracks(savedTracks); setLibraryReady(true); setModelCached(cached); setAutoProcessing(enabled);
+    setTracks(savedTracks); setLibraryReady(true); setAutoProcessing(enabled);
+    void getModelCacheStatus().then(cached => { if (revision === refreshRevision.current) setModelCached(cached); });
     acknowledgeSaved(savedTracks.map(track => track.id.replace(/^spotify-/, '')));
     if (observedProcessingPreference.current === true && !enabled) { cancelled.current = true; separator.current?.dispose(); }
     observedProcessingPreference.current = enabled;
@@ -168,7 +170,7 @@ export default function LibraryPage() {
           if (!automatic) setError('Another ktv420 view is processing these captures.');
           return;
         }
-        separator.current = new LocalSeparator({ backend: backend === 'wasm' || !('gpu' in navigator) ? 'wasm' : 'webgpu' });
+        separator.current = new LocalSeparator({ backend: backend === 'wasm' ? 'wasm' : undefined });
         const process = async (id: string) => {
           if (cancelled.current) return;
           setActive(id); setProgress(null); setSeparationFraction(null);
@@ -403,6 +405,7 @@ export default function LibraryPage() {
     </label></div>
     </header>
     <div className="iframe-content">
+      {spotify.standalone && spotify.spotifyPath && viewMode === 'tracks' && <nav className="iframe-capture-link"><a href={collectionLink(spotify.spotifyPath)} target="_blank" rel="noreferrer">{spotify.tracks.some(row => !tracks.some(track => track.id === `spotify-${row.trackId}`)) ? 'Continue capturing in Spotify' : 'Open in Spotify'} ↗</a></nav>}
     {spotify.replay && <section className="replay-card" aria-label="Shared recording">
       <div><h2>{spotify.replay.name}</h2><p>{replay.active ? `${Math.floor(replay.seconds)}s · ${replay.status === 'preparing' ? 'Preparing song…' : replay.status === 'paused' ? 'Paused' : 'Replaying'}` : replayReady ? 'Ready to replay.' : 'Capture missing songs, then let separation finish.'}</p></div>
       {replay.active ? <><button disabled={replay.status==='preparing' || replay.busy} onClick={() => void replay.togglePause()}>{replay.status==='paused' ? 'Resume recording' : 'Pause recording'}</button><button onClick={replay.stop}>Stop replay</button></> : <button disabled={!replayReady || capture.active || !!active || mp3Export.busy} onClick={replay.start}>Play recording</button>}

@@ -6,8 +6,8 @@ The website is the music app. The optional extension integrates Spotify. Audio n
 flowchart LR
   Spotify[Spotify DOM + audio] --> Capture[Extension: precise capture]
   Capture --> Queue[(Extension raw / prepared staging)]
-  Queue --> Overlay[Hosted Spotify overlay]
-  Overlay --> Processor[Local separation + MP3 workers]
+  Queue --> Processor[Extension offscreen host: local separation + MP3 workers]
+  Overlay[Hosted Spotify overlay] -->|Capture controls and job status| Queue
   Processor --> Queue
   Queue -->|256 KiB chunks, retry + commit acknowledgment| Website[ktv420.web.app]
   Website -->|One-song requests| Capture
@@ -19,11 +19,11 @@ flowchart LR
   Library --> Mixer[Mixer, replay, effects + visualizers]
 ```
 
-On Spotify, a packaged extension frame embeds the hosted capture playlist as a full-window overlay. Its narrow relay derives the Spotify tab from Chrome’s sender information; no tab ID is exposed in a URL. It never mounts the mixer. Its hosted worker receives verified raw chunks, separates/encodes them while capture continues, and uploads prepared files back to extension staging; it does not store audio in iframe IndexedDB. Track clicks and indexed Spotify links open the corresponding top-level ktv420 playlist/track, paused.
+On Spotify, a packaged extension frame embeds the hosted capture playlist as a full-window overlay. Its narrow relay derives the Spotify tab from Chrome’s sender information; no tab ID is exposed in a URL. It never mounts the mixer. A separate extension-owned offscreen document embeds the isolated hosted `/separation-worker` app. This worker receives verified raw chunks, separates/encodes them while capture continues and after either visible page closes, and uploads prepared files back to extension staging; it does not store audio in iframe IndexedDB. Track clicks and indexed Spotify links open the corresponding top-level ktv420 playlist/track, paused.
 
-The top-level website owns the lasting playback library. The extension stages raw captures and validated five-file MP3 results until the website imports them. Opening any website page starts resumable delivery; prepared files are copied without encoding. Files, timing/gain metadata, artwork, playlist membership and a receipt commit together before acknowledgment deletes source audio. Imports continue while open, and one failed song does not block others. An interrupted or quota-failed import leaves its source intact. An acknowledgment retry uses its receipt without copying or resurrecting deleted website audio.
+The top-level website owns the lasting playback library. The extension stages raw captures and validated five-file MP3 results until the website imports them. Opening any website page starts resumable delivery; prepared files are copied without encoding. Files, timing/gain metadata, artwork, playlist membership and a receipt commit together before acknowledgment deletes source audio. Imports continue while open, and one failed song does not block others. An interrupted or quota-failed import leaves its source intact. An acknowledgment retry verifies its receipt against destination files. Durable deletion cutoffs reject older pending deliveries; explicitly newer recaptures replace older audio.
 
-Raw captures have exclusive token-bound claims for either an overlay worker or website receiver. Claims expire after two minutes without renewal; chunks and processing progress renew them. A prepared commit validates hashes and MP3 timing before atomically replacing raw staging. Prepared IDs are immutable capture UUIDs; a delayed acknowledgment cannot delete a newer recording. The website separation lock excludes prepared import from active processing/deletion. Both receiving and source final commits request strict IndexedDB durability. Previous overlay-partition files are untouched; normal recapture is supported. No offscreen helper or storage-access permission prompt is used.
+Raw captures have exclusive token-bound claims for one background worker session. Views cannot claim or release inference work. Replacement background sessions immediately revoke old claims, and browser startup removes incomplete transfers from closed source tabs. Claims expire after two minutes without renewal; chunks and processing progress renew them. A prepared commit validates hashes and MP3 timing before atomically replacing raw staging. Prepared IDs are immutable capture UUIDs; a delayed acknowledgment cannot delete a newer recording. The website separation lock excludes prepared import from active processing/deletion. Both receiving and source final commits request strict IndexedDB durability. Previous overlay-partition files are untouched; normal recapture is supported. The `offscreen` permission supports worker lifetime; no storage-access prompt is used.
 
 `/` and `/catalog` render the catalog; `/playlist` renders the standalone playlist and mixer. `/transfer` and `/replay` work without the extension.
 
@@ -45,9 +45,9 @@ The extension’s new `ktv420-capture-delivery-v1` database contains raw capture
 - `library-summary`: captured/ready metadata plus pending deliveries; no audio.
 - `publish-library`: replace status metadata; top-level website only.
 - `open-player`: open a website playlist/index matching the bound Spotify route.
-- `pending`/`claim-capture`/`chunk`/`ack`/`release-capture`: website raw import with ownership claims.
+- Legacy raw-import operations are rejected; originals stay in extension staging until prepared.
 - `prepared`/`prepared-chunk`/`ack-prepared`: website-only prepared import and committed-result acknowledgment.
-- `work-pending`/`work-claim`/`work-chunk`/`work-touch`/`work-release`: sender-bound overlay processing claims and raw reads.
+- `work-pending`/`work-claim`/`work-chunk`/`work-touch`/`work-release`: background-document/session-bound processing claims and raw reads.
 - `work-begin`/`work-append`/`work-finish`: bounded, validated prepared upload. The overlay cannot acknowledge website delivery.
 - `discover`, `status`: an identified Spotify tab’s collection and capture state.
 - `capture`: one track ID, request UUID and collection path. Retrying the same request reports its status rather than starting another recording.
@@ -73,3 +73,11 @@ Version-2 playlist packages preserve unique audio assets and ordered collection 
 Firebase Hosting serves static website/runtime files; model weights come from the pinned data source. No audio upload or backend processing is used. New pages load current code; existing sessions retain their code, with immutable assets retained across deployments.
 
 Automated checks cover delivery interruptions, lost acknowledgments, rollback, duplicates, origin validation, complete ZIP/folder round trips, quota/lock failures and interrupted processing recovery, alongside existing capture/audio/effect/visualizer tests. The standalone development fixture runs the production importer in a real browser. Real Spotify capture and GPU timings must be reported separately from simulated protocol tests.
+
+## Lifecycle guarantees (7.5)
+
+The offscreen document survives closing overlays and hosted tabs. It reuses the model session between songs, falls back to CPU when GPU initialization fails, and recreates a hosted worker that stops communicating. A crashed job restarts from its saved original, not from a falsely preserved percentage. Progress reports actual operations. Transient errors receive at most three automatic retries with backoff; invalid recordings and exhausted retries stay actionable. MP3 encoding and decoding have cancellation and no-progress deadlines. Final verification renews ownership through its durable commit.
+
+Website status publications inspect stored audio and use monotonically increasing revisions across tabs. Queue summaries read raw/prepared/claim/library state atomically. Imports preserve newer playlist discovery. Deleting a collection preserves audio shared by other collections and prevents an older delivery from restoring the deleted collection. Website playlists link directly to their Spotify capture overlay.
+
+Chrome must be running for background processing. Completed recordings survive browser restart. Browser storage deletion outside ktv420 can only be reconciled when the website next opens and publishes its actual library; an offline status cache is not proof that external deletion did not occur.

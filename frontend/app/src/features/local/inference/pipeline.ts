@@ -36,8 +36,11 @@ export async function separateWithRunner(
   const stride = Math.floor(segmentFrames * 0.75)
   const window = transitionWindow(segmentFrames)
   const chunks = Math.ceil(total / stride)
-  const accumulators = Array.from({ length: 8 }, () => new Float64Array(total))
-  const weights = new Float64Array(total)
+  // Only the overlap needs Float64 accumulation. Finalized samples keep the same
+  // Float32 rounding as the full-track implementation, with bounded scratch memory.
+  const accumulators = Array.from({ length: 8 }, () => new Float64Array(segmentFrames))
+  const weights = new Float64Array(segmentFrames)
+  const channels = Array.from({ length: 8 }, () => new Float32Array(total))
   const packed = new Float32Array(segmentFrames * 2)
   for (let chunk = 0; chunk < chunks; chunk++) {
     const start = chunk * stride
@@ -59,21 +62,24 @@ export async function separateWithRunner(
       for (let i = 0; i < count; i++) {
         const sample = separated[source + i]
         if (!Number.isFinite(sample)) throw new Error('The model returned a non-finite sample.')
-        destination[start + i] += sample * window[i]
+        destination[i] += sample * window[i]
       }
     }
-    for (let i = 0; i < count; i++) weights[start + i] += window[i]
+    for (let i = 0; i < count; i++) weights[i] += window[i]
+    const finalized = Math.min(stride, count)
+    for (let i = 0; i < finalized; i++) {
+      if (!(weights[i] > 0)) throw new Error('Missing overlap-add coverage.')
+      for (let channel = 0; channel < 8; channel++) channels[channel][start + i] = accumulators[channel][i] / weights[i]
+    }
+    const carry = segmentFrames - stride
+    for (const accumulator of accumulators) { accumulator.copyWithin(0, stride); accumulator.fill(0, carry) }
+    weights.copyWithin(0, stride); weights.fill(0, carry)
     onProgress({ phase: 'separating', fraction: (chunk + 1) / chunks, chunk: chunk + 1, totalChunks: chunks, message: `Completed segment ${chunk + 1} of ${chunks}` })
   }
   const output = {} as StemAudio
   for (let stem = 0; stem < STEM_NAMES.length; stem++) {
     onProgress({ phase: 'restoring', fraction: stem / STEM_NAMES.length, message: `Preparing ${STEM_NAMES[stem]}` })
-    const left = new Float32Array(total), right = new Float32Array(total)
-    for (let i = 0; i < total; i++) {
-      if (!(weights[i] > 0)) throw new Error('Missing overlap-add coverage.')
-      left[i] = accumulators[stem * 2][i] / weights[i]
-      right[i] = accumulators[stem * 2 + 1][i] / weights[i]
-    }
+    const left = channels[stem * 2], right = channels[stem * 2 + 1]
     if (useConditioning) {
       restoreConditioning(left, conditioning.mean, conditioning.scale)
       restoreConditioning(right, conditioning.mean, conditioning.scale)

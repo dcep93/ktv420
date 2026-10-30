@@ -1,3 +1,4 @@
+import { requireStorage } from '../features/local/storageBudget';
 import type { WorkerOwner } from './workQueue';
 import { queueTransaction, pendingCaptures } from './queue';
 import { CHUNK_BYTES, decodeChunk, type QueuedCapture } from '../shared/captureFormat';
@@ -40,24 +41,35 @@ export function releaseClaim(id: string, token: string, owner: number | 'website
     };
   });
 }
-export async function stagedSummary() {
-  const [raw, ready, claims] = await Promise.all([pendingCaptures(), preparedCaptures(), queueTransaction<Claim[]>(['claims'], 'readonly', (tx, done) => {
-    const r = tx.objectStore('claims').getAll(); r.onsuccess = () => done(r.result);
-  })]);
-  return [...raw.map(c => {
-    const claim = claims.find(l => l.id === c.id && l.owner !== 'website' && l.expires > Date.now());
-    return { id: `spotify-${c.metadata.trackId}`, status: c.processingError ? 'error' as const : claim ? 'processing' as const : 'captured' as const, progress: claim?.progress, error: c.processingError };
-  }), ...ready.map(p => ({ id: `spotify-${p.capture.metadata.trackId}`, status: 'ready' as const }))];
+export function stagedSummary(includeLibrary = false) {
+  return queueTransaction<import('../shared/librarySummary').LibrarySummary[]>(['captures', 'prepared', 'claims', 'library'], 'readonly', (tx, done) => {
+    const library = tx.objectStore('library').getAll();
+    const raw = tx.objectStore('captures').getAll(), ready = tx.objectStore('prepared').getAll(), claims = tx.objectStore('claims').getAll();
+    claims.onsuccess = () => { const staged = [
+      ...raw.result.filter((c: QueuedCapture) => c.complete).map((c: QueuedCapture) => {
+        const claim = claims.result.find(l => l.id === c.id && l.owner !== 'website' && l.expires > Date.now());
+        return { id: `spotify-${c.metadata.trackId}`, status: c.processingError && !c.retryAt ? 'error' as const : claim ? 'processing' as const : 'captured' as const,
+          progress: claim?.progress, error: c.processingError, retryAt: c.retryAt };
+      }), ...ready.result.map((p: PreparedAudio) => ({ id: `spotify-${p.capture.metadata.trackId}`, status: 'ready' as const })),
+    ];
+      if (!includeLibrary) { done(staged); return; }
+      const merged = new Map(library.result.map(t => [t.id, t]));
+      for (const t of staged) merged.set(t.id, { ...t, location: 'extension' });
+      done([...merged.values()] as import('../shared/librarySummary').LibrarySummary[]);
+    };
+  });
 }
 export function preparedCaptures(): Promise<PreparedAudio[]> {
   return queueTransaction(['prepared'], 'readonly', (tx, done) => { const r = tx.objectStore('prepared').getAll(); r.onsuccess = () => done(r.result); });
 }
 export async function beginPrepared(value: unknown, token: string, owner: number | WorkerOwner) {
   const p = parsePrepared(value);
+  await requireStorage(p.files.reduce((sum, f) => sum + f.bytes, 0));
   await touchClaim(p.id, token, owner);
   // Never accept source metadata supplied by the hosted worker over the verified capture.
   const source = (await pendingCaptures()).find(c => c.id === p.id);
-  if (!source || JSON.stringify(source) !== JSON.stringify(p.capture)) throw new Error('Prepared source changed.');
+  const identity = (capture: QueuedCapture) => ({ id: capture.id, tabId: capture.tabId, metadata: capture.metadata, expectedBytes: capture.expectedBytes, receivedBytes: capture.receivedBytes, nextChunk: capture.nextChunk, createdAt: capture.createdAt, complete: capture.complete });
+  if (!source || JSON.stringify(identity(source)) !== JSON.stringify(identity(p.capture))) throw new Error('Prepared source changed.');
   return queueTransaction(['uploads', 'chunks', 'claims'], 'readwrite', tx => {
     const claim = tx.objectStore('claims').get(p.id), previous = tx.objectStore('uploads').get(p.id);
     previous.onsuccess = () => {
@@ -100,15 +112,19 @@ export async function finishPrepared(id: string, token: string, owner: number | 
     c.onsuccess = () => done([u.result, c.result]);
   });
   if (!upload || upload.token !== token) throw new Error('Prepared upload is missing.');
+  const renew = setInterval(() => { void touchClaim(id, token, owner).catch(() => {}); }, 10000);
+  const deadline = Date.now() + 240000;
+  try {
   const p = parsePrepared(upload.manifest), files: { id: string; blob: Blob }[] = [];
   for (const f of p.files) {
     const parts = chunks.filter(c => c.name === f.name).sort((a, b) => a.index - b.index);
     if (parts.length !== Math.ceil(f.bytes / CHUNK_BYTES) || parts.some((c, i) => c.index !== i)) throw new Error('Prepared upload is incomplete.');
     const blob = new Blob(parts.map(c => c.blob), { type: f.type });
     await validatePreparedFile(p, f, blob);
+    if (Date.now() > deadline) throw new DOMException('Saved audio verification took too long. The recording is safe.', 'TimeoutError');
     files.push({ id: `${id}/${f.name}`, blob });
   }
-  return queueTransaction(['claims', 'captures', 'chunks', 'uploads', 'prepared', 'preparedFiles'], 'readwrite', tx => {
+  return await queueTransaction(['claims', 'captures', 'chunks', 'uploads', 'prepared', 'preparedFiles'], 'readwrite', tx => {
     const r = tx.objectStore('claims').get(id);
     r.onsuccess = () => {
       if (r.result?.token !== token || r.result.owner !== owner || r.result.expires <= Date.now()) { tx.abort(); return; }
@@ -121,6 +137,7 @@ export async function finishPrepared(id: string, token: string, owner: number | 
       }
     };
   }, { durability: 'strict' });
+  } finally { clearInterval(renew); }
 }
 export async function preparedChunk(id: string, name: AudioName, index: number) {
   const blob = await queueTransaction<Blob>(['prepared', 'preparedFiles', 'claims'], 'readwrite', (tx, done) => {
@@ -133,14 +150,15 @@ export async function preparedChunk(id: string, name: AudioName, index: number) 
   });
   return encodeBlobChunk(blob, index);
 }
-export function acknowledgePrepared(id: string) {
+export function acknowledgePrepared(id: string, discarded = false) {
   return queueTransaction(['prepared', 'preparedFiles', 'library', 'claims'], 'readwrite', tx => {
     const r = tx.objectStore('prepared').get(id);
     r.onsuccess = () => {
       const p = r.result as PreparedAudio | undefined;
       if (!p) return;
       const trackId = `spotify-${p.capture.metadata.trackId}`;
-      tx.objectStore('library').put({ id: trackId, status: 'ready' }, trackId);
+      if (discarded) tx.objectStore('library').delete(trackId);
+      else tx.objectStore('library').put({ id: trackId, status: 'ready' }, trackId);
       for (const f of p.files) tx.objectStore('preparedFiles').delete(`${id}/${f.name}`);
       tx.objectStore('prepared').delete(id);
       tx.objectStore('claims').delete(id);

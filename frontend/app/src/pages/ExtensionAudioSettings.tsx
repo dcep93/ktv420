@@ -19,7 +19,7 @@ export default function ExtensionAudioSettings({ capturing }: { capturing: boole
         const hello = await spotifyRequest<{ stagedAudioControls?: boolean }>('hello');
         if (!hello.stagedAudioControls) throw new Error('Reload the updated ktv420 extension to manage extension audio.');
         const rows = await spotifyRequest<StagedAudio[]>('staging-list');
-        if (!disposed && current === revision.current) { setTracks(rows); setLoaded(true); }
+        if (!disposed && current === revision.current) { setTracks(rows); setLoaded(true); setError(''); }
       } catch (reason) { if (!disposed) setError(reason instanceof Error ? reason.message : String(reason)); }
       finally { busy = false; }
     };

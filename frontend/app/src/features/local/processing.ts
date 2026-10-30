@@ -1,5 +1,5 @@
 import { encodeMp3InWorker } from './audio/mp3Client';
-import { decodeWav } from './audio/wav';
+import { decodeWavInWorker } from './audio/decodeClient';
 import { getInput, saveMp3, setTrackStatus } from './libraryClient';
 import type { StereoAudio } from './audio/types';
 import type { ProgressCallback, SeparationResult } from './inference/types';
@@ -20,7 +20,7 @@ export async function processLocalTrack(id: string, separator: Separator,
     const bytes = await input.arrayBuffer();
     if (cancelled()) return;
     onProgress({ phase: 'loading', fraction: 0, message: 'Decoding recorded audio…' });
-    const original = decodeWav(bytes);
+    const original = await decodeWavInWorker(bytes, cancelled);
     const result = await separator.separateStereo(original, onProgress);
     if (cancelled()) return;
     const encoded = await encode(original, result, cancelled, onProgress);

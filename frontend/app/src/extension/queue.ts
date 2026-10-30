@@ -54,6 +54,7 @@ export async function beginCapture(
   tabId: number,
   metadata: Record<string, unknown>,
   bytes: number,
+  documentId?: string,
 ) {
   validateCapture(metadata, bytes);
   const id = crypto.randomUUID();
@@ -80,6 +81,7 @@ export async function beginCapture(
     tx.objectStore('captures').add({
       id,
       tabId,
+      ...(documentId ? { documentId } : {}),
       metadata,
       expectedBytes: bytes,
       receivedBytes: 0,
@@ -190,12 +192,16 @@ export function acknowledgeCapture(id: string, token?: string) {
   });
 }
 
-export function publishLibrarySummary(value: unknown) {
+export function publishLibrarySummary(value: unknown, revision = Date.now() * 1024) {
   const tracks = parseLibrarySummary(value);
-  return queueTransaction(['library'], 'readwrite', tx => {
-    const store = tx.objectStore('library');
-    store.clear();
-    for (const track of tracks) store.put({ ...track, ...(track.separation ? { updatedAt: Date.now(), location: 'website' } : {}) }, track.id);
+  return queueTransaction(['library', 'settings'], 'readwrite', tx => {
+    const previous = tx.objectStore('settings').get('library-revision');
+    previous.onsuccess = () => {
+      if (previous.result > revision) return;
+      tx.objectStore('settings').put(revision, 'library-revision');
+      const store = tx.objectStore('library'); store.clear();
+      for (const track of tracks) store.put({ ...track, updatedAt: Date.now(), location: 'website' }, track.id);
+    };
   });
 }
 export async function readLibrarySummary(): Promise<LibrarySummary[]> {
@@ -217,7 +223,7 @@ export function rememberPlayerCollection(snapshot: PlaylistSnapshot) {
       typeof row.trackName === 'string' && row.trackName.length <= 500 && typeof row.trackArtist === 'string' && row.trackArtist.length <= 500 &&
       typeof row.trackArtworkSrc === 'string' && row.trackArtworkSrc.length <= 4096)) throw new Error('Spotify playlist is not ready.');
   return queueTransaction(['collections'], 'readwrite', tx => {
-    tx.objectStore('collections').put({ ...collection, handoffId: crypto.randomUUID(), tracks: rows.map(({ trackId, trackName, trackArtist, trackArtworkSrc, rowIndex }) => ({ trackId, trackName, trackArtist, trackArtworkSrc, rowIndex })) });
+    tx.objectStore('collections').put({ ...collection, handoffId: crypto.randomUUID(), observedAt: Date.now(), tracks: rows.map(({ trackId, trackName, trackArtist, trackArtworkSrc, rowIndex }) => ({ trackId, trackName, trackArtist, trackArtworkSrc, rowIndex })) });
   });
 }
 export function playerCollections() {

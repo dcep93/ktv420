@@ -4,7 +4,7 @@ export class HostedCaptureQueue {
   active = false;
   total = 0;
   completed = 0;
-  async run(ids: string[] | (() => string[]), saved: () => Set<string>, capture: (id:string) => Promise<void>, changed: () => void) {
+  async run(ids: string[] | (() => string[]), saved: () => Set<string>, capture: (id:string) => Promise<void>, changed: () => void, recovery?: { retries: number; failed: (id: string, message: string) => void }) {
     if (this.active) return false;
     const generation = ++this.generation;
     const readIds = () => [...new Set(typeof ids === 'function' ? ids() : ids)];
@@ -17,7 +17,18 @@ export class HostedCaptureQueue {
         this.total = new Set([...finished, ...current]).size;
         const id = current.find(candidate => !finished.has(candidate));
         if (id === undefined) break;
-        if (!saved().has(id)) await capture(id);
+        if (!saved().has(id)) {
+          for (let attempt = 0; ; attempt++) {
+            try { await capture(id); break; }
+            catch (error) {
+              if (generation !== this.generation) return false;
+              const message = error instanceof Error ? error.message : String(error);
+              if (!recovery || /stopped|closing|changed pages|changed playlists|replaced|another capture|install|update.*extension/i.test(message)) throw error;
+              if (attempt < recovery.retries) continue;
+              recovery.failed(id, message); break;
+            }
+          }
+        }
         if (generation === this.generation) { finished.add(id); this.completed = finished.size; changed(); }
       }
       return generation === this.generation;

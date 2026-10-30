@@ -80,3 +80,24 @@ test('preparation and restoration report intermediate progress across all four s
     assert.equal(output[name].left.length, input.left.length)
   })
 })
+
+test('bounded overlap storage is sample-identical to full Float64 accumulation, including boundaries', async () => {
+  const { transitionWindow } = await import('./pipeline');
+  const segment = 32, stride = 24, total = 103, window = transitionWindow(segment);
+  const reference = Array.from({ length: 8 }, () => new Float64Array(total)), weights = new Float64Array(total);
+  let chunk = 0;
+  const result = await separateWithRunner({ left: new Float32Array(total), right: new Float32Array(total), sampleRate: 44100 }, async () => {
+    const values = Float32Array.from({ length: segment * 8 }, (_, i) => Math.sin(i * .37 + chunk * 2.3) * (chunk + 1));
+    const start = chunk * stride, count = Math.min(segment, total - start);
+    for (let c = 0; c < 8; c++) for (let i = 0; i < count; i++) reference[c][start + i] += values[c * segment + i] * window[i];
+    for (let i = 0; i < count; i++) weights[start + i] += window[i];
+    chunk++; return values;
+  }, () => {}, segment, false);
+  for (const [stem, name] of ['drums', 'bass', 'other', 'vocals'].entries()) {
+    const output = result[name as keyof typeof result];
+    for (let i = 0; i < total; i++) {
+      assert.equal(output.left[i], Math.fround(reference[stem * 2][i] / weights[i]));
+      assert.equal(output.right[i], Math.fround(reference[stem * 2 + 1][i] / weights[i]));
+    }
+  }
+});

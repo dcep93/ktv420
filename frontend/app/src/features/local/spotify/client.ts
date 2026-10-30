@@ -14,7 +14,7 @@ export function spotifyRequest<T>(
     }
     const timer = setTimeout(
       () => reject(new Error('Spotify did not respond. Reload its tab and retry.')),
-      90000,
+      operation === 'work-finish' ? 300000 : 90000,
     );
     chrome.runtime.sendMessage(
       extensionId(),

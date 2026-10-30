@@ -12,10 +12,10 @@ export function listStagedAudio(): Promise<StagedAudio[]> {
     uploads.onsuccess = () => {
       const busy = new Set(claims.result.filter(c => c.expires > Date.now()).map(c => c.id));
       const row = (c: QueuedCapture, bytes: number, ready: boolean): StagedAudio => ({
-        id: c.id, title: String(c.metadata.trackName || 'Untitled recording'), bytes, ready, busy: busy.has(c.id),
+        id: c.id, title: String(c.metadata.trackName || 'Untitled recording'), bytes, ready, busy: busy.has(c.id) || (!ready && !c.complete),
       });
       done([
-        ...captures.result.filter((c: QueuedCapture) => c.complete).map((c: QueuedCapture) => {
+        ...captures.result.map((c: QueuedCapture) => {
           const upload = uploads.result.find(u => u.id === c.id);
           const output = (upload?.manifest.files || []).reduce((sum: number, file: { name: string; bytes: number }) =>
             sum + Math.min(file.bytes, (upload.offsets[file.name] || 0) * CHUNK_BYTES), 0);
