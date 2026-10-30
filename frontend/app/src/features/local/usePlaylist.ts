@@ -14,7 +14,7 @@ type Status = {
   request: { id: string; state: string; error: string } | null;
   active: boolean;
   progress: CaptureProgress | null;
-  volume: number;
+  volume: number | null;
   error: string;
 };
 const params = new URLSearchParams(location.search),
@@ -37,6 +37,7 @@ export function usePlaylist(onClose?: () => void) {
     closeRef = useRef(onClose);
   closeRef.current = onClose;
   const [savingTrackIds, setSavingTrackIds] = useState<string[]>([]);
+  const volumeRevision = useRef(0), volumePending = useRef(0);
   const active = status?.active === true;
   useEffect(() => {
     let disposed = false;
@@ -100,8 +101,9 @@ export function usePlaylist(onClose?: () => void) {
       if (busy) return;
       busy = true;
       try {
+        const revision = volumeRevision.current;
         const next = await spotifyRequest<Status>('status');
-        if (!disposed) setStatus(next);
+        if (!disposed) setStatus(previous => ({ ...next, volume: volumePending.current || revision !== volumeRevision.current ? previous?.volume ?? next.volume : next.volume }));
         const summary = await spotifyRequest<LibrarySummary[]>('library-summary');
         if (!disposed) {
           setLibrarySummary(summary); setSummaryReady(true);
@@ -131,6 +133,10 @@ export function usePlaylist(onClose?: () => void) {
         window.dispatchEvent(new Event('ktv420:overlay-hidden'));
         return;
       }
+      const revision = volumeRevision.current;
+      void spotifyRequest<Status>('status').then(next => {
+        if (revision === volumeRevision.current && !volumePending.current) setStatus(next);
+      }).catch(reason => setError(String(reason)));
       const index = Number.isSafeInteger(detail.trackIndex) && detail.trackIndex > 0 && detail.trackIndex <= 10000 ? detail.trackIndex : null;
       const href = playlistViewUrl(location.href, index);
       if (href !== location.href) history.replaceState(history.state, '', href);
@@ -157,7 +163,7 @@ export function usePlaylist(onClose?: () => void) {
     await spotifyRequest('capture', { trackId, requestId, path });
     while (!cancelled.current) {
       const next = await spotifyRequest<Status>('status');
-      setStatus(next);
+      setStatus(previous => ({ ...next, volume: previous?.volume ?? next.volume }));
       if (next.request?.id !== requestId) throw new Error('Spotify capture was replaced.');
       if (next.request.state === 'error') throw new Error(next.request.error);
       if (next.request.state === 'complete') {
@@ -169,10 +175,14 @@ export function usePlaylist(onClose?: () => void) {
     throw new Error('Capture stopped.');
   }, []);
   const transport = useCallback((command: { action: 'volume'; volume: number }) => {
-    if (command.action === 'volume' && embeddedSpotify)
-      void spotifyRequest('volume', { volume: command.volume }).catch((reason) =>
-        setError(String(reason)),
-      );
+    if (command.action !== 'volume' || !embeddedSpotify) return;
+    const revision = ++volumeRevision.current;
+    volumePending.current++;
+    setStatus(previous => previous ? { ...previous, volume: command.volume } : previous);
+    void spotifyRequest<Status>('volume', { volume: command.volume })
+      .then(next => { if (revision === volumeRevision.current) setStatus(next); })
+      .catch(reason => setError(String(reason)))
+      .finally(() => { volumePending.current--; });
   }, []);
   const setView = useCallback((index: number | null, _revision: number, replace = false) => {
     const href = playlistViewUrl(location.href, index);

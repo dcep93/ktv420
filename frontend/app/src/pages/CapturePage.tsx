@@ -6,7 +6,7 @@ import OverlayIcon from './OverlayIcon';
 /** The Spotify frame never opens audio storage or mounts the mixer. */
 export default function CapturePage() {
   const spotify = usePlaylist();
-  const [error, setError] = useState(''), [settings, setSettings] = useState(false), [localVolume, setVolume] = useState<number | null>(null);
+  const [error, setError] = useState(''), [settings, setSettings] = useState(false);
   const followed = useRef(-1);
   const saved = new Map(spotify.librarySummary.map(track => [track.id, track]));
   for (const id of spotify.savingTrackIds) {
@@ -17,7 +17,7 @@ export default function CapturePage() {
   const allCaptured = spotify.tracks.length > 0 && spotify.tracks.every(row => saved.has(`spotify-${row.trackId}`));
   const canStart = spotify.summaryReady && spotify.tracksComplete && spotify.tracks.length > 0;
   const open = (index: number | null) => { void spotify.openPlayer(index).catch(reason => setError(String(reason.message || reason))); };
-  const volume = localVolume ?? spotify.captureVolume ?? 1;
+  const volume = spotify.captureVolume;
   useEffect(() => {
     const n = spotify.navigation;
     if (!n.open || n.trackIndex === null || followed.current === n.revision || !spotify.tracksComplete) return;
@@ -51,9 +51,9 @@ export default function CapturePage() {
           disabled={!capture.active && !canStart} aria-pressed={capture.active}
           onClick={() => capture.active ? capture.cancel() : allCaptured ? open(1) : capture.toggle()}><img alt="" src={`${import.meta.env.BASE_URL}favicon.svg`} /></button>
         <button className="iframe-settings-button" aria-label="Toggle settings view" aria-pressed={settings} onClick={() => setSettings(!settings)}><OverlayIcon name="settings" /></button>
-      </div><label className="iframe-master-volume"><span>Volume <output>{Math.round(volume * 100)}%</output></span>
-        <input type="range" min="0" max="1" step="0.01" aria-label="Listening volume" value={volume}
-          onChange={event => { const next = Number(event.target.value); setVolume(next); spotify.transport({ action: 'volume', volume: next }); }} />
+      </div><label className="iframe-master-volume"><span>Volume <output>{volume == null ? '—' : `${Math.round(volume * 100)}%`}</output></span>
+        <input type="range" min="0" max="1" step="0.01" aria-label="Listening volume" value={volume ?? 0} disabled={volume == null}
+          onChange={event => { const next = Number(event.target.value); spotify.transport({ action: 'volume', volume: next }); }} />
         <small>{capture.active ? 'Capture' : 'Muted'}</small>
       </label></div>
     </header>

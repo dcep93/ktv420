@@ -2,7 +2,8 @@ import { createPageBridge } from './pageBridge.js';
 import { CaptureOrchestrator } from './orchestrator.js';
 import { collectTrackRows, isSupportedRoute, pausePlaybackCleanly } from './dom.js';
 import { discoverTrackRows, hasAllRows, trackTotal } from './trackDiscovery.js';
-import { readTransportDom } from './transport.js';
+import { readTransportDom, setSpotifyVolume } from './transport.js';
+import { createVolumeMonitor } from './volume.js';
 import { SELECTORS } from './constants.js';
 import { createOverlay } from './overlay.js';
 
@@ -12,8 +13,15 @@ let collection = null,
   tracks = [],
   progress = null,
   current = null,
-  volume = null,
+  monitoring = false,
   error = '';
+const volume = createVolumeMonitor({
+  read: () => readTransportDom().volume, write: setSpotifyVolume,
+  apply: gain => bridge.command('listening-output', { gain }),
+  active: () => monitoring,
+  onError: reason => { error = reason?.message || String(reason); render(); },
+});
+const volumeTimer = setInterval(() => void volume.sync(), 250);
 const overlay = createOverlay({ onClose: async () => {
   await cancel();
   pausePlaybackCleanly();
@@ -79,11 +87,6 @@ async function discover() {
   collection = { path, ...header(), trackIds: tracks.map((t) => t.trackId), tracks, complete };
   return { collection, tracks, complete };
 }
-async function monitor(value) {
-  volume = value;
-  if (runner.isActive()) await bridge.command('listening-output', { gain: value });
-  render();
-}
 async function capture(request) {
   if (current?.id === request.requestId) return status();
   if (runner.isActive() || current?.state === 'running')
@@ -96,6 +99,8 @@ async function capture(request) {
     throw new Error('Discover this Spotify playlist before capturing.');
   const row = tracks.find((t) => t.trackId === request.trackId);
   if (!row) throw new Error('Song is not in this playlist.');
+  const initialVolume = volume.value();
+  if (initialVolume === null) throw new Error('Waiting for Spotify’s volume control. Retry when it appears.');
   current = {
     id: request.requestId,
     trackId: row.trackId,
@@ -105,18 +110,19 @@ async function capture(request) {
   };
   error = '';
   progress = null;
-  volume ??= readTransportDom().volume ?? 1;
   // The website schedules. This primitive captures exactly one identified song.
   void (async () => {
     try {
       await bridge.command('listening-enable', { enabled: true });
-      await bridge.command('listening-output', { gain: volume });
+      monitoring = true;
+      await volume.sync(true);
       if (current.stopped) throw new Error('Capture stopped.');
       await runner.run({ trackIds: [row.trackId], trackSnapshot: [row], collection });
     } catch (reason) {
       current.state = 'error';
       current.error = error = reason?.message || String(reason);
     } finally {
+      monitoring = false;
       await bridge.command('listening-enable', { enabled: false }).catch(() => {});
       if (current.state === 'running') current.state = 'complete';
       render();
@@ -130,7 +136,7 @@ function status() {
     request: current,
     active: runner.isActive() || current?.state === 'running',
     progress,
-    volume: volume ?? readTransportDom().volume ?? 1,
+    volume: volume.value(),
     path: location.pathname.slice(1),
     error,
   };
@@ -177,7 +183,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       case 'volume':
         if (!Number.isFinite(message.volume) || message.volume < 0 || message.volume > 1)
           throw new Error('Invalid volume.');
-        await monitor(message.volume);
+        volume.set(message.volume);
         return status();
       default:
         throw new Error('Unknown Spotify command.');
@@ -218,6 +224,8 @@ setInterval(() => {
 window.addEventListener(
   'pagehide',
   () => {
+    clearInterval(volumeTimer);
+    volume.dispose();
     void runner.requestStop();
     void bridge.command('listening-enable', { enabled: false });
   },

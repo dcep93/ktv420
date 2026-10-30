@@ -7,7 +7,7 @@ The optional [Chrome extension](https://chromewebstore.google.com/detail/ktv420/
 ## Getting started
 
 - **Import:** Catalog → Import playlist → ZIP or extracted folder. Open the imported playlist, then a prepared song. Entering a track starts paused; track endings advance normally.
-- **Capture:** install extension 7.2.0, reload Spotify, open a playlist/album, click **k** to open the overlay, then click its central **k**. The overlay chooses missing songs; Spotify records one at a time. Open a captured song to receive and separate it on ktv420. An already-open website receives captures automatically. Monitor volume does not change captured samples.
+- **Capture:** install extension 7.2.1, reload Spotify, open a playlist/album, click **k** to open the overlay, then click its central **k**. The overlay chooses missing songs; Spotify records one at a time. Open a captured song to receive and separate it on ktv420. An already-open website receives captures automatically. Monitor volume does not change captured samples.
 - **Share:** Catalog → Export → Save ZIP. Upload to Dropbox yourself. Your friend downloads and imports the ZIP or extracted folder. No Dropbox integration, extension, model download or separation is needed for imported prepared audio.
 - **Replay:** `/replay` accepts a recorded mix JSON. Import the required playlist audio, then open the recording in the website mixer. Export MP3 renders the performance locally.
 

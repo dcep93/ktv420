@@ -67,3 +67,9 @@ The Spotify overlay now renders a dedicated capture page and never mounts the mi
 The Spotify launcher and app logo use the same opaque pink 2 px border. Redundant fullscreen permissions/attributes were removed from both capture frames.
 
 Automated validation covers source-bound player URLs, refusal of audio delivery to the overlay, summary validation, queued-to-committed-to-ready status, deletion propagation, plus the existing capture and import tests. Lint and production builds pass. Live 7.2.0 capture-to-website verification requires reloading the installed extension; the preceding live test results apply to 7.1.0.
+
+## Spotify volume synchronization (7.2.1)
+
+The capture overlay no longer displays an invented 100% before Spotify status arrives or retains a permanent local slider override. Spotify’s DOM slider is authoritative, including zero and changes made between overlay openings. Overlay input updates immediately, coalesces DOM/monitor writes over 32 ms, and ignores stale status responses while a newer input is pending. A brief 200 ms settling window allows Spotify’s controlled input to update. Capture monitoring follows subsequent Spotify volume changes; captured PCM remains upstream of monitor gain. Missing initial volume leaves the slider unavailable rather than guessing full volume.
+
+Six regression tests cover inherited/unknown volume, external changes, burst coalescing, settling, idle monitoring, and teardown. Live Spotify verification requires reloading extension 7.2.1.

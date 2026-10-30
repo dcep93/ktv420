@@ -56,7 +56,7 @@ export default function LibraryPage() {
   const [masterVolume, setMasterVolume] = useState(1);
   const remoteVolume = spotify.captureVolume;
   useEffect(() => {
-    if (remoteVolume !== undefined) setMasterVolume(remoteVolume);
+    if (remoteVolume != null) setMasterVolume(remoteVolume);
   }, [remoteVolume]);
   const transportCommand = spotify.transport;
   const entryRevision = useRef(-1), appliedNavigation = useRef(-1);
