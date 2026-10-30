@@ -1,4 +1,5 @@
 import { validateMp3 } from './audio/mp3Validation';
+import { libraryChanges } from './libraryChanges';
 import { MP3_NAMES, mp3Layout, type Mp3Files, type Mp3Encoding } from './audio/mp3Types';
 import type { PlaybackFile, PlaybackRecord } from '../stems/player/types';
 
@@ -66,6 +67,7 @@ export async function transaction<T>(
     tx.oncomplete = () => {
       db.close();
       resolve(result);
+      if (mode === 'readwrite' && stores.includes('tracks')) libraryChanges.dispatchEvent(new Event('change'));
     };
     tx.onabort = () => {
       db.close();

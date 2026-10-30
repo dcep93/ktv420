@@ -1,4 +1,6 @@
 import { separationStatus } from '../features/local/separationStatus';
+import { libraryChanges } from '../features/local/libraryChanges';
+import { missingTrackLabel } from '../features/local/missingTrackLabel';
 import { useSpacePlayback } from '../features/local/useSpacePlayback';
 import { usePlayerPreferences } from '../features/local/usePlayerPreferences';
 import { useHostedCapture } from '../features/local/useHostedCapture';
@@ -137,7 +139,8 @@ export default function LibraryPage() {
   useEffect(() => {
     const update = () => { void refresh().catch(reason => setError(errorText(reason))); };
     update(); const timer = setInterval(update, 2500);
-    return () => { clearInterval(timer); };
+    libraryChanges.addEventListener('change', update);
+    return () => { clearInterval(timer); libraryChanges.removeEventListener('change', update); };
   }, [refresh]);
   useEffect(() => () => { cancelled.current = true; separator.current?.dispose(); }, []);
   useEffect(() => {
@@ -472,7 +475,7 @@ export default function LibraryPage() {
         const fraction = progressKind === 'capture' ? saving ? .99 : capture!.fraction : active === track.id ? separationFraction : staged?.progress?.fraction ?? null;
         const label = ready ? 'Ready' : staged ? staged.status === 'ready' ? 'Importing finished stems…' : queueStatus!.label : saving ? 'Saving…' : progressKind === 'capture' ? `Capturing${fraction === null ? '' : ` ${Math.floor(fraction * 100)}%`}`
           : separating ? `${active === track.id && progress?.phase === 'encoding' ? 'Saving MP3' : active === track.id && progress?.phase === 'restoring' ? 'Restoring audio' : active === track.id && progress?.phase === 'resampling' ? 'Preparing audio' : 'Separating'}${fraction === null ? '' : ` ~${(fraction * 100).toFixed(1)}%`}`
-          : track.status === 'error' ? 'Failed' : track.status === 'missing' ? 'Not captured' : !autoProcessing ? 'Separation paused' : 'Queued';
+          : track.status === 'error' ? 'Failed' : track.status === 'missing' ? missingTrackLabel(libraryReady, spotify.summaryReady, spotify.librarySummary.find(row => row.id === track.id)) : !autoProcessing ? 'Separation paused' : 'Queued';
         const icon = ready ? 'play' : track.status === 'error' || queueStatus?.failed ? 'alert' : progressKind ? 'processing' : 'clock';
         const artwork = (typeof track.metadata?.trackArtworkSrc === 'string' ? track.metadata.trackArtworkSrc : '') ||
           spotify.tracks.find(item => `spotify-${item.trackId}` === track.id)?.trackArtworkSrc || '';

@@ -118,6 +118,7 @@ export function usePlaylist(onClose?: () => void) {
       } catch (reason) {
         if (!disposed && embeddedSpotify) setError(reason instanceof Error ? reason.message : String(reason));
       } finally {
+        if (!disposed) setSummaryReady(true);
         busy = false;
       }
     };
