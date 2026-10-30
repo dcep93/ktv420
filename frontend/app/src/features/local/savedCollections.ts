@@ -18,6 +18,6 @@ export function summarizeCollections(collections: SavedCollection[], tracks: { i
   return collections.flatMap(({trackIds, ...collection}) => {
     const captured = trackIds.filter(id => saved.has(`spotify-${id}`)).length;
     const ready = trackIds.filter(id => saved.get(`spotify-${id}`) === 'ready').length;
-    return captured || collection.startedAt ? [{...collection, captured, ready, total: trackIds.length}] : [];
+    return captured > 0 ? [{...collection, captured, ready, total: trackIds.length}] : [];
   }).sort((a, b) => b.savedAt - a.savedAt);
 }
