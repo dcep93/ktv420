@@ -1,3 +1,4 @@
+import { listStagedAudio, deleteStagedAudio } from './stagedLibrary';
 import { claimCapture, touchClaim, releaseClaim, stagedSummary, preparedCaptures, beginPrepared, appendPrepared, finishPrepared, preparedChunk, acknowledgePrepared } from './staging';
 import type { AudioName } from '../shared/preparedAudio';
 import { APP_ORIGIN, parseRequest, websiteSender } from './protocol';
@@ -31,7 +32,11 @@ async function request(message: unknown, tabId?: number) {
     }
   }
   switch (r.operation) {
-    case 'hello': return { version: 1, extensionVersion: chrome.runtime.getManifest().version, extensionId: chrome.runtime.id, stagedAudio: true };
+    case 'staging-list':
+    case 'staging-delete':
+      if (tabId === undefined) throw new Error('Only the Spotify overlay manages extension audio.');
+      return r.operation === 'staging-list' ? listStagedAudio() : deleteStagedAudio(r.ids as string[]);
+    case 'hello': return { version: 1, extensionVersion: chrome.runtime.getManifest().version, extensionId: chrome.runtime.id, stagedAudio: true, stagedAudioControls: true };
     case 'ack-collection': {
       if (tabId !== undefined) throw new Error('Only the website receives playlist metadata.');
       return acknowledgePlayerCollection(String(r.path), String(r.requestId));

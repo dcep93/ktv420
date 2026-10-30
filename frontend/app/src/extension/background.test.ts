@@ -101,3 +101,13 @@ test('staged processing is overlay-only and prepared import/deletion is standalo
     assert.match(r.error || '', /Only the Spotify overlay/);
   }
 });
+
+test('only the packaged overlay may list and delete extension-stored audio', async () => {
+  for (const operation of ['staging-list', 'staging-delete']) {
+    const r = { ...request, operation, ids: [crypto.randomUUID()] };
+    const result = await call(r, { ...sender, url: 'https://ktv420.web.app/catalog', frameId: 0 }, external);
+    assert.equal(result.ok, false);
+    assert.match(result.error || '', /Only the Spotify overlay/);
+    assert.equal((await call({ type: 'ktv420:overlay-request', request: r })).ok, true);
+  }
+});

@@ -122,17 +122,18 @@ export async function finishPrepared(id: string, token: string, owner: number) {
   }, { durability: 'strict' });
 }
 export async function preparedChunk(id: string, name: AudioName, index: number) {
-  const blob = await queueTransaction<Blob>(['prepared', 'preparedFiles'], 'readonly', (tx, done) => {
+  const blob = await queueTransaction<Blob>(['prepared', 'preparedFiles', 'claims'], 'readwrite', (tx, done) => {
     const p = tx.objectStore('prepared').get(id), f = tx.objectStore('preparedFiles').get(`${id}/${name}`);
     f.onsuccess = () => {
       if (!p.result || !f.result || index * CHUNK_BYTES >= f.result.blob.size) { tx.abort(); return; }
+      tx.objectStore('claims').put({ id, token: crypto.randomUUID(), owner: 'website', expires: Date.now() + LEASE_MS } satisfies Claim);
       done(f.result.blob);
     };
   });
   return encodeBlobChunk(blob, index);
 }
 export function acknowledgePrepared(id: string) {
-  return queueTransaction(['prepared', 'preparedFiles', 'library'], 'readwrite', tx => {
+  return queueTransaction(['prepared', 'preparedFiles', 'library', 'claims'], 'readwrite', tx => {
     const r = tx.objectStore('prepared').get(id);
     r.onsuccess = () => {
       const p = r.result as PreparedAudio | undefined;
@@ -141,6 +142,7 @@ export function acknowledgePrepared(id: string) {
       tx.objectStore('library').put({ id: trackId, status: 'ready' }, trackId);
       for (const f of p.files) tx.objectStore('preparedFiles').delete(`${id}/${f.name}`);
       tx.objectStore('prepared').delete(id);
+      tx.objectStore('claims').delete(id);
     };
   });
 }

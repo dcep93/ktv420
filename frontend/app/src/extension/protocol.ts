@@ -18,7 +18,7 @@ export function parseRequest(value: unknown) {
     r.version !== PROTOCOL_VERSION ||
     typeof r.operation !== 'string' ||
     ![
-      'hello',
+      'hello', 'staging-list', 'staging-delete',
       'claim-capture', 'release-capture', 'prepared', 'prepared-chunk', 'ack-prepared',
       'work-pending', 'work-claim', 'work-chunk', 'work-touch', 'work-release', 'work-begin', 'work-append', 'work-finish',
       'library-summary',
@@ -43,6 +43,8 @@ export function parseRequest(value: unknown) {
   if (r.operation === 'ack-collection' && (typeof r.path !== 'string' || !/^(album|playlist)\/[A-Za-z0-9]{22}$/.test(r.path) || typeof r.requestId !== 'string' || !/^[a-f0-9-]{36}$/.test(r.requestId))) throw new Error('Invalid collection acknowledgment.');
   if (r.operation === 'publish-library') r.tracks = parseLibrarySummary(r.tracks);
   if (r.operation === 'open-player' && (typeof r.path !== 'string' || !/^(album|playlist)\/[A-Za-z0-9]{22}$/.test(r.path) || (r.trackIndex !== null && (!Number.isSafeInteger(r.trackIndex) || Number(r.trackIndex) < 1 || Number(r.trackIndex) > 10000)))) throw new Error('Invalid player link.');
+  if (r.operation === 'staging-delete' && (!Array.isArray(r.ids) || !r.ids.length || r.ids.length > 10000 ||
+      r.ids.some(id => typeof id !== 'string' || !/^[a-f0-9-]{36}$/.test(id)))) throw new Error('Invalid staging deletion.');
   const work = r.operation.startsWith('work-');
   if ((work && r.operation !== 'work-pending') || ['claim-capture', 'release-capture', 'prepared-chunk', 'ack-prepared'].includes(r.operation)) {
     if (typeof r.id !== 'string' || !/^[a-f0-9-]{36}$/.test(r.id)) throw new Error('Invalid staging ID.');
@@ -104,7 +106,7 @@ export function parseRequest(value: unknown) {
       'id',
       'index',
       'volume',
-      'tracks', 'token', 'name', 'manifest', 'base64', 'progress',
+      'ids', 'tracks', 'token', 'name', 'manifest', 'base64', 'progress',
     ]
       .filter((key) => key in r)
       .map((key) => [key, r[key]]),

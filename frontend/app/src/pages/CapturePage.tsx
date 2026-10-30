@@ -1,3 +1,4 @@
+import ExtensionAudioSettings from './ExtensionAudioSettings';
 import { capturePercentage } from '../features/local/capturePercentage';
 import { startStagedProcessing } from '../features/local/spotify/stagedProcessing';
 import { nextSeparationFraction } from '../features/local/rowProgress';
@@ -81,7 +82,7 @@ export default function CapturePage() {
         <p className="iframe-settings-help">Volume changes what you hear, not the recording. Songs separate here as capture continues, then move into ktv420 when you open it.</p>
         <button onClick={() => { setError(''); setProcessingEnabled(value => !value); }}>{processingEnabled ? 'Pause separation' : 'Resume separation'}</button>
         <button onClick={() => open(null)}>Open playlist in ktv420</button>
-      </section></section> : <ol className="iframe-track-list" aria-label="Playlist tracks">{spotify.tracks.map(row => {
+      </section><ExtensionAudioSettings capturing={capture.active} /></section> : <ol className="iframe-track-list" aria-label="Playlist tracks">{spotify.tracks.map(row => {
         const separation = processing?.id === row.trackId ? processing : null;
         const status = separation ? 'processing' : saved.get(`spotify-${row.trackId}`)?.status;
         const current = capture.active && progress?.trackId === row.trackId && !status ? progress : null;
