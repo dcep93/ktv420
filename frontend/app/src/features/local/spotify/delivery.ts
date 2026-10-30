@@ -3,6 +3,7 @@ import { parseCollection } from '../savedCollections';
 import { decodeChunk, validateCapture, type QueuedCapture } from '../../../shared/captureFormat';
 import { spotifyRequest } from './client';
 import { embeddedSpotify } from './overlay';
+import { rememberCollection, type LibraryCollection } from '../collections';
 
 type Stage = { id: string; nextChunk: number; receivedBytes: number; expectedBytes: number };
 function wavHeader(capture: QueuedCapture) {
@@ -166,6 +167,12 @@ export async function drainDeliveries(request = spotifyRequest, wait = false) {
   if (embeddedSpotify) return;
   return navigator.locks.request('ktv420-delivery', { ifAvailable: !wait }, async (lock) => {
     if (!lock) return;
+    // A new playlist made entirely of already saved songs still needs its membership.
+    const collections = await request<(LibraryCollection & { handoffId: string })[]>('collections').catch(() => []);
+    for (const collection of collections) {
+      await rememberCollection(collection, collection.tracks);
+      await request('ack-collection', { path: collection.path, requestId: collection.handoffId });
+    }
     for (const capture of await request<QueuedCapture[]>('pending'))
       await receiveCapture(capture, request);
   });

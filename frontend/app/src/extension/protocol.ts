@@ -18,6 +18,8 @@ export function parseRequest(value: unknown) {
     ![
       'hello',
       'library-summary',
+      'collections',
+      'ack-collection',
       'publish-library',
       'open-player',
       'discover',
@@ -34,6 +36,7 @@ export function parseRequest(value: unknown) {
     ].includes(r.operation)
   )
     throw new Error('Update the ktv420 Spotify extension.');
+  if (r.operation === 'ack-collection' && (typeof r.path !== 'string' || !/^(album|playlist)\/[A-Za-z0-9]{22}$/.test(r.path) || typeof r.requestId !== 'string' || !/^[a-f0-9-]{36}$/.test(r.requestId))) throw new Error('Invalid collection acknowledgment.');
   if (r.operation === 'publish-library') r.tracks = parseLibrarySummary(r.tracks);
   if (r.operation === 'open-player' && (typeof r.path !== 'string' || !/^(album|playlist)\/[A-Za-z0-9]{22}$/.test(r.path) || (r.trackIndex !== null && (!Number.isSafeInteger(r.trackIndex) || Number(r.trackIndex) < 1 || Number(r.trackIndex) > 10000)))) throw new Error('Invalid player link.');
   if ('tabId' in r) throw new Error('Spotify is bound to the overlay, not a supplied tab.');

@@ -11,6 +11,9 @@ import {
   queueTransaction,
   publishLibrarySummary,
   readLibrarySummary,
+  rememberPlayerCollection,
+  playerCollections,
+  acknowledgePlayerCollection,
 } from './queue';
 import { parseRequest, websiteSender } from './protocol';
 const metadata = {
@@ -107,4 +110,19 @@ test('library summary validation rejects malformed IDs, duplicate rows and unkno
     [{ id: 'spotify-a', status: 'ready' }, { id: 'spotify-a', status: 'captured' }]]) {
     assert.throws(() => parseRequest({ protocol: 'ktv420-spotify', version: 1, operation: 'publish-library', tracks: value }), /Invalid library summary/);
   }
+});
+
+test('playlist handoff persists membership without new audio and stale acknowledgments cannot erase a newer handoff', async () => {
+  const path = 'playlist/1111111111111111111111';
+  const snapshot = { complete: true, collection: { path, title: 'New playlist', artwork: '', trackIds: ['known'] },
+    tracks: [{ trackId: 'known', trackName: 'Known song', trackArtist: 'Artist', trackArtworkSrc: '', rowIndex: 0 }] };
+  await rememberPlayerCollection(snapshot);
+  const first = (await playerCollections() as { path: string; handoffId: string }[]).find(c => c.path === path)!;
+  await rememberPlayerCollection(snapshot);
+  await acknowledgePlayerCollection(path, first.handoffId);
+  const next = (await playerCollections() as { path: string; handoffId: string; tracks: unknown[] }[]).find(c => c.path === path)!;
+  assert.notEqual(next.handoffId, first.handoffId);
+  assert.deepEqual(next.tracks, snapshot.tracks);
+  await acknowledgePlayerCollection(path, next.handoffId);
+  assert.equal((await playerCollections() as unknown[]).length, 0);
 });

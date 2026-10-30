@@ -1,6 +1,8 @@
+import { parseCollection } from '../features/local/savedCollections';
+import type { PlaylistSnapshot } from '../features/local/spotify/discover';
 import { parseLibrarySummary, type LibrarySummary } from '../shared/librarySummary';
 import { decodeChunk, validateCapture, type QueuedCapture } from '../shared/captureFormat';
-/** Temporary delivery storage only. Old extension databases are never opened or deleted. */
+/** Temporary audio delivery plus website status/playlist metadata. No playback library. */
 export const QUEUE_DB = 'ktv420-capture-delivery-v1';
 export async function queueTransaction<T>(
   stores: string[],
@@ -8,8 +10,9 @@ export async function queueTransaction<T>(
   run: (tx: IDBTransaction, done: (value: T) => void) => void,
 ): Promise<T> {
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
-    const r = indexedDB.open(QUEUE_DB, 2);
+    const r = indexedDB.open(QUEUE_DB, 3);
     r.onupgradeneeded = () => {
+      if (!r.result.objectStoreNames.contains('collections')) r.result.createObjectStore('collections', { keyPath: 'path' });
       if (!r.result.objectStoreNames.contains('library')) r.result.createObjectStore('library');
       if (r.result.objectStoreNames.contains('captures')) return;
       r.result.createObjectStore('captures', { keyPath: 'id' });
@@ -197,4 +200,27 @@ export async function readLibrarySummary(): Promise<LibrarySummary[]> {
     if (!tracks.has(id)) tracks.set(id, { id, status: 'captured' });
   }
   return [...tracks.values()];
+}
+
+export function rememberPlayerCollection(snapshot: PlaylistSnapshot) {
+  const collection = parseCollection(snapshot?.collection), rows = snapshot?.tracks;
+  if (!collection || !snapshot.complete || !Array.isArray(rows) || rows.length !== collection.trackIds.length ||
+    !rows.every((row, i) => row?.trackId === collection.trackIds[i] && row.rowIndex === i &&
+      typeof row.trackName === 'string' && row.trackName.length <= 500 && typeof row.trackArtist === 'string' && row.trackArtist.length <= 500 &&
+      typeof row.trackArtworkSrc === 'string' && row.trackArtworkSrc.length <= 4096)) throw new Error('Spotify playlist is not ready.');
+  return queueTransaction(['collections'], 'readwrite', tx => {
+    tx.objectStore('collections').put({ ...collection, handoffId: crypto.randomUUID(), tracks: rows.map(({ trackId, trackName, trackArtist, trackArtworkSrc, rowIndex }) => ({ trackId, trackName, trackArtist, trackArtworkSrc, rowIndex })) });
+  });
+}
+export function playerCollections() {
+  return queueTransaction(['collections'], 'readonly', (tx, done) => {
+    const r = tx.objectStore('collections').getAll(); r.onsuccess = () => done(r.result);
+  });
+}
+
+export function acknowledgePlayerCollection(path: string, handoffId: string) {
+  return queueTransaction(['collections'], 'readwrite', tx => {
+    const store = tx.objectStore('collections'), r = store.get(path);
+    r.onsuccess = () => { if (r.result?.handoffId === handoffId) store.delete(path); };
+  });
 }

@@ -8,11 +8,19 @@ import {
   acknowledgeCapture,
   readLibrarySummary,
   publishLibrarySummary,
+  rememberPlayerCollection,
+  playerCollections,
+  acknowledgePlayerCollection,
 } from './queue';
 async function request(message: unknown, tabId?: number) {
   const r = parseRequest(message);
   switch (r.operation) {
     case 'hello': return { version: 1, extensionVersion: chrome.runtime.getManifest().version, extensionId: chrome.runtime.id };
+    case 'ack-collection': {
+      if (tabId !== undefined) throw new Error('Only the website receives playlist metadata.');
+      return acknowledgePlayerCollection(String(r.path), String(r.requestId));
+    }
+    case 'collections': return playerCollections();
     case 'library-summary': return readLibrarySummary();
     case 'publish-library': {
       if (tabId !== undefined) throw new Error('Only the standalone website publishes library status.');
@@ -27,6 +35,9 @@ async function request(message: unknown, tabId?: number) {
       if (!tab.url?.startsWith('https://open.spotify.com/')) throw new Error('Spotify tab is unavailable.');
       if (r.operation === 'open-player') {
         if (new URL(tab.url).pathname.replace(/\/$/, '').slice(1) !== r.path) throw new Error('Spotify changed playlists.');
+        const snapshot = await chrome.tabs.sendMessage(tabId, { type: 'ktv420:command', ...r, operation: 'discover' }, { frameId: 0 });
+        if (!snapshot?.ok || snapshot.result?.collection?.path !== r.path) throw new Error('Spotify playlist changed.');
+        await rememberPlayerCollection(snapshot.result);
         const url = new URL('/playlist', APP_ORIGIN);
         url.searchParams.set('id', String(r.path).replace('/', '.'));
         if (r.trackIndex !== null) url.searchParams.set('ktv420', String(r.trackIndex));

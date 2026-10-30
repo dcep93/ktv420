@@ -1,3 +1,4 @@
+import 'fake-indexeddb/auto';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -22,7 +23,7 @@ globalThis.chrome = {
     get: async () => ({ id: 7, url: currentUrl }),
     sendMessage: async (tabId: number, message: Record<string, unknown>, options: { frameId: number }) => {
       delivered.push({ tabId, message, ...options });
-      return { ok: true, result: { tracks: [] } };
+      return { ok: true, result: { complete: true, collection: { path: new URL(currentUrl).pathname.slice(1).replace(/\/$/, ''), title: 'Playlist', artwork: '', trackIds: ['song'] }, tracks: [{ trackId: 'song', trackName: 'Song', trackArtist: 'Artist', trackArtworkSrc: '', rowIndex: 0 }] } };
     },
   },
 } as unknown as typeof chrome;

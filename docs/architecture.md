@@ -30,7 +30,7 @@ The top-level website is the only receiver and owner of audio. Captures remain i
 
 The website’s fresh `ktv420-web-library-v1` IndexedDB database contains tracks, audio Blobs, collections, settings, incoming delivery chunks and commit receipts. Per-song MP3 commits replace raw audio atomically; imported files and metadata commit with collection membership. Processing status remains recoverable from raw input when a worker/tab closes. A website Web Lock excludes competing separation and import/deletion commits. Performance recordings and analysis/model caches remain website-local.
 
-The extension’s new `ktv420-capture-delivery-v1` database contains temporary capture manifests/chunks and a metadata-only website status cache (schema version 2). Previous extension library/state databases are untouched and never opened. Completed queue entries have no automatic expiry. Starting a new capture may clear unfinished staging for that same Spotify tab, but never completed recordings awaiting acknowledgment.
+The extension’s new `ktv420-capture-delivery-v1` database contains temporary capture manifests/chunks and a metadata-only website status cache (schema version 3). Previous extension library/state databases are untouched and never opened. Completed queue entries have no automatic expiry. Starting a new capture may clear unfinished staging for that same Spotify tab, but never completed recordings awaiting acknowledgment.
 
 ## Protocol and scheduling
 
