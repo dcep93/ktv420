@@ -1,3 +1,7 @@
+import { receivePrepared } from './preparedDelivery';
+import type { PreparedAudio } from '../../../shared/preparedAudio';
+import { SEPARATION_LOCK } from '../libraryClient';
+import { wavHeader } from '../../../shared/captureWav';
 import { transaction, type LocalTrack } from '../library';
 import { parseCollection } from '../savedCollections';
 import { decodeChunk, validateCapture, type QueuedCapture } from '../../../shared/captureFormat';
@@ -6,33 +10,6 @@ import { embeddedSpotify } from './overlay';
 import { rememberCollection, type LibraryCollection } from '../collections';
 
 type Stage = { id: string; nextChunk: number; receivedBytes: number; expectedBytes: number };
-function wavHeader(capture: QueuedCapture) {
-  const header = new ArrayBuffer(58),
-    view = new DataView(header),
-    channels = Number(capture.metadata.audioChannelCount),
-    rate = Number(capture.metadata.audioSampleRate),
-    size = capture.expectedBytes;
-  const text = (at: number, s: string) => {
-    for (let i = 0; i < s.length; i++) view.setUint8(at + i, s.charCodeAt(i));
-  };
-  text(0, 'RIFF');
-  view.setUint32(4, 50 + size, true);
-  text(8, 'WAVE');
-  text(12, 'fmt ');
-  view.setUint32(16, 18, true);
-  view.setUint16(20, 3, true);
-  view.setUint16(22, channels, true);
-  view.setUint32(24, rate, true);
-  view.setUint32(28, rate * channels * 4, true);
-  view.setUint16(32, channels * 4, true);
-  view.setUint16(34, 32, true);
-  text(38, 'fact');
-  view.setUint32(42, 4, true);
-  view.setUint32(46, size / (channels * 4), true);
-  text(50, 'data');
-  view.setUint32(54, size, true);
-  return header;
-}
 export async function receiveCapture(capture: QueuedCapture, request = spotifyRequest) {
   validateCapture(capture.metadata, capture.expectedBytes);
   if (
@@ -159,6 +136,7 @@ export async function receiveCapture(capture: QueuedCapture, request = spotifyRe
       tx.objectStore('captures').delete(capture.id);
       for (const chunk of chunks) tx.objectStore('chunks').delete(`${capture.id}/${chunk.index}`);
     },
+    { durability: 'strict' },
   );
   // No acknowledgment before the transaction above has completed successfully.
   await request('ack', { id: capture.id });
@@ -167,13 +145,35 @@ export async function drainDeliveries(request = spotifyRequest, wait = false) {
   if (embeddedSpotify) return;
   return navigator.locks.request('ktv420-delivery', { ifAvailable: !wait }, async (lock) => {
     if (!lock) return;
+    const failures: unknown[] = [];
     // A new playlist made entirely of already saved songs still needs its membership.
     const collections = await request<(LibraryCollection & { handoffId: string })[]>('collections').catch(() => []);
     for (const collection of collections) {
-      await rememberCollection(collection, collection.tracks);
-      await request('ack-collection', { path: collection.path, requestId: collection.handoffId });
+      try {
+        await rememberCollection(collection, collection.tracks);
+        await request('ack-collection', { path: collection.path, requestId: collection.handoffId });
+      } catch (error) { failures.push(error); }
     }
-    for (const capture of await request<QueuedCapture[]>('pending'))
-      await receiveCapture(capture, request);
+    const capabilities = await request<{ stagedAudio?: boolean }>('hello');
+    if (capabilities.stagedAudio) {
+      // A website separation must finish before a prepared result can replace its input.
+      await navigator.locks.request(SEPARATION_LOCK, { ifAvailable: true }, async lock => {
+        if (!lock) return;
+        for (const prepared of await request<PreparedAudio[]>('prepared')) {
+          try { await receivePrepared(prepared, request); } catch (error) { failures.push(error); }
+        }
+      });
+    }
+    for (const capture of await request<QueuedCapture[]>('pending')) {
+      try {
+        if (!capabilities.stagedAudio) { await receiveCapture(capture, request); continue; }
+        const token = await request<string | null>('claim-capture', { id: capture.id });
+        if (!token) continue;
+        const leased: typeof request = (operation, args) => request(operation, { ...args, token });
+        try { await receiveCapture(capture, leased); }
+        finally { await request('release-capture', { id: capture.id, token }).catch(() => {}); }
+      } catch (error) { failures.push(error); }
+    }
+    if (failures.length) throw new Error(`${failures.length} import${failures.length === 1 ? '' : 's'} pending: ${failures[0] instanceof Error ? failures[0].message : String(failures[0])}`);
   });
 }

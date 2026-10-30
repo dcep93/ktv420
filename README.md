@@ -2,12 +2,12 @@
 
 [Open ktv420](https://ktv420.web.app) to import a playlist, listen, remix and visualize music locally. The website owns your audio library. **No extension is needed for imported music.**
 
-The optional [Chrome extension](https://chromewebstore.google.com/detail/ktv420/kmkbecinmhkfihahalgclomhcicmoiia) captures Spotify. Click **k** to open the full hosted capture playlist as an iframe overlay over Spotify. Song links open the mixer on ktv420.web.app. The overlay never receives or separates audio; the top-level website owns the single playback library.
+The optional [Chrome extension](https://chromewebstore.google.com/detail/ktv420/kmkbecinmhkfihahalgclomhcicmoiia) captures Spotify. Click **k** to open the full hosted capture playlist as an iframe overlay over Spotify. Song links open the mixer on ktv420.web.app. The overlay separates recordings in local workers while capture continues, keeping raw/prepared audio temporarily in extension staging. Opening ktv420 imports it into the website playback library and removes the staged copy only after commit.
 
 ## Getting started
 
 - **Import:** Catalog → Import playlist → ZIP or extracted folder. Open the imported playlist, then a prepared song. Entering a track starts paused; track endings advance normally.
-- **Capture:** install extension 7.2.1, reload Spotify, open a playlist/album, click **k** to open the overlay, then click its central **k**. The overlay chooses missing songs; Spotify records one at a time. Open a captured song to receive and separate it on ktv420. An already-open website receives captures automatically. Monitor volume does not change captured samples.
+- **Capture:** install extension 7.3.0, reload Spotify, open a playlist/album, click **k** to open the overlay, then click its central **k**. The overlay chooses missing songs; Spotify records one at a time. The overlay separates captured songs automatically; settings can pause/resume separation. Open ktv420 to import staged originals/stems automatically. Imports continue while the website is open, including new captures, without re-encoding prepared files. Monitor volume does not change captured samples.
 - **Share:** Catalog → Export → Save ZIP. Upload to Dropbox yourself. Your friend downloads and imports the ZIP or extracted folder. No Dropbox integration, extension, model download or separation is needed for imported prepared audio.
 - **Replay:** `/replay` accepts a recorded mix JSON. Import the required playlist audio, then open the recording in the website mixer. Export MP3 renders the performance locally.
 
@@ -15,15 +15,15 @@ The optional [Chrome extension](https://chromewebstore.google.com/detail/ktv420/
 
 ## Clean break in version 7
 
-This is a fresh website-owned library. There is **no migration** from extension storage and no support for old extension protocols or version-1 playlist packages. Exported version-2 packages round-trip originals, four stems, metadata, timing, shared gain, artwork and ordered membership, including repeated songs. Audio bytes are copied without recompression.
+This is a fresh website-owned library. Version 7.3 imports the current extension delivery queue, including existing 7.x raw captures. There is no migration from pre-v7 databases or old isolated overlay libraries, and no support for old extension protocols or version-1 playlist packages. Exported version-2 packages round-trip originals, four stems, metadata, timing, shared gain, artwork and ordered membership, including repeated songs. Audio bytes are copied without recompression.
 
-Old extension databases are neither opened nor automatically deleted. Removing the extension does not affect the website library. Clearing website data does. Requesting persistent storage may be denied; the app reports this and retains export/deletion controls. Both origins use normal browser quotas, with no `storage` or `unlimitedStorage` permission.
+Old extension databases are neither opened nor automatically deleted. Removing the extension does not affect imported website audio, but removes recordings still awaiting import in its staging queue. Clearing website data does. Requesting persistent storage may be denied; the app reports this and retains export/deletion controls. Both origins use normal browser quotas, with no `storage` or `unlimitedStorage` permission.
 
 ## Responsibilities
 
 The website owns catalog, audio, capture scheduling, separation, encoding, playback, effects, visualizers, recording and import/export. Audio stays on the computer; there is no audio-processing backend, Cloud Run service or GCS audio store. Firebase Hosting serves static app files. Pinned model weights download as data.
 
-The extension owns Spotify discovery, DOM transport, precise Float32 capture, a temporary durable delivery queue and a metadata-only cache of the website’s captured/ready status. Completed recordings survive website closure. The website pulls bounded 256 KiB chunks with backpressure and resumes after interruption. The extension deletes a recording only after the website acknowledges its committed IndexedDB input. Closing the website stops scheduling additional songs; it does not discard the current completed capture.
+The extension owns Spotify discovery, DOM transport, precise Float32 capture, temporary durable raw/prepared staging and a metadata-only cache of the website’s captured/ready status. Completed recordings survive website closure. The website pulls bounded 256 KiB chunks with backpressure and resumes after interruption. The extension deletes a staged recording only after the website acknowledges its committed IndexedDB files and receipt. Raw inputs are replaced in staging only after validated MP3s commit. Token-bound claims prevent separation/import races; interrupted transfers resume from committed chunks. Closing the standalone website does not stop the Spotify overlay; closing the overlay stops its capture and separation.
 
 Separation resumes from stored raw inputs after reopening. Browser Web Locks coordinate separation, import and deletion. The existing Demucs model, WebGPU worker and MP3 worker remain. Supported GPU devices use explicitly requested WebGPU; initialization failure is visible rather than silently switching the entire job to CPU. The settings page provides a CPU/WASM option.
 

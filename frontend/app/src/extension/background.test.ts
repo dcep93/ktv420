@@ -87,3 +87,17 @@ test('track handoff opens a one-based website link, never an embedded player or 
   assert.equal((await call(handoff, { ...sender, url: 'https://ktv420.web.app/', frameId: 0 }, external)).ok, false);
   assert.equal(opened.length, 1);
 });
+test('staged processing is overlay-only and prepared import/deletion is standalone-only', async () => {
+  const id = crypto.randomUUID(), token = crypto.randomUUID();
+  const website = { ...sender, url: 'https://ktv420.web.app/catalog', frameId: 0 };
+  for (const operation of ['prepared', 'prepared-chunk', 'ack-prepared', 'claim-capture', 'release-capture']) {
+    const r = await call({ type: 'ktv420:overlay-request', request: { ...request, operation, id, token, name: 'input', index: 0 } });
+    assert.equal(r.ok, false, operation);
+    assert.match(r.error || '', /Only the website/);
+  }
+  for (const operation of ['work-pending', 'work-claim', 'work-touch', 'work-release', 'work-chunk', 'work-finish']) {
+    const r = await call({ ...request, operation, id, token, index: 0 }, website, external);
+    assert.equal(r.ok, false, operation);
+    assert.match(r.error || '', /Only the Spotify overlay/);
+  }
+});

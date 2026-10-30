@@ -57,10 +57,11 @@ export async function transaction<T>(
   stores: string[],
   mode: IDBTransactionMode,
   run: (tx: IDBTransaction, setResult: (result: T) => void) => void,
+  options?: IDBTransactionOptions,
 ): Promise<T> {
   const db = await openLibrary();
   return new Promise<T>((resolve, reject) => {
-    const tx = db.transaction(stores, mode);
+    const tx = db.transaction(stores, mode, options);
     let result: T;
     tx.oncomplete = () => {
       db.close();

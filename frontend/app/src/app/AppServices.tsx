@@ -55,6 +55,7 @@ export default function AppServices() {
         if (connected)
           try {
             await drainDeliveries();
+            if (!cancelled) setNotice(previous => previous.startsWith('Capture delivery paused:') ? '' : previous);
           } catch (reason) {
             if (!cancelled)
               setNotice(

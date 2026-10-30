@@ -1,4 +1,4 @@
-/** Metadata only: audio and processing stay in the top-level website library. */
+/** Metadata only: combine staged captures with the website library status. */
 export type LibrarySummary = { id: string; status: 'captured' | 'processing' | 'ready' | 'error' };
 export function parseLibrarySummary(value: unknown): LibrarySummary[] {
   if (!Array.isArray(value) || value.length > 10000) throw new Error('Invalid library summary.');

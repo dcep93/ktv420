@@ -128,6 +128,7 @@ export function usePlaylist(onClose?: () => void) {
     const navigation = (event: Event) => {
       const detail = (event as CustomEvent).detail;
       if (!detail.open) {
+        setNavigation(n => ({ ...n, open: false, revision: n.revision + 1 }));
         cancelled.current = true;
         closeRef.current?.();
         window.dispatchEvent(new Event('ktv420:overlay-hidden'));

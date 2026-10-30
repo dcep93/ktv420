@@ -1,12 +1,28 @@
+import { startStagedProcessing } from '../features/local/spotify/stagedProcessing';
+import { nextSeparationFraction } from '../features/local/rowProgress';
+import type { SeparationProgress } from '../features/local/inference/types';
 import { useEffect, useRef, useState } from 'react';
 import { usePlaylist } from '../features/local/usePlaylist';
 import { useHostedCapture } from '../features/local/useHostedCapture';
 import OverlayIcon from './OverlayIcon';
 
-/** The Spotify frame never opens audio storage or mounts the mixer. */
+/** Hosted inference uses extension staging; the frame owns no audio library or mixer. */
 export default function CapturePage() {
   const spotify = usePlaylist();
   const [error, setError] = useState(''), [settings, setSettings] = useState(false);
+  const [processing, setProcessing] = useState<{ id: string; progress: SeparationProgress; fraction: number | null } | null>(null);
+  const [processingEnabled, setProcessingEnabled] = useState(() => {
+    try { return localStorage.getItem('ktv420:overlay-separation') !== 'paused'; } catch { return true; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('ktv420:overlay-separation', processingEnabled ? 'enabled' : 'paused'); } catch { /* Optional preference. */ }
+  }, [processingEnabled]);
+  useEffect(() => {
+    if (!processingEnabled || !spotify.navigation.open) return;
+    return startStagedProcessing(setError, (id, progress) => setProcessing(previous => progress ? {
+      id, progress, fraction: nextSeparationFraction(previous?.id === id ? previous.fraction : null, progress),
+    } : null));
+  }, [processingEnabled, spotify.navigation.open]);
   const followed = useRef(-1);
   const saved = new Map(spotify.librarySummary.map(track => [track.id, track]));
   for (const id of spotify.savingTrackIds) {
@@ -60,15 +76,18 @@ export default function CapturePage() {
     <div className="iframe-content">
       {settings ? <section className="iframe-settings-view" aria-label="Settings view"><section className="iframe-settings-source">
         <header className="iframe-settings-source-header"><h2>Capture</h2></header>
-        <p className="iframe-settings-help">Volume changes what you hear, not the recording. Separation and playback run in ktv420.</p>
+        <p className="iframe-settings-help">Volume changes what you hear, not the recording. Songs separate here as capture continues, then move into ktv420 when you open it.</p>
+        <button onClick={() => { setError(''); setProcessingEnabled(value => !value); }}>{processingEnabled ? 'Pause separation' : 'Resume separation'}</button>
         <button onClick={() => open(null)}>Open playlist in ktv420</button>
       </section></section> : <ol className="iframe-track-list" aria-label="Playlist tracks">{spotify.tracks.map(row => {
-        const status = saved.get(`spotify-${row.trackId}`)?.status;
+        const separation = processing?.id === row.trackId ? processing : null;
+        const status = separation ? 'processing' : saved.get(`spotify-${row.trackId}`)?.status;
         const current = capture.active && progress?.trackId === row.trackId && !status ? progress : null;
         const label = current ? current.phase === 'saving' ? 'Saving…' : `Capturing${current.fraction === null ? '' : ` ${Math.floor(current.fraction * 100)}%`}`
-          : status === 'ready' ? 'Ready' : status === 'processing' ? 'Separating' : status === 'error' ? 'Needs attention' : status ? 'Captured' : 'Not captured';
-        return <li key={`${row.trackId}-${row.rowIndex}`}><button className="iframe-track-row" data-state={status || 'missing'} data-progress={current ? 'capture' : undefined}
-          disabled={!status} aria-label={`${row.trackName} — ${label}`} title={status ? 'Open in ktv420' : label} onClick={() => open(row.rowIndex + 1)}>
+          : separation ? `${separation.progress.phase === 'encoding' ? 'Saving MP3' : 'Separating'}${separation.fraction === null ? '' : ` ~${Math.round(separation.fraction * 100)}%`}` : status === 'ready' ? 'Ready' : status === 'processing' ? 'Separating' : status === 'error' ? 'Needs attention' : status ? 'Captured' : 'Not captured';
+        return <li key={`${row.trackId}-${row.rowIndex}`}><button className="iframe-track-row" data-state={status || 'missing'} data-progress={current ? 'capture' : separation ? 'separation' : undefined}
+          disabled={!status} aria-label={`${row.trackName} — ${label}`} title={separation?.progress.message || (status ? 'Open in ktv420' : label)} onClick={() => open(row.rowIndex + 1)}>
+          {separation && <span className="iframe-track-fill" data-indeterminate={separation.fraction === null} style={{ width: separation.fraction === null ? '35%' : `${separation.fraction * 100}%` }} aria-hidden="true" />}
           {current && <span className="iframe-track-fill" data-indeterminate={current.fraction === null} style={{ width: current.fraction === null ? '35%' : `${current.fraction * 100}%` }} aria-hidden="true" />}
           <span className="iframe-track-state"><OverlayIcon name={status === 'ready' ? 'play' : current || status === 'processing' ? 'processing' : status === 'error' ? 'alert' : 'clock'} /></span>
           {row.trackArtworkSrc ? <img className="iframe-track-artwork" alt="" src={row.trackArtworkSrc} /> : <span className="iframe-track-artwork iframe-artwork-placeholder"><OverlayIcon name="music" /></span>}

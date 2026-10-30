@@ -1,3 +1,5 @@
+import { AUDIO_NAMES, parsePrepared } from '../shared/preparedAudio';
+import { decodeChunk } from '../shared/captureFormat';
 import { parseLibrarySummary } from '../shared/librarySummary';
 export const PROTOCOL_VERSION = 1;
 export const APP_ORIGIN = 'https://ktv420.web.app';
@@ -17,6 +19,8 @@ export function parseRequest(value: unknown) {
     typeof r.operation !== 'string' ||
     ![
       'hello',
+      'claim-capture', 'release-capture', 'prepared', 'prepared-chunk', 'ack-prepared',
+      'work-pending', 'work-claim', 'work-chunk', 'work-touch', 'work-release', 'work-begin', 'work-append', 'work-finish',
       'library-summary',
       'collections',
       'ack-collection',
@@ -39,6 +43,25 @@ export function parseRequest(value: unknown) {
   if (r.operation === 'ack-collection' && (typeof r.path !== 'string' || !/^(album|playlist)\/[A-Za-z0-9]{22}$/.test(r.path) || typeof r.requestId !== 'string' || !/^[a-f0-9-]{36}$/.test(r.requestId))) throw new Error('Invalid collection acknowledgment.');
   if (r.operation === 'publish-library') r.tracks = parseLibrarySummary(r.tracks);
   if (r.operation === 'open-player' && (typeof r.path !== 'string' || !/^(album|playlist)\/[A-Za-z0-9]{22}$/.test(r.path) || (r.trackIndex !== null && (!Number.isSafeInteger(r.trackIndex) || Number(r.trackIndex) < 1 || Number(r.trackIndex) > 10000)))) throw new Error('Invalid player link.');
+  const work = r.operation.startsWith('work-');
+  if ((work && r.operation !== 'work-pending') || ['claim-capture', 'release-capture', 'prepared-chunk', 'ack-prepared'].includes(r.operation)) {
+    if (typeof r.id !== 'string' || !/^[a-f0-9-]{36}$/.test(r.id)) throw new Error('Invalid staging ID.');
+  }
+  if ((work && !['work-pending', 'work-claim'].includes(r.operation)) || r.operation === 'release-capture' || 'token' in r) {
+    if (typeof r.token !== 'string' || !/^[a-f0-9-]{36}$/.test(r.token)) throw new Error('Invalid staging token.');
+  }
+  if (['prepared-chunk', 'work-append', 'work-chunk'].includes(r.operation) && (!Number.isSafeInteger(r.index) || Number(r.index) < 0 || Number(r.index) > 4096)) throw new Error('Invalid staging chunk.');
+  if (['prepared-chunk', 'work-append'].includes(r.operation) && !AUDIO_NAMES.includes(r.name as typeof AUDIO_NAMES[number])) throw new Error('Invalid staging file.');
+  if (r.operation === 'work-begin') {
+    r.manifest = parsePrepared(r.manifest);
+    if (r.id !== (r.manifest as { id: string }).id) throw new Error('Mismatched staging ID.');
+  }
+  if (r.operation === 'work-append') decodeChunk(r.base64);
+  if ('progress' in r) {
+    const p = r.progress as { fraction: number; message: string };
+    if (!p || !Number.isFinite(p.fraction) || p.fraction < 0 || p.fraction > 1 || typeof p.message !== 'string' || p.message.length > 500) throw new Error('Invalid processing progress.');
+    r.progress = { fraction: p.fraction, message: p.message };
+  }
   if ('tabId' in r) throw new Error('Spotify is bound to the overlay, not a supplied tab.');
   if (r.operation === 'view' && r.trackIndex !== null &&
     (!Number.isSafeInteger(r.trackIndex) || Number(r.trackIndex) < 1 || Number(r.trackIndex) > 10000))
@@ -81,7 +104,7 @@ export function parseRequest(value: unknown) {
       'id',
       'index',
       'volume',
-      'tracks',
+      'tracks', 'token', 'name', 'manifest', 'base64', 'progress',
     ]
       .filter((key) => key in r)
       .map((key) => [key, r[key]]),

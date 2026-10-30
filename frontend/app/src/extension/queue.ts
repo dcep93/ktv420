@@ -2,16 +2,18 @@ import { parseCollection } from '../features/local/savedCollections';
 import type { PlaylistSnapshot } from '../features/local/spotify/discover';
 import { parseLibrarySummary, type LibrarySummary } from '../shared/librarySummary';
 import { decodeChunk, validateCapture, type QueuedCapture } from '../shared/captureFormat';
-/** Temporary audio delivery plus website status/playlist metadata. No playback library. */
+/** Temporary raw/prepared audio delivery plus website status/playlist metadata. */
 export const QUEUE_DB = 'ktv420-capture-delivery-v1';
 export async function queueTransaction<T>(
   stores: string[],
   mode: IDBTransactionMode,
   run: (tx: IDBTransaction, done: (value: T) => void) => void,
+  options?: IDBTransactionOptions,
 ): Promise<T> {
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
-    const r = indexedDB.open(QUEUE_DB, 3);
+    const r = indexedDB.open(QUEUE_DB, 4);
     r.onupgradeneeded = () => {
+      for (const name of ['claims', 'prepared', 'preparedFiles', 'uploads']) if (!r.result.objectStoreNames.contains(name)) r.result.createObjectStore(name, { keyPath: 'id' });
       if (!r.result.objectStoreNames.contains('collections')) r.result.createObjectStore('collections', { keyPath: 'path' });
       if (!r.result.objectStoreNames.contains('library')) r.result.createObjectStore('library');
       if (r.result.objectStoreNames.contains('captures')) return;
@@ -20,11 +22,12 @@ export async function queueTransaction<T>(
         .createObjectStore('chunks', { keyPath: 'key' })
         .createIndex('captureId', 'captureId');
     };
-    r.onsuccess = () => resolve(r.result);
+    r.onsuccess = () => { r.result.onversionchange = () => r.result.close(); resolve(r.result); };
+    r.onblocked = () => reject(new Error('Reload ktv420 to update capture staging.'));
     r.onerror = () => reject(r.error);
   });
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(stores, mode);
+    const tx = db.transaction(stores, mode, options);
     let result: T;
     tx.oncomplete = () => {
       db.close();
@@ -127,7 +130,7 @@ export function finishCapture(tabId: number, id: string) {
       }
       store.put({ ...c, complete: true });
     };
-  });
+  }, { durability: 'strict' });
 }
 export function pendingCaptures(): Promise<QueuedCapture[]> {
   return queueTransaction(['captures'], 'readonly', (tx, done) => {
@@ -135,9 +138,11 @@ export function pendingCaptures(): Promise<QueuedCapture[]> {
     r.onsuccess = () => done(r.result.filter((c: QueuedCapture) => c.complete));
   });
 }
-export function readChunk(id: string, index: number): Promise<string> {
+export function readChunk(id: string, index: number, token?: string): Promise<string> {
   if (!Number.isSafeInteger(index) || index < 0) throw new Error('Invalid chunk index.');
-  return queueTransaction(['captures', 'chunks'], 'readonly', (tx, done) => {
+  return queueTransaction(['captures', 'chunks', 'claims'], 'readonly', (tx, done) => {
+    const claim = tx.objectStore('claims').get(id);
+    claim.onsuccess = () => { if (claim.result?.expires > Date.now() && claim.result.token !== token) tx.abort(); };
     const r = tx.objectStore('captures').get(id);
     r.onsuccess = () => {
       if (!r.result?.complete || index >= r.result.nextChunk) {
@@ -157,8 +162,13 @@ export function readChunk(id: string, index: number): Promise<string> {
     };
   });
 }
-export function acknowledgeCapture(id: string) {
-  return queueTransaction(['captures', 'chunks', 'library'], 'readwrite', (tx) => {
+export function acknowledgeCapture(id: string, token?: string) {
+  return queueTransaction(['captures', 'chunks', 'library', 'claims', 'uploads'], 'readwrite', (tx) => {
+    const claim = tx.objectStore('claims').get(id);
+    claim.onsuccess = () => {
+      if (claim.result?.expires > Date.now() && claim.result.token !== token) { tx.abort(); return; }
+      tx.objectStore('claims').delete(id);
+    };
     const r = tx.objectStore('captures').get(id);
     r.onsuccess = () => {
       if (!r.result) return;
@@ -170,14 +180,11 @@ export function acknowledgeCapture(id: string) {
       const library = tx.objectStore('library'), previous = library.get(trackId);
       previous.onsuccess = () => { if (!previous.result) library.put({ id: trackId, status: 'captured' }, trackId); };
       tx.objectStore('captures').delete(id);
-      const cursor = tx.objectStore('chunks').index('captureId').openCursor(id);
-      cursor.onsuccess = () => {
-        const c = cursor.result;
-        if (c) {
-          c.delete();
-          c.continue();
-        }
-      };
+      tx.objectStore('uploads').delete(id);
+      for (const key of [id, `output/${id}`]) {
+        const cursor = tx.objectStore('chunks').index('captureId').openCursor(key);
+        cursor.onsuccess = () => { const c = cursor.result; if (c) { c.delete(); c.continue(); } };
+      }
     };
   });
 }
