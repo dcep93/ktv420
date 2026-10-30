@@ -13,7 +13,7 @@ export default function AppServices() {
   useEffect(() => {
     if (embeddedSpotify) return;
     let cancelled = false,
-      busy = false,
+      busy = false, checkedWorker = false,
       stopWorker: (() => void) | undefined;
     void requestPersistence()
       .then((persistent) => {
@@ -31,7 +31,8 @@ export default function AppServices() {
         const { spotifyRequest } = await import('../features/local/spotify/client');
         let connected = false;
         try {
-          const capability = await spotifyRequest<{ extensionQueue?: boolean; backgroundQueue?: boolean }>('hello');
+          const capability = await spotifyRequest<{ extensionQueue?: boolean; backgroundQueue?: boolean }>('hello', { heal: !checkedWorker });
+          checkedWorker = true;
           connected = true;
           if (capability.extensionQueue && !capability.backgroundQueue && !stopWorker && !cancelled) stopWorker = startStagedProcessing(message => { if (!cancelled) setNotice(message); }, () => {});
         } catch {

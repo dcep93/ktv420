@@ -12,7 +12,7 @@ export function recoverWorker(owner: WorkerOwner, documentId?: string) {
       const capture = captures.result;
       if (!capture) return;
       const value = capture.value as QueuedCapture, retry = value.retryAfterReload;
-      if (documentId && ((retry?.owner === owner && retry.documentId !== documentId) ||
+      if (documentId && (value.recoveries || 0) <= 3 && ((retry?.owner === owner && retry.documentId !== documentId) ||
           (owner === 'worker:background' && value.processingError && !value.attempts && !/invalid|unverified|truncated|unsupported|signature|quota|storage.*full/i.test(value.processingError)))) {
         delete value.processingError; delete value.retryAfterReload; capture.update(value);
       }
@@ -45,7 +45,7 @@ export function configureWork(enabled: boolean, retry = false, backend?: 'auto' 
     if (backend) tx.objectStore('settings').put(backend, 'backend');
     if (retry) {
       const r = tx.objectStore('captures').openCursor();
-      r.onsuccess = () => { const c = r.result; if (c) { const value = c.value; delete value.processingError; delete value.retryAfterReload; delete value.retryAt; value.attempts = 0; c.update(value); c.continue(); } };
+      r.onsuccess = () => { const c = r.result; if (c) { const value = c.value; delete value.processingError; delete value.retryAfterReload; delete value.retryAt; value.attempts = 0; value.recoveries = 0; c.update(value); c.continue(); } };
     }
   });
 }
@@ -59,7 +59,7 @@ export function claimWork(id: string, owner: WorkerOwner, documentId?: string): 
           (l.id === id || l.owner !== 'website'))) { done(null); return; }
       if (c.processingError) { delete c.processingError; delete c.retryAt; tx.objectStore('captures').put(c); }
       const token = crypto.randomUUID();
-      tx.objectStore('claims').put({ id, token, owner, documentId, expires: Date.now() + LEASE_MS }); done(token);
+      tx.objectStore('claims').put({ id, token, owner, documentId, startedAt: Date.now(), progressUpdatedAt: Date.now(), expires: Date.now() + LEASE_MS }); done(token);
     };
   });
 }

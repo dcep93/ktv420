@@ -1,4 +1,4 @@
-# Chrome Web Store package — 7.5.0
+# Chrome Web Store package — 7.5.1
 
 ## Permissions
 

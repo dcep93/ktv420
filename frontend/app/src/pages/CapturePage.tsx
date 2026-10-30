@@ -1,4 +1,6 @@
 import { separationStatus, separationProgressLabel } from '../features/local/separationStatus';
+import { useSpacePlayback } from '../features/local/useSpacePlayback';
+import SeparationSettings from './SeparationSettings';
 import ExtensionAudioSettings from './ExtensionAudioSettings';
 import { capturePercentage } from '../features/local/capturePercentage';
 import { startStagedProcessing } from '../features/local/spotify/stagedProcessing';
@@ -12,6 +14,8 @@ import OverlayIcon from './OverlayIcon';
 /** Hosted inference uses extension staging; the frame owns no audio library or mixer. */
 export default function CapturePage() {
   const spotify = usePlaylist();
+  // Capture has no local player; Space must never activate focused controls.
+  useSpacePlayback(() => {});
   const [error, setError] = useState(''), [settings, setSettings] = useState(false);
   const [startup, setStartup] = useState('');
   const [failures, setFailures] = useState<Record<string, string>>({});
@@ -63,7 +67,7 @@ export default function CapturePage() {
   useEffect(() => {
     if (capture.active && spotify.tracks.length)
       document.title = `${Math.min(99, percentage)}% · ktv420`;
-    else if (allCaptured) document.title = 'ktv420';
+    else document.title = 'ktv420';
   }, [capture.active, spotify.tracks.length, percentage, allCaptured]);
   const message = error || spotify.error || (!spotify.tracksComplete ? 'Loading playlist…' : startup);
   return <main className="iframe-page iframe-page--overlay" aria-label="ktv420 capture playlist">
@@ -83,13 +87,13 @@ export default function CapturePage() {
       </label></div>
     </header>
     <div className="iframe-content">
-      {settings ? <section className="iframe-settings-view" aria-label="Settings view"><section className="iframe-settings-source">
-        <header className="iframe-settings-source-header"><h2>Capture</h2></header>
-        <p className="iframe-settings-help">Volume changes what you hear, not the recording. Songs separate in the background, then move into ktv420 when you open it.</p>
-        <button onClick={() => { setError(''); if (processingEnabled) { void spotify.configureQueue(false).then(() => setProcessing(null)).catch(reason => setError(String(reason))); } else resume(); }}>{processingEnabled ? 'Pause separation' : 'Resume separation'}</button>
-        {(Object.keys(failures).length > 0 || spotify.librarySummary.some(track => track.status === 'error' && track.location === 'extension')) && <button onClick={resume}>Retry separation</button>}
-        <button onClick={() => open(null)}>Open playlist in ktv420</button>
-      </section><ExtensionAudioSettings capturing={capture.active} /></section> : <ol className="iframe-track-list" aria-label="Playlist tracks">{spotify.tracks.map(row => {
+      {settings ? <section className="iframe-settings-view" aria-label="Settings view">
+        <SeparationSettings enabled={processingEnabled} backend={spotify.queueBackend || 'auto'}
+          busy={spotify.librarySummary.some(track => track.status === 'processing' && track.location === 'extension')}
+          failed={spotify.librarySummary.some(track => track.status === 'error' && track.location === 'extension')}
+          configure={spotify.configureQueue} onError={setError} />
+        <ExtensionAudioSettings capturing={capture.active} />
+      </section> : <ol className="iframe-track-list" aria-label="Playlist tracks">{spotify.tracks.map(row => {
         const separation = processingEnabled && processing?.id === row.trackId ? processing : null;
         const track = saved.get(`spotify-${row.trackId}`);
         const waiting = separationStatus(track, processingEnabled, failures[row.trackId]);
@@ -100,13 +104,13 @@ export default function CapturePage() {
         const label = current ? current.phase === 'saving' ? 'Saving…' : `Capturing${current.fraction === null ? '' : ` ${Math.floor(current.fraction * 100)}%`}`
           : separation ? separationProgressLabel(separation.progress.message, separation.fraction) : waiting.label;
         return <li key={`${row.trackId}-${row.rowIndex}`}><button className="iframe-track-row" data-state={status || 'missing'} data-progress={current ? 'capture' : separating ? 'separation' : undefined}
-          disabled={!status} aria-label={`${row.trackName} — ${label}`} title={separation?.progress.message || waiting.detail || label} onClick={() => open(row.rowIndex + 1)}>
+          disabled={!status} aria-label={`${row.trackName} — ${waiting.failed ? 'Retry separation' : label}`} title={separation?.progress.message || waiting.detail || label} onClick={() => waiting.failed ? resume() : open(row.rowIndex + 1)}>
           {separating && <span className="iframe-track-fill" data-indeterminate={fraction === null} style={{ width: fraction === null ? '35%' : `${fraction * 100}%` }} aria-hidden="true" />}
           {current && <span className="iframe-track-fill" data-indeterminate={current.fraction === null} style={{ width: current.fraction === null ? '35%' : `${current.fraction * 100}%` }} aria-hidden="true" />}
           <span className="iframe-track-state"><OverlayIcon name={status === 'ready' ? 'play' : current || separation || waiting.busy ? 'processing' : waiting.failed ? 'alert' : 'clock'} /></span>
           {row.trackArtworkSrc ? <img className="iframe-track-artwork" alt="" src={row.trackArtworkSrc} /> : <span className="iframe-track-artwork iframe-artwork-placeholder"><OverlayIcon name="music" /></span>}
           <span className="iframe-track-copy"><span className="iframe-track-name">{row.trackName}</span><span className="iframe-track-artist">{row.trackArtist}</span></span>
-          <span className="iframe-track-status">{label}</span>
+          <span className="iframe-track-status">{waiting.failed ? 'Retry separation' : label}</span>
         </button></li>;
       })}</ol>}
     </div>

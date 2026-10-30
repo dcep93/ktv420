@@ -21,7 +21,7 @@ async function request(message: unknown, tabId?: number, websiteTabId?: number, 
   const r = parseRequest(message);
   if (String(r.operation).startsWith('work-')) {
     if (r.operation === 'work-state') return workState();
-    if (r.operation === 'work-config') { await configureWork(r.enabled as boolean, r.retry === true, r.backend as 'auto' | 'wasm' | undefined); await ensureWorkerHost(); return; }
+    if (r.operation === 'work-config') { await configureWork(r.enabled as boolean, r.retry === true, r.backend as 'auto' | 'wasm' | undefined); await ensureWorkerHost(r.retry === true); return; }
     const boundTab = tabId ?? websiteTabId;
     if (!backgroundWorker && !['work-state', 'work-config', 'work-pending'].includes(String(r.operation))) throw new Error('Separation runs in the extension background. Refresh this view.');
     if (!backgroundWorker && boundTab === undefined) throw new Error('A ktv420 view must own the worker.');
@@ -55,7 +55,7 @@ async function request(message: unknown, tabId?: number, websiteTabId?: number, 
     case 'staging-delete':
       if (tabId === undefined) throw new Error('Only the Spotify overlay manages extension audio.');
       return r.operation === 'staging-list' ? listStagedAudio() : deleteStagedAudio(r.ids as string[]);
-    case 'hello': await ensureWorkerHost(); return { version: 1, extensionVersion: chrome.runtime.getManifest().version, extensionId: chrome.runtime.id, stagedAudio: true, stagedAudioControls: true, extensionQueue: true, workRecovery: true, backgroundQueue: true };
+    case 'hello': await ensureWorkerHost(!backgroundWorker && r.heal === true); return { version: 1, extensionVersion: chrome.runtime.getManifest().version, extensionId: chrome.runtime.id, stagedAudio: true, stagedAudioControls: true, extensionQueue: true, workRecovery: true, backgroundQueue: true };
     case 'ack-collection': {
       if (tabId !== undefined) throw new Error('Only the website receives playlist metadata.');
       return acknowledgePlayerCollection(String(r.path), String(r.requestId));

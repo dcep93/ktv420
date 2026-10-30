@@ -329,7 +329,14 @@ export default function LibraryPage() {
     if (mix.current) void stopRecording({type:'record_stop',trackTimeSeconds:mixer.current?.position() || 0});
     mixer.current?.pause(); setAutoPlay(false); setViewMode('tracks');
   };
-  const close = useCallback(() => { closeRef.current(); spotify.close(); }, [spotify]);
+  const close = useCallback(() => {
+    const fromPlayer = viewMode === 'player' || viewMode === 'settings' && previousView.current === 'player';
+    closeRef.current();
+    if (fromPlayer) {
+      previousView.current = 'tracks';
+      if (urlNavigation) setUrlView(null, urlNavigation.revision, false);
+    } else spotify.close();
+  }, [spotify, viewMode, urlNavigation, setUrlView]);
   const canCapture = !mp3Export.busy && !replay.active && !recording && !spotify.standalone && !spotify.starting && !deletingAudio && (capture.active || (libraryReady && spotify.supported && spotify.tracksComplete && spotify.tracks.length > 0));
   const audioBusy = mp3Export.busy || replay.active || !!active || recording || capture.active || spotify.starting || deletingAudio;
   const firstCapturedTrack = viewMode === 'tracks' && spotify.tracksComplete && !spotify.replay && !capture.active
@@ -390,7 +397,7 @@ export default function LibraryPage() {
       </p>}
     </div>
     <div className="iframe-actions-shell"><div className="iframe-actions">
-      <button type="button" className="iframe-close-button" aria-label="Close" title="Close" onClick={close}><OverlayIcon name="close" /></button>
+      <button type="button" className="iframe-close-button" aria-label={viewMode === 'player' || viewMode === 'settings' && previousView.current === 'player' ? 'Back to playlist' : 'Back to catalog'} title={viewMode === 'player' || viewMode === 'settings' && previousView.current === 'player' ? 'Back to playlist' : 'Back to catalog'} onClick={close}><OverlayIcon name="close" /></button>
       <button type="button" className="iframe-logo-button" aria-label={viewMode === 'player' ? 'Back to playlist' : firstCapturedTrack ? 'Open first track' : spotify.standalone ? 'No prepared tracks' : 'Start or stop ktv420 capture'}
         title={viewMode === 'player' ? 'Back to playlist' : firstCapturedTrack ? 'Open first track' : spotify.standalone ? 'No prepared tracks' : capture.active ? 'Stop capture' : 'Start capture'}
         aria-disabled={viewMode !== 'player' && !canUseLogo} disabled={viewMode !== 'player' && !canUseLogo}
@@ -483,14 +490,14 @@ export default function LibraryPage() {
         const artwork = (typeof track.metadata?.trackArtworkSrc === 'string' ? track.metadata.trackArtworkSrc : '') ||
           spotify.tracks.find(item => `spotify-${item.trackId}` === track.id)?.trackArtworkSrc || '';
         return <li key={`${track.id}-${index}`}><button type="button" className="iframe-track-row" data-state={track.status} data-progress={progressKind}
-          aria-label={`${track.title} — ${label}`} disabled={!available}
+          aria-label={`${track.title} — ${queueStatus?.failed ? 'Retry separation' : label}`} disabled={!available && !queueStatus?.failed}
           title={staged?.progress?.message || staged?.error || track.error || (active === track.id ? progress?.message : available ? 'Open stem mixer' : label)}
-          onClick={() => openTrack(track.id, spotify.replay ? undefined : spotify.tracks[index]?.rowIndex)}>
+          onClick={() => queueStatus?.failed ? void spotify.configureQueue(true, true).catch(reason => setError(errorText(reason))) : openTrack(track.id, spotify.replay ? undefined : spotify.tracks[index]?.rowIndex)}>
           {progressKind && <span className="iframe-track-fill" data-indeterminate={fraction === null} style={{ width: fraction === null ? '35%' : `${fraction * 100}%` }} aria-hidden="true" />}
           <span className="iframe-track-state"><OverlayIcon name={icon} /></span>
           {artwork ? <img className="iframe-track-artwork" alt="" src={artwork} crossOrigin="anonymous" /> : <span className="iframe-track-artwork iframe-artwork-placeholder"><OverlayIcon name="music" /></span>}
           <span className="iframe-track-copy"><span className="iframe-track-name">{track.title}</span><span className="iframe-track-artist">{track.artist}</span></span>
-          <span className="iframe-track-status">{label}</span>
+          <span className="iframe-track-status">{queueStatus?.failed ? 'Retry separation' : label}</span>
         </button></li>;
       })}
     </ol>}

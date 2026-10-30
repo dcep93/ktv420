@@ -16,7 +16,7 @@ test('website pause takes precedence over the overlay toggle and stale processin
 });
 test('local queue, pause, retry and older extension states are distinct', () => {
   const track = { id: 'spotify-song', status: 'captured' as const, location: 'extension' as const };
-  assert.equal(separationStatus(track, true).label, 'Waiting for separation worker');
+  assert.equal(separationStatus(track, true).label, 'Queued');
   assert.equal(separationStatus(track, false).label, 'Separation paused');
   assert.equal(separationStatus(track, true, 'GPU failed').label, 'Needs retry');
   assert.equal(separationStatus(track, true, 'GPU failed').detail, 'GPU failed');
@@ -25,7 +25,7 @@ test('local queue, pause, retry and older extension states are distinct', () => 
   assert.equal(separationPhase({ phase: 'restoring', fraction: .5, message: '' }), 'Restoring audio');
 });
 test('visible separation status names the real operation and has only one percentage', () => {
-  for (const message of ['Preparing audio: 50%', 'Downloading model (50%)', 'Restoring vocals: 50%']) {
+  for (const message of ['Preparing audio: 50%', 'Restoring vocals: 50%']) {
     const label = separationProgressLabel(message, .15);
     assert.equal((label.match(/%/g) || []).length, 1);
     assert.ok(label.endsWith('~15%'));
@@ -35,7 +35,7 @@ test('visible separation status names the real operation and has only one percen
   assert.equal(separationProgressLabel('Downloading model (50%)', null), 'Downloading model (50%)');
   const status = separationStatus({ id: 'spotify-song', status: 'processing', location: 'extension',
     progress: { fraction: .76, message: 'Running GPU model · segment 50 of 53' } }, true);
-  assert.equal(status.label, 'Running GPU model · segment 50 of 53 · ~76%');
+  assert.equal(status.label, 'Separating · ~76%');
 });
 test('a silent operation explicitly waits without inventing progress or a new stage', () => {
   const progress = { phase: 'loading' as const, fraction: 0, message: 'Initializing GPU model…' };

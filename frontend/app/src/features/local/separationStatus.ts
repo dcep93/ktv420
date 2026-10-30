@@ -20,7 +20,7 @@ export function separationStatus(track: LibrarySummary | undefined, enabled: boo
   if (track.location === 'extension') {
     // Another Spotify overlay may own the active claim, independently of this view's pause switch.
     if (track.status === 'processing') return { label: separationProgressLabel(track.progress?.message || 'Starting separation worker', track.progress?.fraction ?? null), detail: track.progress?.message || 'Starting separation worker', busy: true, failed: false };
-    return { label: enabled ? 'Waiting for separation worker' : 'Separation paused', detail: enabled ? 'Waiting for the next available separation slot.' : 'Resume separation in Settings.', busy: false, failed: false };
+    return { label: enabled ? 'Queued' : 'Separation paused', detail: enabled ? 'Waiting for the next available separation slot.' : 'Resume separation in Settings.', busy: false, failed: false };
   }
   return { label: 'Captured · open ktv420', detail: 'Open ktv420 to check separation. Reload the extension for live queue status.', busy: false, failed: false };
 }
@@ -30,7 +30,13 @@ export function separationProgressLabel(message: string, fraction: number | null
   if (fraction === null || !Number.isFinite(fraction)) return message;
   const step = message.replace(/\s*\(\s*\d+(?:\.\d+)?%\s*\)/g, '')
     .replace(/\s*[:·]?\s*~?\d+(?:\.\d+)?%/g, '').trim();
-  return `${step} · ~${Math.round(Math.max(0, Math.min(.99, fraction)) * 100)}%`;
+  // The row answers “what is happening?”; detailed stages stay in its tooltip.
+  if (/Downloading model/.test(message)) return message.split(' · no new progress')[0];
+  if (/model|worker/i.test(step) && !/Running|segment/i.test(step)) return 'Loading model…';
+  const label = /segment|frequency|reconstruct|Running/i.test(step) ? 'Separating'
+    : /Checking .*file|Saving|Verifying saved|Preparing saved|album artwork|Float32/i.test(step) ? 'Saving'
+    : /Restor/i.test(step) ? 'Restoring audio' : /Reading|Decoding|Prepar|Resampl/i.test(step) ? 'Preparing audio' : step;
+  return `${label} · ~${Math.round(Math.max(0, Math.min(.99, fraction)) * 100)}%`;
 }
 
 export function separationPhase(progress: SeparationProgress) {

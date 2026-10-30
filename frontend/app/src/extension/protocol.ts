@@ -41,6 +41,7 @@ export function parseRequest(value: unknown) {
   )
     throw new Error('Update the ktv420 Spotify extension.');
   if (r.operation === 'ack-collection' && (typeof r.path !== 'string' || !/^(album|playlist)\/[A-Za-z0-9]{22}$/.test(r.path) || typeof r.requestId !== 'string' || !/^[a-f0-9-]{36}$/.test(r.requestId))) throw new Error('Invalid collection acknowledgment.');
+  if ('heal' in r && (r.operation !== 'hello' || typeof r.heal !== 'boolean')) throw new Error('Invalid recovery request.');
   if ('revision' in r && (!Number.isSafeInteger(r.revision) || Number(r.revision) < 0)) throw new Error('Invalid library revision.');
   if (r.operation === 'publish-library') r.tracks = parseLibrarySummary(r.tracks);
   if (r.operation === 'open-player' && (typeof r.path !== 'string' || !/^(album|playlist)\/[A-Za-z0-9]{22}$/.test(r.path) || (r.trackIndex !== null && (!Number.isSafeInteger(r.trackIndex) || Number(r.trackIndex) < 1 || Number(r.trackIndex) > 10000)))) throw new Error('Invalid player link.');
@@ -121,7 +122,7 @@ export function parseRequest(value: unknown) {
       'id',
       'index',
       'volume',
-      'ids', 'tracks', 'revision', 'token', 'name', 'manifest', 'base64', 'progress', 'enabled', 'retry', 'backend', 'error', 'metadata', 'bytes', 'recoverOnReload', 'transient', 'discarded',
+      'heal', 'ids', 'tracks', 'revision', 'token', 'name', 'manifest', 'base64', 'progress', 'enabled', 'retry', 'backend', 'error', 'metadata', 'bytes', 'recoverOnReload', 'transient', 'discarded',
     ]
       .filter((key) => key in r)
       .map((key) => [key, r[key]]),

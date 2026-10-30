@@ -43,6 +43,7 @@ export function usePlaylist(onClose?: () => void) {
   const active = status?.active === true;
   useEffect(() => {
     let disposed = false;
+    void spotifyRequest('hello', { heal: true }).catch(() => {});
     const load = async () => {
       try {
         let collection;

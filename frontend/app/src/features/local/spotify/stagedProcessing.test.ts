@@ -196,3 +196,20 @@ test('sequential songs reuse the model worker and normal view closure does not c
   });
   await observed.promise; stopView();
 });
+
+test('a visible background-queue observer stays quiet and stops polling worker startup', async () => {
+  Object.defineProperty(globalThis, 'location', { configurable: true, value: { pathname: '/playlist' } });
+  const messages: string[] = []; let hellos = 0;
+  const stop = startStagedProcessing(error => assert.fail(error), () => {}, {
+    request: async <T>(op: string): Promise<T> => {
+      assert.equal(op, 'hello'); hellos++;
+      await new Promise(resolve => setTimeout(resolve, 20));
+      return { stagedAudio: true, backgroundQueue: true } as T;
+    },
+  }, message => messages.push(message));
+  try {
+    await new Promise(resolve => setTimeout(resolve, 1650));
+    assert.equal(hellos, 1);
+    assert.equal(messages.filter(Boolean).length, 0);
+  } finally { stop(); }
+});

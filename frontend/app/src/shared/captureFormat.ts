@@ -12,6 +12,7 @@ export type QueuedCapture = {
   processingError?: string;
   retryAt?: number;
   attempts?: number;
+  recoveries?: number;
   retryAfterReload?: { owner: string; documentId: string };
 };
 export function validateCapture(metadata: Record<string, unknown>, bytes: number) {

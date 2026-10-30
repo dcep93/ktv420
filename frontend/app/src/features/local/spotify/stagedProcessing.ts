@@ -20,7 +20,7 @@ export function startStagedProcessing(onError: (error: string, trackId?: string)
   const process = dependencies.process || processLocalTrack;
   let stopped = false, busy = false, separator: Worker | undefined, queueEnabled = true, pausedRun = false, sharedQueue = false, stateBusy = false;
   let overall: number | null = null, queueBackend: 'auto' | 'wasm' = 'auto';
-  let recovered = false, separatorBackend = '';
+  let recovered = false, observing = false, separatorBackend = '';
   let idleAt = Date.now();
   const readState = async () => {
     if (!sharedQueue || stateBusy || stopped) return;
@@ -31,13 +31,12 @@ export function startStagedProcessing(onError: (error: string, trackId?: string)
   };
   const attempted = new Set<string>();
   async function tick() {
-    if (busy || stopped) return;
+    if (busy || stopped || observing) return;
     busy = true;
     try {
-      if (!recovered) onStartup('Connecting to separation queue…');
       const capability = await request<{ stagedAudio?: boolean; extensionQueue?: boolean; workRecovery?: boolean; backgroundQueue?: boolean }>('hello');
       if (!capability.stagedAudio) return;
-      if (capability.backgroundQueue && location.pathname !== '/separation-worker') { onStartup(''); return; }
+      if (capability.backgroundQueue && location.pathname !== '/separation-worker') { observing = true; onStartup(''); return; }
       sharedQueue = !!capability.extensionQueue;
       if (stopped) return;
       if (capability.workRecovery && !recovered) { onStartup('Recovering interrupted separation…'); await request('work-recover'); }
@@ -78,7 +77,7 @@ export function startStagedProcessing(onError: (error: string, trackId?: string)
         };
         const heartbeat = setInterval(renew, 10000);
         try {
-          report({ phase: 'loading', fraction: 0, message: capture.attempts ? 'Restarting interrupted separation…' : 'Starting separation worker…' });
+          report({ phase: 'loading', fraction: 0, message: capture.attempts || capture.recoveries ? 'Restarting interrupted separation…' : 'Starting separation worker…' });
           if (!separator || separatorBackend !== queueBackend) { separator?.dispose(); separator = createSeparator(); separatorBackend = queueBackend; }
           worker = separator; idleAt = Date.now();
           await process(`spotify-${capture.metadata.trackId}`, separator, () => stopped || lost || pausedRun || !queueEnabled,

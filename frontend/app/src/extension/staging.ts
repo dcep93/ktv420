@@ -1,10 +1,11 @@
+import { progressIdentity, type WorkerClaim } from './workerHealth';
 import { requireStorage } from '../features/local/storageBudget';
 import type { WorkerOwner } from './workQueue';
 import { queueTransaction, pendingCaptures } from './queue';
 import { CHUNK_BYTES, decodeChunk, type QueuedCapture } from '../shared/captureFormat';
 import { parsePrepared, validatePreparedFile, encodeBlobChunk, sha256, type PreparedAudio, type AudioName } from '../shared/preparedAudio';
 export const LEASE_MS = 120000;
-type Claim = { id: string; token: string; owner: number | 'website' | WorkerOwner; expires: number; progress?: { fraction: number; message: string } };
+type Claim = WorkerClaim;
 export async function claimCapture(id: string, owner: number | 'website' | WorkerOwner): Promise<string | null> {
   return queueTransaction(['captures', 'claims'], 'readwrite', (tx, done) => {
     const r = tx.objectStore('captures').get(id);
@@ -26,7 +27,11 @@ export function touchClaim(id: string, token: string, owner: number | 'website' 
     r.onsuccess = () => {
       const c = r.result as Claim | undefined;
       if (!c || c.token !== token || c.owner !== owner || c.expires <= Date.now()) { tx.abort(); return; }
-      store.put({ ...c, expires: Date.now() + LEASE_MS, progress: progress || c.progress });
+      const now = Date.now(), changed = !!progress && progressIdentity(progress) !== progressIdentity(c.progress);
+      store.put({ ...c, expires: now + LEASE_MS, startedAt: c.startedAt ?? now,
+        progressUpdatedAt: changed ? now : c.progressUpdatedAt ?? now,
+        slowestStepMs: changed && c.progressUpdatedAt !== undefined ? Math.max(c.slowestStepMs || 0, now - c.progressUpdatedAt) : c.slowestStepMs,
+        progress: progress || c.progress });
     };
   });
 }
