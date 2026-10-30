@@ -2,7 +2,7 @@
 
 ## Implemented
 
-The website now owns canonical originals/stems, metadata and collections in a fresh `ktv420-web-library-v1` IndexedDB database. Import, catalog, playlist playback, the existing effects/visualizers and replay use website storage directly. The optional 7.0.0 extension exposes Spotify discovery and one-song precise capture, with a separate durable temporary queue. No website iframe or general storage/API broker remains.
+The website now owns canonical originals/stems, metadata and collections in a fresh `ktv420-web-library-v1` IndexedDB database. Import, catalog, playlist playback, the existing effects/visualizers and replay use website storage directly. The optional 7.0.0 extension exposes Spotify discovery and one-song precise capture, with a separate durable temporary queue. Version 7.1 restores the hosted iframe overlay over Spotify, with a packaged frame for shared website storage and a narrow Spotify relay. No general storage/API broker remains.
 
 Capture delivery is chunked, sequential and resumable. The website acknowledges only after the input, metadata, collection and delivery receipt commit. An acknowledgment retry cannot duplicate or resurrect deleted audio. Original PCM survives a failed MP3 commit; all five MP3s must pass structural, duration and checksum validation before replacing it. Version-2 playlist packages preserve original and stems, shared gain, timing, artwork, metadata and repeated collection positions.
 
@@ -48,3 +48,7 @@ The live run also exposed a launch bug after Spotify SPA navigation: Chrome's me
 Closing every website tab during an active recording and reconnecting its queued delivery has not yet been exercised live. Durable queue/commit acknowledgment behavior is covered by the transaction tests. This run verified playback progression, not a subjective listening-quality or sample-by-sample comparison against a known Spotify reference signal.
 
 A roughly 3 GB playlist was not imported in this run. The existing streaming ZIP writer, per-song importer and bounded delivery remain; round-trip verification used a small real-audio fixture. Sustained full-song GPU inference while listening, other operating systems and Chrome Web Store review remain separate acceptance checks.
+
+## Overlay restoration (7.1.0)
+
+The compact capture popup and separate-tab `spotifyTab` launch were removed. The existing hosted playlist/mixer is again embedded over Spotify. Commands use the enclosing extension frame’s trusted sender tab, and external website callers cannot select a Spotify tab. New tests cover cross-origin/source rejection, startup readiness before postMessage, URL navigation, close/reopen, Escape, title/favicon restoration and automatic sender binding. The website library and durable delivery queue are preserved. The installed extension must be reloaded before the restored overlay can be verified in the user’s Chrome session.

@@ -2,16 +2,16 @@
 
 [Open ktv420](https://ktv420.web.app) to import a playlist, listen, remix and visualize music locally. The website owns your audio library. **No extension is needed for imported music.**
 
-The optional [Chrome extension](https://chromewebstore.google.com/detail/ktv420/kmkbecinmhkfihahalgclomhcicmoiia) captures Spotify. It provides a small control panel and an **Open in ktv420** button. The full player runs in a regular website tab, never inside Spotify.
+The optional [Chrome extension](https://chromewebstore.google.com/detail/ktv420/kmkbecinmhkfihahalgclomhcicmoiia) captures Spotify. Click **k** to open the full hosted playlist/player as an iframe overlay over Spotify. The same library is also available directly on the website.
 
 ## Getting started
 
 - **Import:** Catalog → Import playlist → ZIP or extracted folder. Open the imported playlist, then a prepared song. Entering a track starts paused; track endings advance normally.
-- **Capture:** install extension 7.0.1, reload Spotify, open a playlist/album, click **k → Open in ktv420**, then click the website’s central **k**. The website chooses missing songs; Spotify records one at a time. Monitor volume does not change captured samples.
+- **Capture:** install extension 7.1.0, reload Spotify, open a playlist/album, click **k** to open the overlay, then click its central **k**. The website chooses missing songs; Spotify records one at a time. Monitor volume does not change captured samples.
 - **Share:** Catalog → Export → Save ZIP. Upload to Dropbox yourself. Your friend downloads and imports the ZIP or extracted folder. No Dropbox integration, extension, model download or separation is needed for imported prepared audio.
 - **Replay:** `/replay` accepts a recorded mix JSON. Import the required playlist audio, then open the recording in the website mixer. Export MP3 renders the performance locally.
 
-`/` and `/catalog` show the library. `/playlist?id=album.ID` and `/playlist?id=playlist.ID` open a saved collection. Append `&ktv420=1` for its first track (one-based). Close returns to the catalog. Capture connection parameters are optional and do not affect saved playback.
+`/` and `/catalog` show the library. `/playlist?id=album.ID` and `/playlist?id=playlist.ID` open a saved collection. Append `&ktv420=1` for its first track (one-based). Close returns to the catalog on the website; in Spotify, it closes the overlay and pauses playback/capture. Spotify links support `?ktv420` and one-based `?ktv420=1`. No Spotify tab IDs are used in URLs.
 
 ## Clean break in version 7
 
@@ -51,7 +51,7 @@ node scripts/build-extension.mjs
 
 This stages `dist/extension-candidate`, `dist/ktv420-extension.zip` and `site/player`. The root homepage is generated from the same app build. Publish the website before installing the extension candidate. Then run `node scripts/build-extension.mjs --install`, reload the unpacked extension at the existing `extension` folder, and refresh Spotify. GitHub Actions publishes the website and retains the Store ZIP as an artifact.
 
-`npm run dev` serves the website on port 5174. Localhost storage is independent of production. The production extension protocol accepts only the exact `https://ktv420.web.app` origin and top-level frames; it is intentionally unavailable on localhost. Development harnesses are excluded from the published build:
+`npm run dev` serves the website on port 5174. Localhost storage is independent of production. Top-level website pages can receive pending captures from the extension. Spotify controls are available only through the packaged overlay frame, bound to its enclosing Spotify tab. The hosted origin must be exactly `https://ktv420.web.app`; the production relay is intentionally unavailable on localhost. Development harnesses are excluded from the published build:
 
 - `/standalone-preview.html`: real browser ZIP/folder import/export and synthetic player fixtures, without an extension.
 - `/benchmark.html`: explicit WebGPU/WASM model verification with cold and warm timings.

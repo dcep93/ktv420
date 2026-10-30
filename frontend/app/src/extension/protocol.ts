@@ -24,14 +24,18 @@ export function parseRequest(value: unknown) {
       'pending',
       'chunk',
       'ack',
+      'close',
+      'view',
+      'presentation',
     ].includes(r.operation)
   )
     throw new Error('Update the ktv420 Spotify extension.');
-  if (
-    ['discover', 'status', 'capture', 'cancel', 'volume'].includes(r.operation) &&
-    (!Number.isSafeInteger(r.tabId) || Number(r.tabId) < 0)
-  )
-    throw new Error('Invalid Spotify tab.');
+  if ('tabId' in r) throw new Error('Spotify is bound to the overlay, not a supplied tab.');
+  if (r.operation === 'view' && r.trackIndex !== null &&
+    (!Number.isSafeInteger(r.trackIndex) || Number(r.trackIndex) < 1 || Number(r.trackIndex) > 10000))
+    throw new Error('Invalid track index.');
+  if (r.operation === 'presentation' && (typeof r.title !== 'string' || r.title.length > 500))
+    throw new Error('Invalid title.');
   if (
     r.operation === 'capture' &&
     (typeof r.path !== 'string' ||
@@ -59,7 +63,9 @@ export function parseRequest(value: unknown) {
       'protocol',
       'version',
       'operation',
-      'tabId',
+      'trackIndex',
+      'replace',
+      'title',
       'trackId',
       'requestId',
       'path',

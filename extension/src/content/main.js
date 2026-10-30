@@ -1,10 +1,10 @@
 import { createPageBridge } from './pageBridge.js';
 import { CaptureOrchestrator } from './orchestrator.js';
-import { collectTrackRows, isSupportedRoute } from './dom.js';
+import { collectTrackRows, isSupportedRoute, pausePlaybackCleanly } from './dom.js';
 import { discoverTrackRows, hasAllRows, trackTotal } from './trackDiscovery.js';
 import { readTransportDom } from './transport.js';
 import { SELECTORS } from './constants.js';
-import { sendLocalMessage } from './storage.js';
+import { createOverlay } from './overlay.js';
 
 const bridge = createPageBridge(),
   runner = new CaptureOrchestrator({ bridge });
@@ -13,8 +13,11 @@ let collection = null,
   progress = null,
   current = null,
   volume = null,
-  error = '',
-  panel;
+  error = '';
+const overlay = createOverlay({ onClose: async () => {
+  await cancel();
+  pausePlaybackCleanly();
+} });
 bridge.inject().catch((reason) => console.warn('[ktv420] Spotify hooks unavailable', reason));
 function header() {
   const element = document.querySelector('[data-testid="entity-header"]'),
@@ -141,7 +144,7 @@ async function cancel() {
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (sender.id !== chrome.runtime.id) return false;
   if (message?.type === 'ktv420:show-controls') {
-    show();
+    overlay.show();
     respond({ ok: true });
     return false;
   }
@@ -153,6 +156,15 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     return false;
   const run = async () => {
     switch (message.operation) {
+      case 'close':
+        overlay.hide();
+        return true;
+      case 'view':
+        overlay.setView(message.trackIndex, message.replace === true);
+        return true;
+      case 'presentation':
+        overlay.setTitle(message.title);
+        return true;
       case 'discover':
         return discover();
       case 'status':
@@ -182,93 +194,13 @@ runner.addEventListener('captureprogress', (event) => {
   render();
 });
 runner.addEventListener('activechange', render);
-function show() {
-  if (!panel) {
-    panel = document.createElement('section');
-    panel.setAttribute('aria-label', 'ktv420 capture');
-    Object.assign(panel.style, {
-      position: 'fixed',
-      right: '24px',
-      top: '84px',
-      zIndex: '2147483647',
-      width: '310px',
-      padding: '20px',
-      background: '#1d1712',
-      color: '#eee',
-      border: '1px solid #b48a60',
-      borderRadius: '16px',
-      font: '15px system-ui',
-      boxShadow: '0 12px 40px #0008',
-    });
-    document.body.append(panel);
-  }
-  panel.hidden = false;
-  render();
-}
-let panelStatus, panelStop, panelVolume;
 function render() {
-  if (!panel) return;
-  // Keep the input mounted while progress arrives so dragging volume stays smooth.
-  if (!panelStatus) {
-    const title = document.createElement('strong');
-    title.textContent = 'ktv420';
-    panel.append(title);
-    const close = document.createElement('button');
-    close.textContent = '×';
-    close.setAttribute('aria-label', 'Hide capture controls');
-    close.style.float = 'right';
-    close.onclick = () => {
-      panel.hidden = true;
-    };
-    panel.append(close);
-    panelStatus = document.createElement('p');
-    panelStatus.setAttribute('role', 'status');
-    panel.append(panelStatus);
-    const open = document.createElement('button');
-    open.textContent = 'Open in ktv420';
-    open.onclick = () =>
-      void sendLocalMessage({ type: 'ktv420:open-app' }).catch((reason) => {
-        error = reason.message;
-        render();
-      });
-    panel.append(open);
-    panelStop = document.createElement('button');
-    panelStop.textContent = 'Stop capture';
-    panelStop.onclick = () => void cancel();
-    panel.append(panelStop);
-    const label = document.createElement('label');
-    label.textContent = 'Volume ';
-    label.style.display = 'block';
-    label.style.marginTop = '16px';
-    panelVolume = document.createElement('input');
-    panelVolume.type = 'range';
-    panelVolume.min = '0';
-    panelVolume.max = '1';
-    panelVolume.step = '.01';
-    panelVolume.oninput = () => {
-      void monitor(Number(panelVolume.value)).catch((reason) => {
-        error = reason.message;
-        render();
-      });
-    };
-    label.append(panelVolume);
-    panel.append(label);
-  }
-  panelStatus.textContent =
-    error ||
-    (current?.state === 'running'
-      ? `Capturing${progress?.fraction == null ? '…' : ` ${Math.floor(progress.fraction * 100)}%`}`
-      : current?.state === 'complete'
-        ? 'Captured · ready for ktv420'
-        : 'Capture and listen in ktv420.');
-  panelStop.hidden = current?.state !== 'running';
-  if (document.activeElement !== panelVolume)
-    panelVolume.value = String(volume ?? readTransportDom().volume ?? 1);
+  if (current?.state === 'running') overlay.setTitle(`${progress?.fraction == null ? '' : `${Math.floor(progress.fraction * 100)}% · `}ktv420`);
 }
 
 const button = document.createElement('button');
 button.title = 'ktv420';
-button.setAttribute('aria-label', 'Open ktv420 capture controls');
+button.setAttribute('aria-label', 'Open ktv420');
 const icon = document.createElement('img');
 icon.src = chrome.runtime.getURL('assets/favicon.svg');
 icon.alt = 'k';
@@ -276,7 +208,7 @@ icon.width = 32;
 icon.height = 32;
 button.append(icon);
 Object.assign(button.style, { background: 'transparent', border: '0', cursor: 'pointer' });
-button.onclick = show;
+button.onclick = () => overlay.show();
 setInterval(() => {
   const parent = document.querySelector(SELECTORS.spotifyLogo)?.closest('a')?.parentElement;
   if (parent && isSupportedRoute()) {
@@ -291,11 +223,3 @@ window.addEventListener(
   },
   { once: true },
 );
-if (new URLSearchParams(location.search).has('ktv420')) {
-  const timer = setInterval(() => {
-    if (document.body && isSupportedRoute()) {
-      clearInterval(timer);
-      show();
-    }
-  }, 300);
-}

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ktv420",
-  "version": "7.0.1",
+  "version": "7.1.0",
   "minimum_chrome_version": "121",
   "description": "Spotify capture for ktv420. Import, separate, mix and visualize music locally at ktv420.web.app.",
   "icons": {
@@ -22,7 +22,7 @@
     "type": "module"
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'none';"
+    "extension_pages": "script-src 'self'; object-src 'none'; frame-src https://ktv420.web.app; connect-src 'none'; style-src 'self';"
   },
   "content_scripts": [
     {
@@ -41,7 +41,8 @@
         "assets/favicon.svg",
         "assets/icon-*.png",
         "src/content/*.js",
-        "src/page/*.js"
+        "src/page/*.js",
+        "src/overlay/index.html"
       ],
       "matches": [
         "https://open.spotify.com/*"

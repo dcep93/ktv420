@@ -16,7 +16,7 @@ flowchart LR
   Library --> Mixer[Mixer, replay, effects + visualizers]
 ```
 
-There are no player/broker iframes. The website does not rely on storage sharing between an embedded origin and a top-level origin. `/` and `/catalog` render the catalog; `/playlist` renders the existing playlist and mixer directly. `/transfer` and `/replay` also work without the extension.
+On Spotify, a packaged extension frame embeds the hosted app as a full-window overlay. Its narrow relay derives the Spotify tab from Chrome’s sender information; no tab ID is exposed in a URL. The extension’s existing host permission for the app origin gives its embedded app access to the same top-level storage partition as the standalone website ([Chrome documentation](https://developer.chrome.com/docs/extensions/develop/concepts/storage-and-cookies)). The frame does not own or broker the music library. `/` and `/catalog` render the catalog; `/playlist` renders the existing playlist and mixer directly. `/transfer` and `/replay` also work without the extension.
 
 ## Ownership and updates
 
@@ -30,19 +30,20 @@ The extension’s new `ktv420-capture-delivery-v1` database contains only tempor
 
 ## Protocol and scheduling
 
-`ktv420-spotify`, version 1, is a new protocol. `chrome.runtime.sendMessage` connects a top-level `https://ktv420.web.app` document to its installed extension. The worker rejects other origins, subframes, versions, invalid IDs/indexes/volumes and operations outside the allowlist:
+`ktv420-spotify`, version 1, is a new protocol. `chrome.runtime.sendMessage` connects a top-level `https://ktv420.web.app` document for delivery operations only. The overlay app uses an origin/source-validated postMessage relay through its packaged parent. The worker accepts Spotify commands only from that extension frame in the enclosing Spotify tab, rejects client-supplied tab IDs, and validates versions, IDs/indexes/volumes and operations:
 
 - `hello`: protocol/extension version.
 - `discover`, `status`: an identified Spotify tab’s collection and capture state.
 - `capture`: one track ID, request UUID and collection path. Retrying the same request reports its status rather than starting another recording.
 - `cancel`, `volume`: stop the active primitive or adjust monitoring gain.
+- `close`, `view`, `presentation`: close/pause the overlay, synchronize the one-based track URL, or update the Spotify tab title.
 - `pending`, `chunk`, `ack`: list completed deliveries, read one bounded chunk, and release a committed delivery.
 
-No arbitrary code, script injection requests, Chrome API relay or website access to old extension storage is exposed. Host access is limited to Spotify and the app origin (the latter permits reusing an existing app tab). No API permissions are requested.
+No arbitrary code, script injection requests, Chrome API relay or website access to old extension storage is exposed. Host access is limited to Spotify and the app origin (the latter permits shared website storage in the hosted overlay). No API permissions are requested.
 
-The website holds a capture-scheduler lock and issues one-song requests sequentially, skipping existing inputs. It does not depend on animation frames or an iframe heartbeat. Spotify’s content script verifies complete discovery, route and song identity before recording. Its minimal panel offers Open in ktv420, Stop, progress/error and monitor volume. Ordinary Spotify playback is untouched until capture is explicitly requested.
+The website holds a capture-scheduler lock and issues one-song requests sequentially, skipping existing inputs. It does not depend on animation frames or an iframe heartbeat. Spotify’s content script verifies complete discovery, route and song identity before recording. The full hosted playlist, settings and mixer render over Spotify. Close/Escape pauses the mixer, cancels capture scheduling and pauses Spotify; reopening reuses the frame. Direct website playback remains independent of Spotify. Ordinary Spotify playback is untouched until capture is explicitly requested.
 
-If the website closes, no new requests are scheduled. The current single capture may finish into the durable queue. Reopening any website page reconnects delivery. The website stores one chunk at a time before requesting the next. Commit receipts prevent duplicate delivery and permit retrying a lost acknowledgment; a later user deletion cannot be undone by an old retry. Transaction failure leaves extension copies available.
+If the website closes, no new requests are scheduled. Explicitly closing the Spotify overlay also stops the active capture. The current single capture may finish into the durable queue. Reopening any website page reconnects delivery. The website stores one chunk at a time before requesting the next. Commit receipts prevent duplicate delivery and permit retrying a lost acknowledgment; a later user deletion cannot be undone by an old retry. Transaction failure leaves extension copies available.
 
 ## Audio and GPU
 

@@ -57,6 +57,10 @@ export function useHostedCapture(options: Options) {
       },
     );
   }, [cancel]);
+  useEffect(() => {
+    window.addEventListener('ktv420:overlay-hidden', cancel);
+    return () => window.removeEventListener('ktv420:overlay-hidden', cancel);
+  }, [cancel]);
   // Closing the website stops scheduling; the extension may finish its single in-flight recording.
   useEffect(
     () => () => {

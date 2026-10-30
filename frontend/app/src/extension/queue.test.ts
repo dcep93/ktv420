@@ -62,8 +62,8 @@ test('only the exact top-level website origin and bounded explicit v1 operations
     { url: 'https://ktv420.web.app' },
   ])
     assert.equal(websiteSender(sender), false);
-  const base = { protocol: 'ktv420-spotify', version: 1, operation: 'status', tabId: 7 };
-  assert.equal(parseRequest(base).tabId, 7);
+  const base = { protocol: 'ktv420-spotify', version: 1, operation: 'status' };
+  assert.equal(parseRequest(base).operation, 'status');
   assert.equal(parseRequest({ ...base, type: 'arbitrary', script: 'code' }).script, undefined);
   const capture = {
     ...base,
@@ -77,7 +77,9 @@ test('only the exact top-level website origin and bounded explicit v1 operations
   for (const bad of [
     { ...base, version: 2 },
     { ...base, operation: 'eval' },
-    { ...base, tabId: -1 },
+    { ...base, tabId: 7 },
+    { ...base, operation: 'view', trackIndex: -1 },
+    { ...base, operation: 'presentation', title: 42 },
     { ...base, operation: 'volume', volume: Infinity },
     { ...base, operation: 'capture', trackId: '../bad', requestId: crypto.randomUUID() },
     { ...base, operation: 'chunk', id: crypto.randomUUID(), index: -1 },

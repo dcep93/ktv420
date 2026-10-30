@@ -1,8 +1,10 @@
 import { extensionId } from '../extensionConnection';
+import { embeddedSpotify, overlayRequest } from './overlay';
 export function spotifyRequest<T>(
   operation: string,
   args: Record<string, unknown> = {},
 ): Promise<T> {
+  if (embeddedSpotify) return overlayRequest<T>({ protocol: 'ktv420-spotify', version: 1, operation, ...args });
   return new Promise((resolve, reject) => {
     if (!globalThis.chrome?.runtime?.sendMessage) {
       reject(

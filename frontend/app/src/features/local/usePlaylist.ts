@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { savedCollection, rememberCollection, type TrackRow } from './collections';
 import { playlistPath, playlistIndex, playlistViewUrl } from './playlistPage';
 import { spotifyRequest } from './spotify/client';
+import { embeddedSpotify, overlayReady } from './spotify/overlay';
 import { drainDeliveries } from './spotify/delivery';
 import { getTrack } from './library';
 import { loadPerformance } from './performanceFiles';
@@ -18,8 +19,6 @@ type Status = {
 };
 const params = new URLSearchParams(location.search),
   path = playlistPath(params.get('id')) || '';
-const rawTab = params.get('spotifyTab'),
-  tabId = rawTab && /^\d+$/.test(rawTab) ? Number(rawTab) : null;
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 export function usePlaylist(onClose?: () => void) {
   const [tracks, setTracks] = useState<TrackRow[]>([]),
@@ -42,12 +41,12 @@ export function usePlaylist(onClose?: () => void) {
     const load = async () => {
       try {
         let collection;
-        if (tabId !== null) {
+        if (embeddedSpotify) {
           const snapshot = await spotifyRequest<{
             collection: Collection;
             tracks: TrackRow[];
             complete: boolean;
-          }>('discover', { tabId });
+          }>('discover');
           if (snapshot.collection.path !== path)
             throw new Error(
               'Spotify is showing a different playlist. Open ktv420 from that page again.',
@@ -97,14 +96,14 @@ export function usePlaylist(onClose?: () => void) {
     };
   }, []);
   useEffect(() => {
-    if (tabId === null) return;
+    if (!embeddedSpotify) return;
     let disposed = false,
       busy = false;
     const poll = async () => {
       if (busy) return;
       busy = true;
       try {
-        const next = await spotifyRequest<Status>('status', { tabId });
+        const next = await spotifyRequest<Status>('status');
         if (!disposed) setStatus(next);
         await drainDeliveries();
       } catch (reason) {
@@ -120,19 +119,42 @@ export function usePlaylist(onClose?: () => void) {
       clearInterval(timer);
     };
   }, []);
+  useEffect(() => {
+    if (!embeddedSpotify) return;
+    const navigation = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (!detail.open) {
+        cancelled.current = true;
+        closeRef.current?.();
+        window.dispatchEvent(new Event('ktv420:overlay-hidden'));
+        return;
+      }
+      const index = Number.isSafeInteger(detail.trackIndex) && detail.trackIndex > 0 && detail.trackIndex <= 10000 ? detail.trackIndex : null;
+      const href = playlistViewUrl(location.href, index);
+      if (href !== location.href) history.replaceState(history.state, '', href);
+      setNavigation(n => ({ open: true, trackIndex: index, revision: n.revision + 1 }));
+    };
+    window.addEventListener('ktv420:overlay-navigation', navigation);
+    overlayReady();
+    const title = new MutationObserver(() => {
+      void spotifyRequest('presentation', { title: document.title.slice(0, 500) }).catch(() => {});
+    });
+    title.observe(document.querySelector('title')!, { childList: true, subtree: true, characterData: true });
+    return () => { window.removeEventListener('ktv420:overlay-navigation', navigation); title.disconnect(); };
+  }, []);
   const cancelCapture = useCallback(() => {
     cancelled.current = true;
-    if (tabId !== null)
-      void spotifyRequest('cancel', { tabId }).catch((reason) => setError(String(reason)));
+    if (embeddedSpotify)
+      void spotifyRequest('cancel').catch((reason) => setError(String(reason)));
   }, []);
   const captureOne = useCallback(async (trackId: string) => {
-    if (tabId === null)
+    if (!embeddedSpotify)
       throw new Error('Open this playlist from the Spotify extension to capture.');
     cancelled.current = false;
     const requestId = crypto.randomUUID();
-    await spotifyRequest('capture', { tabId, trackId, requestId, path });
+    await spotifyRequest('capture', { trackId, requestId, path });
     while (!cancelled.current) {
-      const next = await spotifyRequest<Status>('status', { tabId });
+      const next = await spotifyRequest<Status>('status');
       setStatus(next);
       if (next.request?.id !== requestId) throw new Error('Spotify capture was replaced.');
       if (next.request.state === 'error') throw new Error(next.request.error);
@@ -149,15 +171,16 @@ export function usePlaylist(onClose?: () => void) {
     throw new Error('Capture stopped.');
   }, []);
   const transport = useCallback((command: { action: 'volume'; volume: number }) => {
-    if (command.action === 'volume' && tabId !== null)
-      void spotifyRequest('volume', { tabId, volume: command.volume }).catch((reason) =>
+    if (command.action === 'volume' && embeddedSpotify)
+      void spotifyRequest('volume', { volume: command.volume }).catch((reason) =>
         setError(String(reason)),
       );
   }, []);
   const setView = useCallback((index: number | null, _revision: number, replace = false) => {
     const href = playlistViewUrl(location.href, index);
     if (href !== location.href)
-      history[replace ? 'replaceState' : 'pushState'](history.state, '', href);
+      history[embeddedSpotify || replace ? 'replaceState' : 'pushState'](history.state, '', href);
+    if (embeddedSpotify) void spotifyRequest('view', { trackIndex: index, replace }).catch(reason => setError(String(reason)));
     // An internal transition is already handled by the mixer; only popstate increments revision.
     setNavigation((n) => ({ ...n, trackIndex: index }));
   }, []);
@@ -174,7 +197,7 @@ export function usePlaylist(onClose?: () => void) {
     captureProgress: status?.progress || null,
     savingTrackIds,
     replay,
-    standalone: tabId === null,
+    standalone: !embeddedSpotify,
     captureVolume: status?.volume,
     captureOne,
     cancelCapture,
@@ -183,7 +206,9 @@ export function usePlaylist(onClose?: () => void) {
     dismissReplay: () => setReplay(null),
     close: () => {
       closeRef.current?.();
-      location.assign('/catalog');
+      cancelled.current = true;
+      if (embeddedSpotify) void spotifyRequest('close').catch(reason => setError(String(reason)));
+      else location.assign('/catalog');
     },
     acknowledgeSaved: useCallback((ids: string[]) => {
       setSavingTrackIds((previous) => previous.filter((id) => !ids.includes(id)));
