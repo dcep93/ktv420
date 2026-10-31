@@ -1,8 +1,7 @@
 import { createTitlePublisher } from './captureTitle';
 import { listTracks } from './library';
-import { sharedSummary } from './sharedSummary';
+import { playlistSummary } from './sharedSummary';
 import { libraryChanges } from './libraryChanges';
-import { rememberCollection } from './collections';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { savedCollection, type TrackRow } from './collections';
 import { playlistPath, playlistIndex, playlistViewUrl } from './playlistPage';
@@ -58,10 +57,7 @@ export function usePlaylist(onClose?: () => void) {
           const snapshot = await discoverPlaylist(path,
             () => spotifyRequest<PlaylistSnapshot>('discover'), () => disposed);
           if (!snapshot) return;
-          // Playlist metadata shares the same database as the standalone catalog.
           collection = { ...snapshot.collection, tracks: snapshot.tracks };
-          // Safe for old extensions too; host permissions provide the same storage partition.
-          await rememberCollection(snapshot.collection, snapshot.tracks);
         } else {
           // Render cached rows (or just their small metadata handoff) immediately.
           // The background worker commits audio directly; render metadata immediately.
@@ -120,8 +116,8 @@ export function usePlaylist(onClose?: () => void) {
           const next = await spotifyRequest<Status>('status');
           if (!disposed) setStatus(previous => ({ ...next, volume: volumePending.current || revision !== volumeRevision.current ? previous?.volume ?? next.volume : next.volume }));
         }
-        const remote = await spotifyRequest<LibrarySummary[]>('library-summary');
-        const summary = shared.current ? sharedSummary(await listTracks(), remote) : remote;
+        const summary = await playlistSummary(embeddedSpotify, shared.current, listTracks,
+          () => spotifyRequest<LibrarySummary[]>('library-summary'));
         if (!disposed) {
           setLibrarySummary(summary); setSummaryReady(true);
           setError('');
@@ -133,7 +129,6 @@ export function usePlaylist(onClose?: () => void) {
       } catch (reason) {
         if (!disposed && embeddedSpotify) setError(reason instanceof Error ? reason.message : String(reason));
       } finally {
-        if (!disposed) setSummaryReady(true);
         busy = false;
       }
     };

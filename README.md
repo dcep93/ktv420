@@ -15,7 +15,7 @@ The optional [Chrome extension](https://chromewebstore.google.com/detail/ktv420/
 
 ## Clean break in version 7
 
-One website-owned library is shared by the top-level site and extension-hosted frames. Version 7.6 recovers existing 7.x extension captures and prepared stems automatically. There is no migration from pre-v7 databases or old isolated overlay libraries, and no support for old extension protocols or version-1 playlist packages. Exported version-2 packages round-trip originals, four stems, metadata, timing, shared gain, artwork and ordered membership, including repeated songs. Audio bytes are copied without recompression.
+The background worker saves finished audio into the website library. Spotify overlays must read library status through the extension relay: their IndexedDB can be isolated from the top-level website, even with the same website origin. Version 7.6 recovers existing 7.x extension captures and prepared stems automatically. There is no migration from pre-v7 databases or old isolated overlay libraries, and no support for old extension protocols or version-1 playlist packages. Exported version-2 packages round-trip originals, four stems, metadata, timing, shared gain, artwork and ordered membership, including repeated songs. Audio bytes are copied without recompression.
 
 Old extension databases are neither opened nor automatically deleted. Removing the extension does not affect website audio, but removes temporary recordings not yet committed to the website library. Clearing website data does. Requesting persistent storage may be denied; the app reports this and retains export/deletion controls. Both origins use normal browser quotas, with no `storage` or `unlimitedStorage` permission.
 

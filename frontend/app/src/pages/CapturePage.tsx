@@ -98,7 +98,8 @@ export default function CapturePage() {
       </section> : <ol className="iframe-track-list" aria-label="Playlist tracks">{spotify.tracks.map(row => {
         const separation = processingEnabled && processing?.id === row.trackId ? processing : null;
         const track = saved.get(`spotify-${row.trackId}`);
-        const waiting = separationStatus(track, processingEnabled, failures[row.trackId]);
+        const waiting = spotify.summaryReady ? separationStatus(track, processingEnabled, failures[row.trackId])
+          : { label: '', detail: 'Checking saved audio', busy: true, failed: false };
         const status = separation ? 'processing' : track?.status;
         const separating = !!separation || waiting.busy;
         const fraction = separation ? separation.fraction : track?.progress?.fraction ?? null;
