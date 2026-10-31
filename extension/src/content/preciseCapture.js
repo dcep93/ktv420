@@ -63,7 +63,7 @@ export async function startPreciseCapture({ bridge, trackId, checkCancelled = ()
             let state = await bridge.command('capture-state');
             check();
             if (state.invalid) {
-              if (state.invalidCode === 'startup-zero-seek' && restart < 2 &&
+              if (['startup-zero-seek', 'startup-audio-gap'].includes(state.invalidCode) && restart < 2 &&
                   state.source === prepared.target.source) continue attempts;
               throw new Error(`Capture timing could not be verified: ${state.invalidReason || 'Audio was interrupted during startup.'} Nothing was saved.`);
             }

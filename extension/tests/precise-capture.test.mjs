@@ -137,6 +137,9 @@ test('repeated startup resets are bounded; unrelated failures never restart', as
  for(const failure of [
   {source:'audio',invalidCode:'startup-zero-seek',expectedBegins:3},
   {source:'different',invalidCode:'startup-zero-seek',expectedBegins:1},
+  {source:'audio',invalidCode:'startup-audio-gap',expectedBegins:3},
+  {source:'different',invalidCode:'startup-audio-gap',expectedBegins:1},
+  {source:'audio',invalidCode:'audio-gap',expectedBegins:1},
   {source:'audio',invalidCode:'seek',expectedBegins:1},
   {source:'audio',invalidCode:'',expectedBegins:1},
  ]){
@@ -263,4 +266,22 @@ test('repeated media replacements exhaust a bounded retry without recording', as
  };
  await assert.rejects(startPreciseCapture(h.options),/audio source changed/);
  assert.equal(prepares,3);assert.ok(!h.calls.includes('capture-begin'));
+});
+
+
+test('an empty startup audio gap is discarded and recaptured from verified zero', async () => {
+ const h=setup(), command=h.options.bridge.command;let begins=0;
+ h.options.bridge.command=async(name,payload)=>{
+  if(name==='capture-begin')begins++;
+  if(name==='capture-state'&&begins===1){
+   h.setMedia({position:.01});
+   return {source:'audio',invalid:true,invalidCode:'startup-audio-gap',invalidReason:'first quantum missing'};
+  }
+  return command(name,payload);
+ };
+ assert.equal((await startPreciseCapture(h.options)).startVerified,true);
+ assert.equal(begins,2);
+ assert.equal(h.calls.filter(name=>name==='capture-abort').length,2);
+ assert.equal(h.calls.filter(name=>name==='seek').length,2);
+ assert.equal(h.calls.filter(name=>name==='play').length,2);
 });

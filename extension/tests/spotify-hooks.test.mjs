@@ -633,3 +633,25 @@ test('playlist discovery marks truncated pagination incomplete and prefers the p
   assert.equal(result.complete,false); assert.equal(result.total,45);
   assert.equal(result.tracks[0].trackId,playable);
 });
+
+
+test('only an empty first-second audio gap permits discarding and restarting capture', async () => {
+ for(const {priorFrames, elapsed, expectedCode} of [
+  {priorFrames:0,elapsed:128/44100,expectedCode:'startup-audio-gap'},
+  {priorFrames:128,elapsed:256/44100,expectedCode:'audio-gap'},
+  {priorFrames:0,elapsed:1.1,expectedCode:'audio-gap'},
+ ]) {
+  const h=harness([{src:'song',paused:true}]);
+  await h.command('capture-begin',{requireStart:true,expectedSource:'song'});
+  await h.elements[0].play();
+  const block=(frame)=>h.ports[0].onmessage({data:{frame,channelCount:2,bytesBuffer:new Float32Array(256).buffer}});
+  if(priorFrames) block(0);
+  h.contexts[0].currentTime=elapsed;
+  block(priorFrames+128);
+  const state=(await h.command('capture-state')).result;
+  assert.equal(state.invalid,true);
+  assert.equal(state.invalidCode,expectedCode);
+  const finished=(await h.command('capture-finish')).result;
+  assert.equal(finished.invalid,true, 'no gap is ever accepted as a valid capture');
+ }
+});

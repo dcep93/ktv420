@@ -669,7 +669,12 @@
         const from = Math.max(message.frame, interval.start), to = Math.min(end, interval.end);
         if (to <= from) continue;
         if (from !== (interval.lastFrame ?? interval.start)) {
-          this.invalidate(`Audio samples were missed or repeated during recording (expected frame ${interval.lastFrame ?? interval.start}, received ${from}; ${this.byteLength / stride} frames captured).`); return;
+          // A cold audio graph can miss its first quantum. Never keep that
+          // attempt; permit a bounded re-arm only before any PCM was collected.
+          const startupGap = this.startVerified && this.byteLength === 0 &&
+            from > interval.start && this.context.currentTime - this.firstPlaybackAt <= 1;
+          this.invalidate(`Audio samples were missed or repeated during recording (expected frame ${interval.lastFrame ?? interval.start}, received ${from}; ${this.byteLength / stride} frames captured).`,
+            startupGap ? 'startup-audio-gap' : 'audio-gap'); return;
         }
         interval.lastFrame = to;
         const part = bytes.subarray((from-message.frame)*stride,(to-message.frame)*stride);

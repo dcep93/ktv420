@@ -1,5 +1,7 @@
 # Standalone library verification — 2026-10-29
 
+These are historical results for the versions named below. See [7.6.1 release verification](release-7.6.1.md) for the current shared-library architecture and release checks.
+
 ## Implemented
 
 The website now owns canonical originals/stems, metadata and collections in a fresh `ktv420-web-library-v1` IndexedDB database. Import, catalog, playlist playback, the existing effects/visualizers and replay use website storage directly. The optional 7.0.0 extension exposes Spotify discovery and one-song precise capture, with a separate durable temporary queue. Version 7.1 restores the hosted iframe overlay over Spotify, with a packaged frame for shared website storage and a narrow Spotify relay. No general storage/API broker remains.
