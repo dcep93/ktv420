@@ -12,7 +12,7 @@ export function listStagedAudio(): Promise<StagedAudio[]> {
     uploads.onsuccess = () => {
       const busy = new Set(claims.result.filter(c => c.expires > Date.now()).map(c => c.id));
       const row = (c: QueuedCapture, bytes: number, ready: boolean): StagedAudio => ({
-        id: c.id, title: String(c.metadata.trackName || 'Untitled recording'), bytes, ready, busy: busy.has(c.id) || (!ready && !c.complete),
+        id: c.id, ...(c.metadata.trackId ? { trackId: `spotify-${c.metadata.trackId}` } : {}), title: String(c.metadata.trackName || 'Untitled recording'), bytes, ready, busy: busy.has(c.id) || (!ready && !c.complete),
       });
       done([
         ...captures.result.map((c: QueuedCapture) => {

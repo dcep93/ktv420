@@ -27,7 +27,7 @@ test('settings list raw/prepared sizes and delete selected extension data withou
     tx.objectStore('chunks').put({ key: `output/${id}/input/0`, captureId: `output/${id}`, blob: new Blob(['partial-data']) });
   });
   const rows = await listStagedAudio();
-  assert.deepEqual(rows.find(r => r.id === id), { id, title: 'rawsong', bytes: 28, ready: false, busy: false });
+  assert.deepEqual(rows.find(r => r.id === id), { id, trackId: 'spotify-rawsong', title: 'rawsong', bytes: 28, ready: false, busy: false });
   assert.deepEqual(rows.find(r => r.id === preparedId), { id: preparedId, title: 'Prepared song', bytes: 30, ready: true, busy: false });
   await deleteStagedAudio([id, preparedId]);
   assert.ok((await pendingCaptures()).some(c => c.id === other));

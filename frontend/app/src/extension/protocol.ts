@@ -20,7 +20,7 @@ export function parseRequest(value: unknown) {
     ![
       'hello', 'work-state', 'work-config', 'work-failure', 'work-recover', 'return-begin', 'return-chunk', 'return-finish', 'staging-list', 'staging-delete',
       'claim-capture', 'release-capture', 'prepared', 'prepared-chunk', 'ack-prepared',
-      'work-pending', 'work-claim', 'work-chunk', 'work-touch', 'work-release', 'work-begin', 'work-append', 'work-finish',
+      'work-pending', 'work-claim', 'work-chunk', 'work-touch', 'work-release', 'work-commit', 'work-begin', 'work-append', 'work-finish',
       'library-summary',
       'collections',
       'ack-collection',
@@ -43,7 +43,7 @@ export function parseRequest(value: unknown) {
   if (r.operation === 'ack-collection' && (typeof r.path !== 'string' || !/^(album|playlist)\/[A-Za-z0-9]{22}$/.test(r.path) || typeof r.requestId !== 'string' || !/^[a-f0-9-]{36}$/.test(r.requestId))) throw new Error('Invalid collection acknowledgment.');
   if ('heal' in r && (r.operation !== 'hello' || typeof r.heal !== 'boolean')) throw new Error('Invalid recovery request.');
   if ('revision' in r && (!Number.isSafeInteger(r.revision) || Number(r.revision) < 0)) throw new Error('Invalid library revision.');
-  if (r.operation === 'publish-library') r.tracks = parseLibrarySummary(r.tracks);
+  if (r.operation === 'publish-library' || (r.operation === 'work-commit' && r.discarded !== true)) r.tracks = parseLibrarySummary(r.tracks);
   if (r.operation === 'open-player' && (typeof r.path !== 'string' || !/^(album|playlist)\/[A-Za-z0-9]{22}$/.test(r.path) || (r.trackIndex !== null && (!Number.isSafeInteger(r.trackIndex) || Number(r.trackIndex) < 1 || Number(r.trackIndex) > 10000)))) throw new Error('Invalid player link.');
   if (r.operation === 'staging-delete' && (!Array.isArray(r.ids) || !r.ids.length || r.ids.length > 10000 ||
       r.ids.some(id => typeof id !== 'string' || !/^[a-f0-9-]{36}$/.test(id)))) throw new Error('Invalid staging deletion.');

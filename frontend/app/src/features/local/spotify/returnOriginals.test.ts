@@ -37,3 +37,10 @@ test('interrupted original return resumes exact chunks and never deletes the web
   await returnUnfinishedOriginals(request); assert.equal((await pendingCaptures()).length, 1); assert.deepEqual(indexes, [0, 1, 1]);
   assert.deepEqual(await (await getInput(id)).arrayBuffer(), await wav.arrayBuffer());
 });
+
+test('shared-library recovery never sends an already queued original back to the extension again', async () => {
+  const pending = await pendingCaptures();
+  assert.ok(pending.length);
+  const skip = new Set(pending.map(c => `spotify-${c.metadata.trackId}`));
+  await returnUnfinishedOriginals(async () => { throw Error('Duplicate raw transfer'); }, skip);
+});

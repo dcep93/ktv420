@@ -29,16 +29,17 @@ export default function AppServices() {
       try {
         // A missing extension is normal. Only surface delivery failures after a successful hello.
         const { spotifyRequest } = await import('../features/local/spotify/client');
-        let connected = false;
+        let connected = false, sharedLibrary = false;
         try {
-          const capability = await spotifyRequest<{ extensionQueue?: boolean; backgroundQueue?: boolean }>('hello', { heal: !checkedWorker });
+          const capability = await spotifyRequest<{ extensionQueue?: boolean; backgroundQueue?: boolean; sharedLibrary?: boolean }>('hello', { heal: !checkedWorker });
+          sharedLibrary = capability.sharedLibrary === true;
           checkedWorker = true;
           connected = true;
           if (capability.extensionQueue && !capability.backgroundQueue && !stopWorker && !cancelled) stopWorker = startStagedProcessing(message => { if (!cancelled) setNotice(message); }, () => {});
         } catch {
           /* website works independently */
         }
-        if (connected)
+        if (connected && !sharedLibrary)
           try {
             await drainDeliveries();
             if (!cancelled) setNotice(previous => previous.startsWith('Storage is not persistent.') ? previous : '');

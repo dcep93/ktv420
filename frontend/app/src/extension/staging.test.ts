@@ -222,3 +222,20 @@ test('a stale receipt cannot acknowledge missing audio as successfully imported'
   await receivePrepared(f.p, read);
   assert.equal((await getTrack(`spotify-${f.trackId}`))?.status, 'ready');
 });
+
+test('shared-library background migration recovers old prepared audio without any visible website importer', async () => {
+  const { migrateLegacyAudio } = await import('../features/local/spotify/sharedMigration');
+  Object.defineProperty(navigator, 'locks', { configurable: true, value: { request: async (_name: string, _options: unknown, fn: (lock: object) => unknown) => fn({}) } });
+  const f = await fixture(); await upload(f);
+  let imports = 0;
+  await migrateLegacyAudio(async <T>(op: string, args: Record<string, unknown> = {}): Promise<T> => {
+    if (op === 'collections') return [] as T;
+    if (op === 'prepared') return [f.p] as T;
+    if (op === 'work-pending') return await pendingCaptures() as T;
+    if (op === 'ack-prepared') imports++;
+    return read<T>(op, args);
+  });
+  assert.equal(imports, 1);
+  assert.equal((await getTrack(`spotify-${f.trackId}`))?.status, 'ready');
+  assert.ok(!(await preparedCaptures()).some(p => p.id === f.id));
+});

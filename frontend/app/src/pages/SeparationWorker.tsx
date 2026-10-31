@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { embeddedSpotify, overlayReady } from '../features/local/spotify/overlay';
 import { startStagedProcessing } from '../features/local/spotify/stagedProcessing';
-/** No library, player, or view ownership: extension staging is authoritative. */
+/** A persistent background owner writes directly to the shared website library. */
 export default function SeparationWorker() {
   useEffect(() => {
     if (!embeddedSpotify) return;

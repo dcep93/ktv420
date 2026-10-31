@@ -2,7 +2,7 @@
 export type LibrarySummary = {
   id: string; status: 'captured' | 'processing' | 'ready' | 'error';
   separation?: 'paused' | 'queued' | 'processing' | 'error';
-  location?: 'website' | 'extension';
+  location?: 'website' | 'extension' | 'shared';
   updatedAt?: number;
   retryAt?: number;
   progress?: { fraction: number; message: string };

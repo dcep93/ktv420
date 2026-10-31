@@ -1,3 +1,7 @@
+import { listTracks } from './library';
+import { sharedSummary } from './sharedSummary';
+import { libraryChanges } from './libraryChanges';
+import { rememberCollection } from './collections';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { savedCollection, type TrackRow } from './collections';
 import { playlistPath, playlistIndex, playlistViewUrl } from './playlistPage';
@@ -33,6 +37,8 @@ export function usePlaylist(onClose?: () => void) {
   const [replay, setReplay] = useState<PerformanceRecording | null>(null);
   const [librarySummary, setLibrarySummary] = useState<LibrarySummary[]>([]);
   const [summaryReady, setSummaryReady] = useState(false);
+  const [sharedLibrary, setSharedLibrary] = useState(false);
+  const shared = useRef(false);
   const [queueEnabled, setQueueEnabled] = useState<boolean | null>(null);
   const [queueBackend, setQueueBackend] = useState<'auto' | 'wasm' | null>(null);
   const cancelled = useRef(false),
@@ -43,7 +49,7 @@ export function usePlaylist(onClose?: () => void) {
   const active = status?.active === true;
   useEffect(() => {
     let disposed = false;
-    void spotifyRequest('hello', { heal: true }).catch(() => {});
+    void spotifyRequest<{ sharedLibrary?: boolean }>('hello', { heal: true }).then(capability => { shared.current = capability.sharedLibrary === true; if (!disposed) setSharedLibrary(shared.current); }).catch(() => {});
     const load = async () => {
       try {
         let collection;
@@ -51,11 +57,13 @@ export function usePlaylist(onClose?: () => void) {
           const snapshot = await discoverPlaylist(path,
             () => spotifyRequest<PlaylistSnapshot>('discover'), () => disposed);
           if (!snapshot) return;
-          // The overlay holds metadata only; the website registers delivered captures.
+          // Playlist metadata shares the same database as the standalone catalog.
           collection = { ...snapshot.collection, tracks: snapshot.tracks };
+          // Safe for old extensions too; host permissions provide the same storage partition.
+          await rememberCollection(snapshot.collection, snapshot.tracks);
         } else {
           // Render cached rows (or just their small metadata handoff) immediately.
-          // AppServices imports audio in the background; ready tracks appear as it commits.
+          // The background worker commits audio directly; render metadata immediately.
           collection = await loadPlaylistCollection(path);
         }
         if (!disposed) {
@@ -67,7 +75,7 @@ export function usePlaylist(onClose?: () => void) {
       } catch (reason) {
         if (!disposed) {
           setError(reason instanceof Error ? reason.message : String(reason));
-          // The capture frame must never consult its isolated audio database.
+          // A failed Spotify discovery should not replace the current playlist.
           if (embeddedSpotify) return;
           try {
             const c = await savedCollection(path);
@@ -110,7 +118,8 @@ export function usePlaylist(onClose?: () => void) {
           const next = await spotifyRequest<Status>('status');
           if (!disposed) setStatus(previous => ({ ...next, volume: volumePending.current || revision !== volumeRevision.current ? previous?.volume ?? next.volume : next.volume }));
         }
-        const summary = await spotifyRequest<LibrarySummary[]>('library-summary');
+        const remote = await spotifyRequest<LibrarySummary[]>('library-summary');
+        const summary = shared.current ? sharedSummary(await listTracks(), remote) : remote;
         if (!disposed) {
           setLibrarySummary(summary); setSummaryReady(true);
           setError('');
@@ -127,10 +136,13 @@ export function usePlaylist(onClose?: () => void) {
       }
     };
     void poll();
+    const changed = () => { void poll(); };
+    libraryChanges.addEventListener('change', changed);
     const timer = setInterval(() => void poll(), 1500);
     return () => {
       disposed = true;
       clearInterval(timer);
+      libraryChanges.removeEventListener('change', changed);
     };
   }, []);
   useEffect(() => {
@@ -206,6 +218,7 @@ export function usePlaylist(onClose?: () => void) {
   return {
     tracks,
     librarySummary,
+    sharedLibrary,
     queueEnabled,
     queueBackend,
     configureQueue: async (enabled: boolean, retry = false, backend?: 'auto' | 'wasm') => { await spotifyRequest('work-config', { enabled, retry, ...(backend ? { backend } : {}) }); setQueueEnabled(enabled); if (backend) setQueueBackend(backend); },

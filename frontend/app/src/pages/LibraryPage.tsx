@@ -76,7 +76,7 @@ export default function LibraryPage() {
   const [separationFraction, setSeparationFraction] = useState<number | null>(null);
   const [localBackend, setBackend] = useState<'auto' | 'wasm'>('auto');
   const backend = spotify.queueBackend ?? localBackend;
-  const queueBusy = spotify.librarySummary.some(row => row.location === 'extension' && row.status === 'processing');
+  const queueBusy = spotify.librarySummary.some(row => row.location !== 'website' && row.status === 'processing');
   const [modelCached, setModelCached] = useState(false);
   const [modelAction, setModelAction] = useState<'download' | 'remove' | null>(null);
   const [modelDownload, setModelDownload] = useState(0);
@@ -435,7 +435,7 @@ export default function LibraryPage() {
           <div><h3>Automatic separation</h3><p id="separation-help">Capture continues while paused. Unfinished songs restart on resume.</p></div>
           <button disabled={deletingAudio} aria-describedby="separation-help" onClick={() => setProcessingEnabled(!autoProcessing)}>{autoProcessing ? 'Pause separation' : 'Resume separation'}</button>
         </div>
-        {spotify.librarySummary.some(row => row.location === 'extension' && row.status === 'error') && <button onClick={() => void spotify.configureQueue(true, true).catch(reason => setError(errorText(reason)))}>Retry separation</button>}
+        {spotify.librarySummary.some(row => row.location !== 'website' && row.status === 'error') && <button onClick={() => void spotify.configureQueue(true, true).catch(reason => setError(errorText(reason)))}>Retry separation</button>}
         {active && <progress max={1} value={progress?.fraction || 0} aria-label="Separation progress" title={progress?.message} />}
         <div className="iframe-setting-row">
           <div><label htmlFor="separation-device">Processing device</label><p>Use CPU if GPU separation fails.</p></div>
@@ -474,7 +474,7 @@ export default function LibraryPage() {
     </section>}
     {viewMode === 'tracks' && <ol className="iframe-track-list" aria-label="Playlist tracks">
       {displayTracks.map((track, index) => {
-        const staged = spotify.librarySummary.find(row => row.id === track.id && row.location === 'extension');
+        const staged = spotify.librarySummary.find(row => row.id === track.id && row.location !== 'website');
         const queueStatus = staged ? separationStatus(staged, autoProcessing, staged.error) : null;
         const ready = track.status === 'ready';
         const available = ready && !mp3Export.busy && !deletingAudio && (!recording || selected === track.id);

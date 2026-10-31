@@ -1,3 +1,4 @@
+import SharedAudioSettings from './SharedAudioSettings';
 import { separationStatus, separationProgressLabel } from '../features/local/separationStatus';
 import { useSpacePlayback } from '../features/local/useSpacePlayback';
 import SeparationSettings from './SeparationSettings';
@@ -11,7 +12,7 @@ import { usePlaylist } from '../features/local/usePlaylist';
 import { useHostedCapture } from '../features/local/useHostedCapture';
 import OverlayIcon from './OverlayIcon';
 
-/** Hosted inference uses extension staging; the frame owns no audio library or mixer. */
+/** Capture controls over Spotify; shared audio and playback live on the website origin. */
 export default function CapturePage() {
   const spotify = usePlaylist();
   // Capture has no local player; Space must never activate focused controls.
@@ -72,7 +73,7 @@ export default function CapturePage() {
   const message = error || spotify.error || (!spotify.tracksComplete ? 'Loading playlist…' : startup);
   return <main className="iframe-page iframe-page--overlay" aria-label="ktv420 capture playlist">
     <header className="iframe-overlay-header">
-      <div className="iframe-status-slot">{message && <p className="iframe-status-message" data-kind={error || spotify.error ? 'error' : 'notice'} role="status"><OverlayIcon name={error || spotify.error ? 'alert' : 'music'} /><span>{message}</span>{(Object.keys(failures).length > 0 || spotify.librarySummary.some(track => track.status === 'error' && track.location === 'extension')) && <button onClick={resume}>Retry separation</button>}</p>}</div>
+      <div className="iframe-status-slot">{message && <p className="iframe-status-message" data-kind={error || spotify.error ? 'error' : 'notice'} role="status"><OverlayIcon name={error || spotify.error ? 'alert' : 'music'} /><span>{message}</span>{(Object.keys(failures).length > 0 || spotify.librarySummary.some(track => track.status === 'error' && track.location !== 'website')) && <button onClick={resume}>Retry separation</button>}</p>}</div>
       <div className="iframe-actions-shell"><div className="iframe-actions">
         <button className="iframe-close-button" aria-label="Close" onClick={spotify.close}><OverlayIcon name="close" /></button>
         <button className="iframe-logo-button" aria-label={capture.active ? 'Stop capture' : allCaptured ? 'Open first track in ktv420' : 'Start capture'}
@@ -89,10 +90,10 @@ export default function CapturePage() {
     <div className="iframe-content">
       {settings ? <section className="iframe-settings-view" aria-label="Settings view">
         <SeparationSettings enabled={processingEnabled} backend={spotify.queueBackend || 'auto'}
-          busy={spotify.librarySummary.some(track => track.status === 'processing' && track.location === 'extension')}
-          failed={spotify.librarySummary.some(track => track.status === 'error' && track.location === 'extension')}
+          busy={spotify.librarySummary.some(track => track.status === 'processing' && track.location !== 'website')}
+          failed={spotify.librarySummary.some(track => track.status === 'error' && track.location !== 'website')}
           configure={spotify.configureQueue} onError={setError} />
-        <ExtensionAudioSettings capturing={capture.active} />
+        {spotify.sharedLibrary ? <SharedAudioSettings capturing={capture.active} /> : <ExtensionAudioSettings capturing={capture.active} />}
       </section> : <ol className="iframe-track-list" aria-label="Playlist tracks">{spotify.tracks.map(row => {
         const separation = processingEnabled && processing?.id === row.trackId ? processing : null;
         const track = saved.get(`spotify-${row.trackId}`);

@@ -6,11 +6,11 @@ import { encodeBlobChunk } from '../../../shared/preparedAudio';
 import { spotifyRequest } from './client';
 type ReturnJob = { id: string; metadata: Record<string, unknown>; bytes: number };
 /** Caller holds delivery + website processing locks. Keep the backup until prepared import commits. */
-export async function returnUnfinishedOriginals(request = spotifyRequest) {
+export async function returnUnfinishedOriginals(request = spotifyRequest, skip = new Set<string>()) {
   const collections = await listCollections();
   const failures: string[] = [];
   for (const track of await listTracks()) {
-    if (track.source !== 'spotify' || track.status === 'ready') continue;
+    if (track.source !== 'spotify' || track.status === 'ready' || skip.has(track.id)) continue;
     try {
       const key = `extension-return/${track.id}`;
       const job = await transaction<ReturnJob>(['settings'], 'readwrite', (tx, done) => {

@@ -1,3 +1,5 @@
+import { processSharedCapture } from './sharedCapture';
+import { migrateLegacyAudio, publishSharedLibrary } from './sharedMigration';
 import { nextSeparationFraction } from '../rowProgress';
 import { progressActivity } from './progressActivity';
 import { spotifyRequest } from './client';
@@ -10,7 +12,7 @@ import { MP3_NAMES } from '../audio/mp3Types';
 import { encodeBlobChunk, sha256, type PreparedAudio } from '../../../shared/preparedAudio';
 import type { SeparationProgress } from '../inference/types';
 
-/** No audio is stored in the hosted iframe's partitioned IndexedDB. */
+/** Background inference; modern workers commit directly into the shared website library. */
 type Worker = Pick<LocalSeparator, 'separateStereo' | 'dispose'>;
 export function startStagedProcessing(onError: (error: string, trackId?: string) => void, onProgress: (id: string, progress: SeparationProgress | null) => void,
   dependencies: { request?: typeof spotifyRequest; createSeparator?: () => Worker; process?: typeof processLocalTrack } = {},
@@ -21,7 +23,7 @@ export function startStagedProcessing(onError: (error: string, trackId?: string)
   let stopped = false, busy = false, separator: Worker | undefined, queueEnabled = true, pausedRun = false, sharedQueue = false, stateBusy = false;
   let overall: number | null = null, queueBackend: 'auto' | 'wasm' = 'auto';
   let recovered = false, observing = false, separatorBackend = '';
-  let idleAt = Date.now();
+  let idleAt = Date.now(), migrationAt = 0;
   const readState = async () => {
     if (!sharedQueue || stateBusy || stopped) return;
     stateBusy = true;
@@ -34,7 +36,7 @@ export function startStagedProcessing(onError: (error: string, trackId?: string)
     if (busy || stopped || observing) return;
     busy = true;
     try {
-      const capability = await request<{ stagedAudio?: boolean; extensionQueue?: boolean; workRecovery?: boolean; backgroundQueue?: boolean }>('hello');
+      const capability = await request<{ stagedAudio?: boolean; extensionQueue?: boolean; workRecovery?: boolean; backgroundQueue?: boolean; sharedLibrary?: boolean }>('hello');
       if (!capability.stagedAudio) return;
       if (capability.backgroundQueue && location.pathname !== '/separation-worker') { observing = true; onStartup(''); return; }
       sharedQueue = !!capability.extensionQueue;
@@ -43,6 +45,14 @@ export function startStagedProcessing(onError: (error: string, trackId?: string)
       if (!recovered) { recovered = true; onStartup('Checking saved recordings…'); }
       if (stopped) return;
       await readState();
+      if (capability.sharedLibrary) {
+        if (Date.now() - migrationAt > 30000) {
+          migrationAt = Date.now();
+          // A corrupt legacy entry must not block newly captured songs.
+          try { await migrateLegacyAudio(request); } catch (error) { onError(String(error)); }
+        }
+        await publishSharedLibrary(request);
+      }
       if (!queueEnabled) return;
       const pending = await request<QueuedCapture[]>('work-pending');
       if (!pending.length && Date.now() - idleAt > 180000) { separator?.dispose(); separator = undefined; }
@@ -80,6 +90,11 @@ export function startStagedProcessing(onError: (error: string, trackId?: string)
           report({ phase: 'loading', fraction: 0, message: capture.attempts || capture.recoveries ? 'Restarting interrupted separation…' : 'Starting separation worker…' });
           if (!separator || separatorBackend !== queueBackend) { separator?.dispose(); separator = createSeparator(); separatorBackend = queueBackend; }
           worker = separator; idleAt = Date.now();
+          if (capability.sharedLibrary) {
+            await processSharedCapture(capture, token, request, separator, () => stopped || lost || pausedRun || !queueEnabled, report, process);
+            continue;
+          }
+          // Compatibility for extensions installed before shared-library support.
           await process(`spotify-${capture.metadata.trackId}`, separator, () => stopped || lost || pausedRun || !queueEnabled,
             report, {
               setTrackStatus: async () => {}, // The exclusive claim represents processing; final commit represents ready.

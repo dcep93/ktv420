@@ -2,7 +2,7 @@
 const APP = 'https://ktv420.web.app';
 const frame = document.querySelector('iframe');
 let session = crypto.randomUUID(), lastActivity = Date.now(), restarting = false;
-const allowed = new Set(['hello', 'work-state', 'work-recover', 'work-pending', 'work-claim', 'work-touch', 'work-chunk', 'work-begin', 'work-append', 'work-finish', 'work-failure', 'work-release']);
+const allowed = new Set(['hello', 'work-state', 'work-recover', 'work-pending', 'work-claim', 'work-touch', 'work-chunk', 'work-begin', 'work-append', 'work-finish', 'work-failure', 'work-release', 'work-commit', 'prepared', 'prepared-chunk', 'ack-prepared', 'collections', 'ack-collection', 'publish-library', 'return-begin', 'return-chunk', 'return-finish']);
 window.addEventListener('message', event => {
   if (event.source !== frame.contentWindow || event.origin !== APP || event.data?.source !== 'ktv420-overlay-app') return;
   lastActivity = Date.now(); restarting = false;

@@ -7,6 +7,7 @@ import { touchClaim, releaseClaim, stagedSummary, preparedCaptures, beginPrepare
 import type { AudioName } from '../shared/preparedAudio';
 import { APP_ORIGIN, parseRequest, websiteSender } from './protocol';
 import {
+  acknowledgeCapture,
   beginCapture,
   appendCapture,
   finishCapture,
@@ -32,6 +33,17 @@ async function request(message: unknown, tabId?: number, websiteTabId?: number, 
     }
     const id = String(r.id), token = String(r.token);
     switch (r.operation) {
+      case 'work-commit': {
+        await touchClaim(id, token, owner);
+        const capture = (await pendingCaptures()).find(c => c.id === id);
+        if (!capture) return;
+        if (r.discarded !== true) {
+          const tracks = r.tracks as { id: string; status: string }[];
+          if (!tracks?.some(t => t.id === `spotify-${capture.metadata.trackId}` && t.status === 'ready')) throw new Error('Shared stems are not committed.');
+          await publishLibrarySummary(tracks, r.revision as number);
+        }
+        return acknowledgeCapture(id, token);
+      }
       case 'work-failure': return failWork(id, token, owner, String(r.error), r.recoverOnReload === true, r.transient === true);
       case 'work-pending': return pendingCaptures();
       case 'work-claim': return claimWork(id, owner, documentId);
@@ -55,7 +67,7 @@ async function request(message: unknown, tabId?: number, websiteTabId?: number, 
     case 'staging-delete':
       if (tabId === undefined) throw new Error('Only the Spotify overlay manages extension audio.');
       return r.operation === 'staging-list' ? listStagedAudio() : deleteStagedAudio(r.ids as string[]);
-    case 'hello': await ensureWorkerHost(!backgroundWorker && r.heal === true); return { version: 1, extensionVersion: chrome.runtime.getManifest().version, extensionId: chrome.runtime.id, stagedAudio: true, stagedAudioControls: true, extensionQueue: true, workRecovery: true, backgroundQueue: true };
+    case 'hello': await ensureWorkerHost(!backgroundWorker && r.heal === true); return { version: 1, extensionVersion: chrome.runtime.getManifest().version, extensionId: chrome.runtime.id, stagedAudio: true, stagedAudioControls: true, extensionQueue: true, workRecovery: true, backgroundQueue: true, sharedLibrary: true };
     case 'ack-collection': {
       if (tabId !== undefined) throw new Error('Only the website receives playlist metadata.');
       return acknowledgePlayerCollection(String(r.path), String(r.requestId));
@@ -104,7 +116,7 @@ chrome.action.onClicked.addListener((tab) => {
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (sender.id === chrome.runtime.id && sender.tab === undefined && sender.url === chrome.runtime.getURL('src/worker/index.html') &&
       message?.type === 'ktv420:worker-request' && /^[a-f0-9-]{36}$/.test(message.session || '') &&
-      ['hello', 'work-state', 'work-recover', 'work-pending', 'work-claim', 'work-touch', 'work-chunk', 'work-begin', 'work-append', 'work-finish', 'work-failure', 'work-release'].includes(message.request?.operation)) {
+      ['hello', 'work-state', 'work-recover', 'work-pending', 'work-claim', 'work-touch', 'work-chunk', 'work-begin', 'work-append', 'work-finish', 'work-failure', 'work-release', 'work-commit', 'prepared', 'prepared-chunk', 'ack-prepared', 'collections', 'ack-collection', 'publish-library', 'return-begin', 'return-chunk', 'return-finish'].includes(message.request?.operation)) {
     void request(message.request, undefined, undefined, `${sender.documentId}/${message.session}`, true).then(
       result => respond({ ok: true, result }), error => respond({ ok: false, error: String(error.message || error) }));
     return true;

@@ -1,4 +1,4 @@
-# Chrome Web Store package — 7.5.1
+# Chrome Web Store package — 7.6.0
 
 ## Permissions
 
@@ -6,7 +6,7 @@ The package requests `offscreen` for one background document hosting local audio
 
 Offscreen justification:
 
-> The offscreen document hosts a local audio separation worker so processing continues when the user closes or refreshes the Spotify overlay or ktv420 website. It reads only audio captured by ktv420, produces local MP3 stems, and retains them until the website durably imports them. The document does not play audio or upload recordings.
+> The offscreen document hosts a local audio separation worker so processing continues when the user closes or refreshes the Spotify overlay or ktv420 website. It reads only audio captured by ktv420, produces local MP3 stems, and commits them directly into the website’s shared IndexedDB library. The document does not play audio or upload recordings.
 
 Site access remains limited to `open.spotify.com` and `ktv420.web.app`. Content scripts and public extension resources are restricted to Spotify. Website external requests require a top-level ktv420 origin. The offscreen relay accepts only processing operations, validates the iframe origin/source, and exposes no Chrome API to the hosted page.
 
@@ -16,6 +16,6 @@ Privileged extension logic is packaged. The overlay and processing application r
 
 ## Package and verification
 
-`dist/ktv420-extension.zip` is the upload package. The offscreen permission is exercised by `chrome.offscreen.createDocument` with the `WORKERS` reason. Tests restrict the permission set, reject worker impersonation and view-owned inference claims, and verify durable import, retry and deletion behavior. Nothing is submitted to the Store automatically.
+`dist/ktv420-extension.zip` is the upload package. The offscreen permission is exercised by `chrome.offscreen.createDocument` with the `WORKERS` reason. Tests restrict the permission set, reject worker impersonation and view-owned inference claims, and verify durable storage, retry and deletion behavior. Nothing is submitted to the Store automatically.
 
 Reference: [Chrome offscreen API](https://developer.chrome.com/docs/extensions/reference/api/offscreen).

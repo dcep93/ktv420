@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ktv420",
-  "version": "7.5.1",
+  "version": "7.6.0",
   "minimum_chrome_version": "121",
   "description": "Spotify capture for ktv420. Import, separate, mix and visualize music locally at ktv420.web.app.",
   "icons": {
