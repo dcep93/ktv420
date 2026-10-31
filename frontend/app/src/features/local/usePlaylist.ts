@@ -1,3 +1,4 @@
+import { createTitlePublisher } from './captureTitle';
 import { listTracks } from './library';
 import { sharedSummary } from './sharedSummary';
 import { libraryChanges } from './libraryChanges';
@@ -70,7 +71,8 @@ export function usePlaylist(onClose?: () => void) {
           setTracks(collection.tracks);
           setComplete(true);
           setError('');
-          document.title = `${collection.title} · ktv420`;
+          // CapturePage owns the overlay title, including during discovery.
+          if (!embeddedSpotify) document.title = `${collection.title} · ktv420`;
         }
       } catch (reason) {
         if (!disposed) {
@@ -167,10 +169,12 @@ export function usePlaylist(onClose?: () => void) {
     };
     window.addEventListener('ktv420:overlay-navigation', navigation);
     overlayReady();
-    const title = new MutationObserver(() => {
-      void spotifyRequest('presentation', { title: document.title.slice(0, 500) }).catch(() => {});
+    const publishTitle = createTitlePublisher(title => {
+      void spotifyRequest('presentation', { title }).catch(() => {});
     });
+    const title = new MutationObserver(() => publishTitle(document.title));
     title.observe(document.querySelector('title')!, { childList: true, subtree: true, characterData: true });
+    publishTitle(document.title);
     return () => { window.removeEventListener('ktv420:overlay-navigation', navigation); title.disconnect(); };
   }, []);
   const cancelCapture = useCallback(() => {

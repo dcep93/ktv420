@@ -1,3 +1,4 @@
+import { createCaptureTitle, setCaptureDocumentTitle } from '../features/local/captureTitle';
 import SharedAudioSettings from './SharedAudioSettings';
 import { separationStatus, separationProgressLabel } from '../features/local/separationStatus';
 import { useSpacePlayback } from '../features/local/useSpacePlayback';
@@ -62,14 +63,14 @@ export default function CapturePage() {
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
   }, [spotify]);
+  const titleForCapture = useRef(createCaptureTitle());
   const progress = spotify.captureProgress;
   const percentage = capturePercentage(spotify.tracks.map(row => row.trackId),
     new Set([...saved.keys()].map(id => id.replace(/^spotify-/, ''))), progress);
   useEffect(() => {
-    if (capture.active && spotify.tracks.length)
-      document.title = `${Math.min(99, percentage)}% · ktv420`;
-    else document.title = 'ktv420';
-  }, [capture.active, spotify.tracks.length, percentage, allCaptured]);
+    const title = titleForCapture.current(capture.active, spotify.tracks.length, percentage);
+    setCaptureDocumentTitle(document, title);
+  }, [capture.active, spotify.tracks.length, percentage]);
   const message = error || spotify.error || (!spotify.tracksComplete ? 'Loading playlist…' : startup);
   return <main className="iframe-page iframe-page--overlay" aria-label="ktv420 capture playlist">
     <header className="iframe-overlay-header">
