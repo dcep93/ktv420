@@ -17,7 +17,8 @@ await cp(new URL('THIRD_PARTY_NOTICES.md', root), new URL('THIRD_PARTY_NOTICES.m
 const hosted = new URL('site/player/', root);
 await rm(hosted, { recursive: true, force: true });
 await cp(new URL('frontend/app/dist/', root), hosted, { recursive: true });
-await cp(new URL('frontend/app/dist/index.html', root), new URL('site/index.html', root));
+// Keep the hand-authored landing page at /. The app is served from /player/
+// and the explicit Firebase routes (/catalog, /playlist, /transfer, etc.).
 await rm(new URL('benchmark-reference.f32', hosted), { force: true });
 await writeAssetManifest(hosted.pathname);
 const theme = new URL('site/theme/', root);
