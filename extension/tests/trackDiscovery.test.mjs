@@ -40,7 +40,7 @@ test('route cancellation stops discovery without scrolling the new route', async
 });
 
 
-test('track totals exclude the grid header and fall back to the collection header', t => {
+test('track totals prefer the song count and fall back to the grid without its column header', t => {
   const original = Object.getOwnPropertyDescriptor(globalThis, 'document');
   let count = '46', header = 'Public Playlist • 45 songs, about 3 hr';
   Object.defineProperty(globalThis, 'document', { configurable: true, value: {
@@ -48,6 +48,28 @@ test('track totals exclude the grid header and fall back to the collection heade
   } });
   t.after(() => original ? Object.defineProperty(globalThis, 'document', original) : delete globalThis.document);
   assert.equal(trackTotal(), 45);
+  header = 'Playlist'; assert.equal(trackTotal(), 45);
+  header = 'Playlist • 1,234 songs'; assert.equal(trackTotal(), 1234);
+  header = 'Album • 1 song'; assert.equal(trackTotal(), 1);
+  header = 'Public Playlist • 45 songs, about 3 hr';
   count = null; assert.equal(trackTotal(), 45);
   header = 'Album'; assert.equal(trackTotal(), null);
+});
+
+test('a 16-song, two-disc album completes without searching for its disc headings as songs', async t => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: {
+    querySelector: selector => selector.includes('entity-header')
+      ? { textContent: 'Album • 2026 • 16 songs, 55 min 47 sec' }
+      : { getAttribute: () => '19' },
+  } });
+  t.after(() => original ? Object.defineProperty(globalThis, 'document', original) : delete globalThis.document);
+  const album = rows.slice(0, 16);
+  assert.equal(trackTotal(), 16);
+  const result = await discoverTrackRows({ read: () => album,
+    container: () => { assert.fail('A complete album should not need a scroll sweep'); } });
+  assert.equal(result.complete, true);
+  assert.deepEqual(result.tracks, album);
+  const partial = await discoverTrackRows({ read: () => album.slice(0, 12), container: () => null });
+  assert.equal(partial.complete, false, 'The first disc alone must not count as the complete album');
 });

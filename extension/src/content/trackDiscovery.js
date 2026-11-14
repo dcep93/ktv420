@@ -1,13 +1,16 @@
 import { collectTrackRows, findTracklistRoot } from './dom.js';
 
 export function trackTotal() {
+  // The collection header counts songs. The grid also counts disc headings,
+  // so its row count can overstate the number of tracks on multi-disc albums.
+  const header = document.querySelector('[data-testid="entity-header"]')?.textContent || '';
+  const match = header.match(/\b([\d,]+)\s+songs?\b/i);
+  if (match) return Number(match[1].replaceAll(',', ''));
   const root = findTracklistRoot();
   // Spotify includes its column-header row in aria-rowcount.
   const count = Number(root?.getAttribute?.('aria-rowcount'));
   if (Number.isSafeInteger(count) && count > 1) return count - 1;
-  const header = document.querySelector('[data-testid="entity-header"]')?.textContent || '';
-  const match = header.match(/\b([\d,]+)\s+songs?\b/i);
-  return match ? Number(match[1].replaceAll(',', '')) : null;
+  return null;
 }
 
 export function hasAllRows(tracks, total) {

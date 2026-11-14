@@ -27,6 +27,7 @@ const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 export function usePlaylist(onClose?: () => void) {
   const [tracks, setTracks] = useState<TrackRow[]>([]),
     [complete, setComplete] = useState(false),
+    [loadError, setLoadError] = useState(''),
     [error, setError] = useState(''),
     [status, setStatus] = useState<Status | null>(null);
   const [navigation, setNavigation] = useState({
@@ -66,13 +67,13 @@ export function usePlaylist(onClose?: () => void) {
         if (!disposed) {
           setTracks(collection.tracks);
           setComplete(true);
-          setError('');
+          setLoadError('');
           // CapturePage owns the overlay title, including during discovery.
           if (!embeddedSpotify) document.title = `${collection.title} · ktv420`;
         }
       } catch (reason) {
         if (!disposed) {
-          setError(reason instanceof Error ? reason.message : String(reason));
+          setLoadError(reason instanceof Error ? reason.message : String(reason));
           // A failed Spotify discovery should not replace the current playlist.
           if (embeddedSpotify) return;
           try {
@@ -224,7 +225,8 @@ export function usePlaylist(onClose?: () => void) {
     summaryReady,
     openPlayer: (trackIndex: number | null) => spotifyRequest('open-player', { path, trackIndex }),
     tracksComplete: complete,
-    error,
+    // Status polls can recover independently; they must not erase a failed load.
+    error: loadError || error,
     notice: '',
     spotifyPath: path,
     navigation,
