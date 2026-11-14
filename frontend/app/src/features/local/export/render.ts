@@ -2,6 +2,7 @@ import { TempoEngine } from '../../stems/player/tempoEngine';
 import { applyAudioEffect, createEffectNodes, prepareAudioEffects, syncAudioEffects, type AudioEffectType } from '../../stems/player/audioEffects';
 import { connectStemEffects, disposeStemEffects } from '../../stems/player/stemGraph';
 import { getLogarithmicVolumeGain } from '../../stems/player/mixerGain';
+import { createMasterAudio, masterLatencyFrames } from '../../stems/player/masterAudio';
 import type { PlaybackRecord } from '../../stems/player/types';
 import type { MixerSnapshot, PerformanceEvent } from '../recording';
 import { EXPORT_RATE, eventQuanta, checkExportMemory, type ExportSection } from './timeline';
@@ -10,8 +11,10 @@ export type RenderSource = { record: PlaybackRecord; offset: number; duration: n
 export async function renderSection(section: ExportSection, source: RenderSource, signal: AbortSignal, progress: (frames:number)=>void) {
   signal.throwIfAborted();
   const snapshot = section.events[0].snapshot!;
-  checkExportMemory(source.duration,snapshot.stems.length,section.frames);
-  const context = new OfflineAudioContext(2,section.frames,EXPORT_RATE);
+  const latencyFrames = masterLatencyFrames(EXPORT_RATE);
+  // Both the padded native render and the exact-length result coexist while trimming.
+  checkExportMemory(source.duration,snapshot.stems.length,section.frames * 2 + latencyFrames);
+  const context = new OfflineAudioContext(2,section.frames + latencyFrames,EXPORT_RATE);
   const files = snapshot.stems.map(stem => source.record.files.find(file => file.name===stem.name && file.path.includes('/input/')===stem.input));
   if (files.some(file=>!file)) throw new Error('This recording needs stems that are missing from this computer.');
   const buffers: AudioBuffer[] = [];
@@ -28,10 +31,9 @@ export async function renderSection(section: ExportSection, source: RenderSource
     buffers.push(buffer);
   }
   await prepareAudioEffects(context);
-  const stems = buffers.map(()=>{
-    const input=context.createGain(),effects=createEffectNodes(context);
-    connectStemEffects(input,effects,context.destination);return {input,effects};
-  });
+  signal.throwIfAborted();
+  const master = createMasterAudio(context);
+  const stems: { input: GainNode; effects: ReturnType<typeof createEffectNodes> }[] = [];
   let engine: TempoEngine | undefined, playing=false, position=0,tempo=1;
   const apply = (value: MixerSnapshot, initial=false) => {
     if(value.stems.length!==snapshot.stems.length) throw new Error('Recording stem layout changed unexpectedly.');
@@ -70,6 +72,12 @@ export async function renderSection(section: ExportSection, source: RenderSource
   void processorFailed.catch(() => {});
   const perform = (event: PerformanceEvent) => Promise.race([act(event), processorFailed]);
   try {
+    master.output.connect(context.destination);
+    for (let i=0;i<buffers.length;i++) {
+      const input=context.createGain(),effects=createEffectNodes(context);
+      stems.push({input,effects});
+      connectStemEffects(input,effects,master.input);
+    }
     engine = await TempoEngine.create(context,buffers,stems.map(stem=>stem.input),message=>rejectProcessor(new Error(message)));
     stems.forEach(stem=>{stem.effects.node.onprocessorerror=()=>rejectProcessor(new Error('Audio effects stopped during export.'));});
     signal.throwIfAborted();
@@ -86,9 +94,16 @@ export async function renderSection(section: ExportSection, source: RenderSource
       for(const event of pause.events) await perform(event);
       progress(pause.frame); await context.resume();
     }
-    const output=await Promise.race([rendering,processorFailed]);signal.throwIfAborted();progress(section.frames);return output;
+    const output=await Promise.race([rendering,processorFailed]);signal.throwIfAborted();
+    const trimmed=context.createBuffer(output.numberOfChannels,section.frames,EXPORT_RATE);
+    for(let channel=0;channel<output.numberOfChannels;channel++) {
+      // A subarray is a view, avoiding an additional full-channel temporary copy.
+      trimmed.copyToChannel(output.getChannelData(channel).subarray(latencyFrames,latencyFrames+section.frames),channel);
+    }
+    progress(section.frames);return trimmed;
   } finally {
     engine?.dispose();stems.forEach(stem=>disposeStemEffects(stem.input,stem.effects));
+    master.dispose();
     if(context.state==='suspended' && rendering) {
       // Offline contexts cannot be closed. Resume any remaining scheduled suspensions
       // with a disconnected graph so a cancelled render can release its buffers.

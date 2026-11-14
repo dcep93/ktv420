@@ -33,7 +33,7 @@ Capture verifies the actual Spotify media is paused at zero, arms capture, then 
 
 Raw capture is limited to 1 GiB per song. Processing preserves Float32 precision until a local worker encodes the original and four stems as 320 kbps stereo MP3. All files share timing, gapless metadata and a common headroom gain, restored on playback. Four minutes across five MP3s takes about 48 MB. MP3 storage is lossy; ZIP export adds no new compression loss. Large playlist exports stream to disk, and imports commit one song at a time.
 
-The mixer retains independent tempo/pitch, effects, linked faders, mute, spotlight, visualizers, fullscreen scenes, JSON performance recording and MP3 performance export. Settings carry between tracks. Playback and replay do not depend on Spotify transport, browser-extension IDs or an extension connection.
+The mixer retains independent tempo/pitch, effects, linked faders, mute, spotlight, visualizers, fullscreen scenes, JSON performance recording and MP3 performance export. A shared master compressor and soft safety ceiling let the existing faders boost the combined mix while keeping rendered sample peaks below −1 dBFS. All stems receive the same approximately 6 ms master delay; visual timing accounts for it and MP3 performance export removes it without shortening the recording. Individual effects retain their intentional timing behavior. Strong boosts can audibly compress or saturate; the sample ceiling is not a true-peak guarantee after MP3 encoding. Settings carry between tracks. Playback and replay do not depend on Spotify transport, browser-extension IDs or an extension connection.
 
 ## Development
 

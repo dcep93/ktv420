@@ -22,17 +22,20 @@ export class TempoEngine {
   private node: StretchNode;
   private duration: number;
   private completion: PlaybackEnd;
-  private constructor(context: BaseAudioContext, node: StretchNode, duration: number, ended: () => void) {
+  private outputDelaySeconds: number;
+  private scheduledStart = 0;
+  private constructor(context: BaseAudioContext, node: StretchNode, duration: number, ended: () => void, outputDelaySeconds: number) {
     this.context=context; this.node=node; this.duration=duration;
     this.clock = new SongClock(() => context.currentTime);
     this.completion = new PlaybackEnd(context, ended);
+    this.outputDelaySeconds = outputDelaySeconds;
   }
-  static async create(context: BaseAudioContext, buffers: AudioBuffer[], destinations: AudioNode[], fail: (message: string) => void, ended = () => {}) {
+  static async create(context: BaseAudioContext, buffers: AudioBuffer[], destinations: AudioNode[], fail: (message: string) => void, ended = () => {}, outputDelaySeconds = 0) {
     if (!buffers.length || buffers.length !== destinations.length) throw new Error('Incomplete stem buffers.');
     const length = buffers[0].length;
     if (buffers.some(b => b.sampleRate !== context.sampleRate || b.length !== length)) throw new Error('Stem lengths or sample rates do not match.');
     const node = await SignalsmithStretch(context, { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [buffers.length * 2], channelInterpretation: 'discrete' });
-    const engine = new TempoEngine(context, node, buffers[0].duration, ended);
+    const engine = new TempoEngine(context, node, buffers[0].duration, ended, outputDelaySeconds);
     node.onprocessorerror = () => { engine.failed = true; engine.pause(); fail('Audio processing stopped. Reload the player to retry.'); };
     // One multichannel processor shares its time map across every stereo stem.
     const splitter = context.createChannelSplitter(buffers.length * 2);
@@ -49,6 +52,7 @@ export class TempoEngine {
     return engine;
   }
   get position() { return Math.min(this.duration, this.clock.position); }
+  positionAt(contextTime: number) { return Math.min(this.duration, this.clock.positionAt(contextTime)); }
   private get neutral() { return this.tempo === 1 && this.pitch === 0; }
   private stopNative() { this.sources.forEach(source => { source.stop(); source.disconnect(); }); this.sources=[]; }
   private startNative(position: number, when: number) {
@@ -60,8 +64,9 @@ export class TempoEngine {
     if (this.disposed || this.failed) throw new Error('Audio processor is unavailable. Reload the player.');
     this.stopNative();
     const when = this.context.currentTime + .02;
+    this.scheduledStart = when;
     this.clock.start(position, this.tempo, when); this.running=true;
-    this.completion.schedule(this.clock.endTime(this.duration));
+    this.completion.schedule(this.clock.endTime(this.duration) + this.outputDelaySeconds);
     if (this.neutral) { this.node.disconnect(); this.connected=false; this.startNative(position,when); return; }
     this.connectProcessor(); this.gate(0,this.context.currentTime);this.gate(1,when);
     await this.node.schedule({ output: when, input: position, rate: this.tempo, semitones: this.pitch, active: true });
@@ -72,15 +77,17 @@ export class TempoEngine {
     const wasNeutral=this.neutral, position=this.clock.position;
     this.clock.changeRate(tempo); this.tempo=tempo; this.pitch=pitch;
     if (!this.running) return;
-    this.completion.schedule(this.clock.endTime(this.duration));
+    // A control change during the 20 ms lead-in must retain the scheduled start.
+    const when = Math.max(this.context.currentTime, this.scheduledStart);
+    this.completion.schedule(this.clock.endTime(this.duration) + this.outputDelaySeconds);
     if (this.neutral) {
       const update = this.node.schedule({ active:false }); this.gate(0,this.context.currentTime);
-      this.node.disconnect();this.connected=false;this.startNative(position,this.context.currentTime);
+      this.node.disconnect();this.connected=false;this.startNative(position,when);
       return update;
     } else {
       if (wasNeutral) this.stopNative();
-      this.connectProcessor();this.gate(1,this.context.currentTime);
-      return this.node.schedule({ output:this.context.currentTime,input:position,rate:tempo,semitones:pitch,active:true });
+      this.connectProcessor();this.gate(1,when);
+      return this.node.schedule({ output:when,input:position,rate:tempo,semitones:pitch,active:true });
     }
   }
   pause() {

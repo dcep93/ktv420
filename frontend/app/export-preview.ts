@@ -1,3 +1,4 @@
+import { createMasterAudio, masterLatencyFrames } from './src/features/stems/player/masterAudio';
 import { renderSection, type RenderSource } from './src/features/local/export/render';
 import { exportReplay } from './src/features/local/export/exportReplay';
 import { compileExport, EXPORT_RATE as rate } from './src/features/local/export/timeline';
@@ -46,16 +47,18 @@ document.querySelector('#correctness')!.addEventListener('click',async()=>{
   for(const effect of audioEffectOptions) {
    const snapshot=structuredClone(data.snapshot);snapshot.stems[0].effect=effect.value;snapshot.stems[0].value=.72;snapshot.stems[0].volume=.9;
    const output=await renderSection(compileExport(mix(snapshot,1.5)).sections[0],data.source,signal,()=>{});
-   const reference=new OfflineAudioContext(2,Math.round(1.5*rate),rate);
+   const delay=masterLatencyFrames(rate);
+   const reference=new OfflineAudioContext(2,Math.round(1.5*rate)+delay,rate);
+   const master=createMasterAudio(reference);master.output.connect(reference.destination);
    await prepareAudioEffects(reference);
    const input=reference.createGain(),nodes=createEffectNodes(reference);
-   input.gain.value=getLogarithmicVolumeGain(.9);connectStemEffects(input,nodes,reference.destination);
+   input.gain.value=getLogarithmicVolumeGain(.9);connectStemEffects(input,nodes,master.input);
    applyAudioEffect({context:reference,nodes,effect:effect.value,value:.72});
    syncAudioEffects(nodes,0,1,.02);
    const native=reference.createBufferSource();native.buffer=await reference.decodeAudioData(await data.source.record.files[0].blob.arrayBuffer());native.connect(input);native.start(.02);
    const baseline=await reference.startRendering();let error=0,maxAt=0;
-   for(let c=0;c<2;c++){const a=output.getChannelData(c),b=baseline.getChannelData(c);for(let i=0;i<a.length;i++)if(Math.abs(a[i]-b[i])>error){error=Math.abs(a[i]-b[i]);maxAt=i/rate;}}
-   disposeStemEffects(input,nodes);assert(error<1e-6,`${effect.label}: export matches the live effect graph (${error.toExponential(1)} at ${maxAt}, rms ${rms(output.getChannelData(0),.2,1.2)}/${rms(baseline.getChannelData(0),.2,1.2)})`);
+   for(let c=0;c<2;c++){const a=output.getChannelData(c),b=baseline.getChannelData(c).subarray(delay);for(let i=0;i<a.length;i++)if(Math.abs(a[i]-b[i])>error){error=Math.abs(a[i]-b[i]);maxAt=i/rate;}}
+   disposeStemEffects(input,nodes);master.dispose();assert(error<1e-6,`${effect.label}: export matches the live effect graph (${error.toExponential(1)} at ${maxAt}, rms ${rms(output.getChannelData(0),.2,1.2)}/${rms(baseline.getChannelData(0).subarray(delay),.2,1.2)})`);
   }
   const pitched=structuredClone(data.snapshot);pitched.tempo=1.5;pitched.pitch=12;
   const output=await renderSection(compileExport(mix(pitched,4)).sections[0],data.source,signal,()=>{});

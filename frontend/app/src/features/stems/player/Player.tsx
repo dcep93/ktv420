@@ -11,6 +11,7 @@ import { isCombinedVisualizer, drawCombinedVisualizer, resetCombinedVisualizer }
 import { getLogarithmicVolumeGain } from './mixerGain';
 import { connectStemEffects } from './stemGraph';
 import { TempoEngine } from './tempoEngine';
+import { createMasterAudio, type MasterAudio } from './masterAudio';
 import { validTempo, validPitch } from './tempo';
 import type { MixerSnapshot } from '../../local/recording';
 import {
@@ -102,6 +103,7 @@ export default function Player({
   const [transportError, setTransportError] = useState('');
   const playbackEpoch = useRef(0);
   const masterGain = useRef<GainNode | null>(null);
+  const masterAudio = useRef<MasterAudio | null>(null);
   const engine = useRef<TempoEngine | null>(null);
   const playbackEnded = useRef<() => void>(() => {});
   const [engineReady, setEngineReady] = useState(false);
@@ -176,6 +178,7 @@ export default function Player({
   const gainNodesRef = useRef<Record<string, GainNode>>({});
   const effectNodesRef = useRef<Record<string, EffectNodes>>({});
   const analyserNodesRef = useRef<Record<string, AnalyserNode>>({});
+  const analysisBranchesRef = useRef<Record<string, { delay: DelayNode; sink: GainNode }>>({});
   const combinedCanvas = useRef<HTMLCanvasElement | null>(null);
   const visualRevision = useRef(0);
   useEffect(() => { visualRevision.current++; }, [volumes, trackMuteStates, trackDeafenStates, effectValues, effectTypes, effectSettings]);
@@ -423,6 +426,8 @@ export default function Player({
       masterGain.current = audioCtxRef.current.createGain();
       masterGain.current.gain.value = 0;
       masterGain.current.connect(audioCtxRef.current.destination);
+      masterAudio.current = createMasterAudio(audioCtxRef.current);
+      masterAudio.current.output.connect(masterGain.current);
     }
 
     return audioCtxRef.current;
@@ -481,6 +486,22 @@ export default function Player({
   const currentPlaybackTime = useCallback(() => {
     return isPlaying && engine.current ? engine.current.position : startOffsetRef.current;
   }, [isPlaying]);
+
+  const currentPresentationTime = useCallback(() => {
+    const context = audioCtxRef.current;
+    return isPlaying && engine.current && context
+      ? engine.current.positionAt(context.currentTime - (masterAudio.current?.latencySeconds ?? 0))
+      : startOffsetRef.current;
+  }, [isPlaying]);
+
+  const disposeStemNodes = useCallback(() => {
+    Object.values(gainNodesRef.current).forEach(node => node.disconnect());
+    Object.values(effectNodesRef.current).forEach(disposeAudioEffects);
+    Object.values(analyserNodesRef.current).forEach(node => node.disconnect());
+    Object.values(analysisBranchesRef.current).forEach(({ delay, sink }) => { delay.disconnect(); sink.disconnect(); });
+    gainNodesRef.current = {}; effectNodesRef.current = {};
+    analyserNodesRef.current = {}; analysisBranchesRef.current = {};
+  }, []);
 
   const createRecordingEvent = useCallback(
     (
@@ -582,11 +603,15 @@ export default function Player({
 
       stopAllSources();
       engine.current?.dispose(); engine.current = null;
+      disposeStemNodes();
+      masterAudio.current?.dispose(); masterAudio.current = null;
+      masterGain.current?.disconnect(); masterGain.current = null;
       audioCtxRef.current?.close().catch((error) => {
         console.error("Failed to close audio context", error);
       });
+      audioCtxRef.current = null;
     };
-  }, [flushDebouncedRecordingEvents, stopAllSources]);
+  }, [flushDebouncedRecordingEvents, stopAllSources, disposeStemNodes]);
 
   useEffect(() => {
     flushDebouncedRecordingEvents();
@@ -642,9 +667,7 @@ export default function Player({
     stopAllSources();
     engine.current?.dispose(); engine.current = null;
     buffersRef.current = {};
-    gainNodesRef.current = {};
-    effectNodesRef.current = {};
-    analyserNodesRef.current = {};
+    disposeStemNodes();
 
     const tracksSnapshot = tracks;
 
@@ -653,7 +676,7 @@ export default function Player({
         URL.revokeObjectURL(track.url);
       });
     };
-  }, [flushDebouncedRecordingEvents, stopAllSources, tracks]);
+  }, [flushDebouncedRecordingEvents, stopAllSources, disposeStemNodes, tracks]);
 
   useEffect(() => {
     const activeIds = new Set(tracks.map((track) => track.id));
@@ -676,6 +699,12 @@ export default function Player({
       if (!activeIds.has(id)) {
         analyser.disconnect();
         delete analyserNodesRef.current[id];
+      }
+    });
+    Object.entries(analysisBranchesRef.current).forEach(([id, { delay, sink }]) => {
+      if (!activeIds.has(id)) {
+        delay.disconnect(); sink.disconnect();
+        delete analysisBranchesRef.current[id];
       }
     });
 
@@ -719,12 +748,17 @@ export default function Player({
 
         analyser.fftSize = 2048;
 
-        connectStemEffects(gain, effectNodes, analyser);
-        analyser.connect(masterGain.current!);
+        connectStemEffects(gain, effectNodes, masterAudio.current!.input);
+        const delay = context.createDelay(.1), sink = context.createGain();
+        delay.delayTime.value = masterAudio.current!.latencySeconds;
+        sink.gain.value = 0;
+        effectNodes.node.connect(delay); delay.connect(analyser);
+        analyser.connect(sink); sink.connect(context.destination);
 
         gainNodesRef.current[track.id] = gain;
         effectNodesRef.current[track.id] = effectNodes;
         analyserNodesRef.current[track.id] = analyser;
+        analysisBranchesRef.current[track.id] = { delay, sink };
         gain.gain.setValueAtTime(
           getEffectiveVolumeFromRefs(track.id, volumesRef.current[track.id]),
           context.currentTime
@@ -822,7 +856,7 @@ export default function Player({
       try {
         const next = await TempoEngine.create(context, tracks.map(t => buffersRef.current[t.id]), tracks.map(t => gainNodesRef.current[t.id]), message => {
           setTransportError(message); setIsPlaying(false); playbackErrorRef.current?.(message);
-        }, () => playbackEnded.current());
+        }, () => playbackEnded.current(), masterAudio.current!.latencySeconds);
         if (isCancelled) { next.dispose(); return; }
         engine.current = next; next.set(tempoRef.current, pitchRef.current); setEngineReady(true);
       } catch (reason) { if (!isCancelled) setTransportError(`Could not prepare tempo processing: ${String(reason)}`); }
@@ -902,7 +936,7 @@ export default function Player({
     const draw = (now: number) => {
       drawAnimationFrameRef.current = requestAnimationFrame(draw);
       if (document.hidden) return;
-      const playbackTime = currentPlaybackTime();
+      const playbackTime = currentPresentationTime();
       if (visualRevision.current !== revision || playbackTime !== lastPosition) {
         revision = visualRevision.current; lastPosition = playbackTime; settleUntil = now + 1500;
       }
@@ -939,7 +973,7 @@ export default function Player({
       if (drawAnimationFrameRef.current !== null) cancelAnimationFrame(drawAnimationFrameRef.current);
       observer.disconnect(); document.removeEventListener("visibilitychange", visibilityChanged); taps.forEach(tap => tap.dispose());
     };
-  }, [amplitudeEnvelopes, amplitudeMaximums, currentPlaybackTime, duration, getEffectiveVolumeFromRefs, isPlaying, tracks, visualizerType]);
+  }, [amplitudeEnvelopes, amplitudeMaximums, currentPresentationTime, duration, getEffectiveVolumeFromRefs, isPlaying, tracks, visualizerType]);
 
   useLayoutEffect(() => {
     playbackEnded.current = () => {
@@ -957,7 +991,7 @@ export default function Player({
 
   useEffect(() => {
     const updateTime = () => {
-      const playbackTime = currentPlaybackTime();
+      const playbackTime = currentPresentationTime();
       if (isDraggingSeekRef.current) {
         const pendingTime = pendingSeekRef.current;
 
@@ -979,7 +1013,7 @@ export default function Player({
       }
     };
   }, [
-    currentPlaybackTime,
+    currentPresentationTime,
     duration,
   ]);
 

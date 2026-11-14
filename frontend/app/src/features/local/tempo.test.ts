@@ -2,6 +2,30 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { SongClock, validPitch, validTempo } from '../stems/player/tempo';
 import { parseRecording, type PerformanceRecording } from './recording';
+test('presentation clock queries integrate past rates through rapid tempo changes', () => {
+ let now=0;const clock=new SongClock(()=>now);
+ clock.start(10,1,.02);
+ assert.equal(clock.positionAt(-.006),10);
+ now=1;clock.changeRate(1.5);
+ now=1.003;clock.changeRate(.5);
+ assert.ok(Math.abs(clock.positionAt(.999)-10.979)<1e-12);
+ assert.ok(Math.abs(clock.positionAt(1.002)-10.983)<1e-12);
+ now=1.01;assert.ok(Math.abs(clock.positionAt(now-.006)-10.985)<1e-12);
+ assert.ok(Math.abs(clock.position-10.988)<1e-12);
+});
+test('presentation history resets on seeks, clamps scheduled starts, and records pauses', () => {
+ let now=0;const clock=new SongClock(()=>now);
+ clock.start(10,1,.02);now=.01;clock.changeRate(1.5);
+ assert.equal(clock.positionAt(.015),10);
+ assert.ok(Math.abs(clock.positionAt(.03)-10.015)<1e-12);
+ now=1;clock.pause();
+ assert.ok(clock.positionAt(.999)<clock.position);
+ assert.equal(clock.positionAt(10),clock.position);
+ now=2;clock.start(3,.5,2.02);
+ assert.equal(clock.positionAt(1.999),3);
+ assert.equal(clock.positionAt(2.019),3);
+ assert.ok(Math.abs(clock.positionAt(2.03)-3.005)<1e-12);
+});
 test('song time integrates tempo changes, scheduled starts, seeks and pauses without changing elapsed performance time',()=>{
  let now=0;const clock=new SongClock(()=>now);
  clock.start(10,1,.02);assert.equal(clock.position,10);
