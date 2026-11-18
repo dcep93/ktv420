@@ -2,7 +2,7 @@ import { isSupportedRoute } from './dom.js';
 
 export function createOverlay({ onClose }) {
   const origin = chrome.runtime.getURL('').replace(/\/$/, '');
-  let frame, ready = false, open = false, route = '', lastUrl = '', previousOverflow = '';
+  let frame, frameUrl = '', ready = false, open = false, route = '', lastUrl = '', previousOverflow = '';
   let originalTitle = '', overlayTitle = 'ktv420', favicons = [];
   // Spotify updates its title on track changes. Keep the hosted title while open.
   const applyTitle = () => { if (open && document.title !== overlayTitle) document.title = overlayTitle; };
@@ -23,7 +23,7 @@ export function createOverlay({ onClose }) {
   }
   function show(updateUrl = true) {
     if (!document.body || !isSupportedRoute()) return;
-    if (!frame || route !== location.pathname) {
+    if (!frame || !frame.isConnected || route !== location.pathname) {
       frame?.remove(); ready = false; route = location.pathname;
       frame = document.createElement('iframe');
       frame.id = 'ktv420-spotify-overlay';
@@ -32,7 +32,7 @@ export function createOverlay({ onClose }) {
       const url = new URL(chrome.runtime.getURL('src/overlay/index.html'));
       url.searchParams.set('id', route.slice(1).replace(/\/$/, '').replace('/', '.'));
       if (index() !== null) url.searchParams.set('ktv420', String(index()));
-      frame.src = url.href;
+      frame.src = frameUrl = url.href;
       document.body.append(frame);
     }
     if (!open) {
@@ -64,6 +64,12 @@ export function createOverlay({ onClose }) {
     if (open && event.key === 'Escape') { event.preventDefault(); hide(); }
   });
   const sync = () => {
+    // Only repair our own frame. A srcdoc assignment replaces it with an empty
+    // document even when src still points to the correct application.
+    if (open && frame && (frame.hasAttribute?.('srcdoc') || frame.src !== frameUrl)) {
+      ready = false; frame.removeAttribute('srcdoc'); frame.src = frameUrl;
+    }
+    if (open && frame && !frame.isConnected) show(false);
     if (location.href === lastUrl || !document.body) return;
     lastUrl = location.href;
     if (open && location.pathname !== route) hide(false);
@@ -73,6 +79,7 @@ export function createOverlay({ onClose }) {
   window.addEventListener('popstate', sync);
   setInterval(sync, 300);
   return { show, hide,
+    publishStatus(status) { if (ready && frame?.isConnected) frame.contentWindow.postMessage({ source: 'ktv420-spotify-host', type: 'status', status }, origin); },
     setView(trackIndex, replace) { write(true, trackIndex, replace); },
     setTitle(title) { if (open) { overlayTitle = title; applyTitle(); } },
   };

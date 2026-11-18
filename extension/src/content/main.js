@@ -130,6 +130,7 @@ async function capture(request) {
       monitoring = false;
       await bridge.command('listening-enable', { enabled: false }).catch(() => {});
       if (current.state === 'running') current.state = 'complete';
+      overlay.publishStatus(status());
     }
   })();
   return status();
@@ -178,6 +179,10 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
         return discover();
       case 'status':
         return status();
+      case 'diagnostics':
+        return { extensionVersion: chrome.runtime.getManifest().version, status: status(),
+          captures: JSON.parse(sessionStorage.getItem('ktv420:capture-diagnostics') || '[]'),
+          lastFailure: JSON.parse(sessionStorage.getItem('ktv420:last-capture-failure') || 'null') };
       case 'capture':
         return capture(message);
       case 'cancel':
@@ -200,6 +205,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
 });
 runner.addEventListener('captureprogress', (event) => {
   progress = event.detail;
+  overlay.publishStatus(status());
 });
 // The hosted capture scheduler owns the whole-playlist title via presentation.
 

@@ -9,13 +9,14 @@ export type QueuedCapture = {
   nextChunk: number;
   createdAt: number;
   complete: boolean;
+  streaming?: boolean;
   processingError?: string;
   retryAt?: number;
   attempts?: number;
   recoveries?: number;
   retryAfterReload?: { owner: string; documentId: string };
 };
-export function validateCapture(metadata: Record<string, unknown>, bytes: number) {
+export function validateCapture(metadata: Record<string, unknown>, bytes: number, requireEnd = true) {
   if (
     !metadata ||
     typeof metadata.trackId !== 'string' ||
@@ -31,7 +32,7 @@ export function validateCapture(metadata: Record<string, unknown>, bytes: number
     bytes % (Number(metadata.audioChannelCount) * 4) !== 0 ||
     metadata.audioByteLength !== bytes ||
     metadata.captureStartVerified !== true ||
-    metadata.captureEndVerified !== true
+    (requireEnd && metadata.captureEndVerified !== true)
   )
     throw new Error('Invalid or unverified capture.');
 }

@@ -10,12 +10,15 @@ test('packaged host waits for the real child and rejects forged cross-window req
   const childMessages = [], parentMessages = [], requests = [], listeners = {};
   const child = { postMessage: (...args) => childMessages.push(args) };
   const parent = { postMessage: (...args) => parentMessages.push(args) };
-  const frame = { contentWindow: child };
+  let tick;
+  const frame = { contentWindow: child, attributes: new Set(), hasAttribute(name) { return this.attributes.has(name); }, removeAttribute(name) { this.attributes.delete(name); } };
+  const recovery = {}, retry = {};
   const chrome = { runtime: { sendMessage: (r, cb) => { requests.push(r); cb({ ok: true, result: 42 }); } } };
   vm.runInNewContext(readFileSync(new URL('../src/overlay/host.js', import.meta.url), 'utf8'), {
     URL, URLSearchParams, chrome, parent,
     location: { search: '?id=album.19cvoEE5d3pMkxLFL5TsAG&ktv420=2' },
-    document: { querySelector: () => frame },
+    document: { querySelector: selector => selector === 'iframe' ? frame : selector === '#recovery' ? recovery : retry },
+    setInterval: fn => { tick = fn; },
     window: { addEventListener: (name, fn) => { listeners[name] = fn; } },
   });
   const url = new URL(frame.src);
@@ -37,6 +40,14 @@ test('packaged host waits for the real child and rejects forged cross-window req
   assert.equal(childMessages.at(-1)[0].result, 42);
   send(parent, spotify, { source: 'ktv420-spotify-host', type: 'navigation', open: false, trackIndex: null });
   assert.equal(childMessages.at(-1)[0].open, false);
+  send(parent, spotify, { source: 'ktv420-spotify-host', type: 'status', status: { request: { state: 'complete' } } });
+  assert.equal(childMessages.at(-1)[0].status.request.state, 'complete');
+  const expected = frame.src;
+  frame.attributes.add('srcdoc'); tick();
+  assert.equal(frame.hasAttribute('srcdoc'), false);
+  assert.equal(frame.src, expected);
+  frame.src = 'about:blank'; tick(); assert.equal(frame.src, expected);
+  assert.equal(requests.length, 1, 'repair never cancels or restarts capture');
 });
 test('overlay restores Spotify on close, reuses its frame and synchronizes one-based track links', () => {
   let location = new URL(`${spotify}/album/19cvoEE5d3pMkxLFL5TsAG?ktv420=2`);
@@ -47,7 +58,7 @@ test('overlay restores Spotify on close, reuses its frame and synchronizes one-b
     head: {}, title: 'Spotify album', documentElement: { style: { overflow: 'auto' } },
     body: { append(frame) { frame.isConnected = true; frames.push(frame); } },
     querySelectorAll: () => [favicon],
-    createElement: () => ({ style: {}, contentWindow: { postMessage: (...args) => messages.push(args) }, focus() {}, remove() { this.isConnected = false; } }),
+    createElement: () => ({ style: {}, attributes: new Set(), hasAttribute(name) { return this.attributes.has(name); }, removeAttribute(name) { this.attributes.delete(name); }, contentWindow: { postMessage: (...args) => messages.push(args) }, focus() {}, remove() { this.isConnected = false; } }),
   };
   const context = {
     URL, URLSearchParams, document,
@@ -97,4 +108,12 @@ test('overlay restores Spotify on close, reuses its frame and synchronizes one-b
   assert.equal(frames.length, 1);
   assert.equal(frames[0].hidden, false);
   assert.equal(location.searchParams.get('ktv420'), '');
+  const expected = frames[0].src;
+  frames[0].attributes.add('srcdoc'); tick();
+  assert.equal(frames[0].hasAttribute('srcdoc'), false);
+  assert.equal(frames[0].src, expected);
+  assert.equal(closed, 1, 'blank-frame recovery must not stop the recording');
+  frames[0].remove(); tick();
+  assert.equal(frames.length, 2);
+  assert.equal(frames[1].isConnected, true);
 });

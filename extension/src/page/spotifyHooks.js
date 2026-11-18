@@ -252,8 +252,10 @@
           result = controller.markAcceptedStart();
         } else if (command === "capture-state") {
           result = controller.state();
+        } else if (command === "capture-read") {
+          result = controller.read(payload || {});
         } else if (command === "capture-finish") {
-          result = await controller.finish();
+          result = await controller.finish(payload || {});
         } else if (command === "capture-abort") {
           result = controller.abort();
         } else if (command === "playlist-tracks") {
@@ -431,9 +433,20 @@
           invalid: currentCapture.invalid, invalidReason: currentCapture.invalidReason || '',
           invalidCode: currentCapture.invalidCode || '' };
       },
-      async finish() {
+      read({ offset = 0 } = {}) {
         assertCapture(currentCapture);
-        const result = await currentCapture.finish();
+        if (currentCapture.invalid) throw new Error(currentCapture.invalidReason);
+        // Retain a tail for codec padding verification. Only full transport chunks leave early.
+        const reserve = Math.ceil(currentCapture.sampleRate * .1) * currentCapture.channelCount * 4;
+        const duration = Math.min(...[currentCapture.duration, currentCapture.element.duration].filter(value => Number.isFinite(value) && value > 0));
+        const limit = Math.min(currentCapture.byteLength, Math.floor(duration * currentCapture.sampleRate) * currentCapture.channelCount * 4);
+        const available = Math.floor(Math.max(0, limit - reserve) / 262144) * 262144;
+        const end = Math.min(available, offset + 262144);
+        return { offset, bytesBuffer: currentCapture.copyBytes(offset, Math.max(offset, end)).buffer };
+      },
+      async finish({ offset = 0 } = {}) {
+        assertCapture(currentCapture);
+        const result = await currentCapture.finish(offset);
         currentCapture = null;
         return result;
       },
@@ -569,7 +582,22 @@
       this.element.removeEventListener('waiting', this.onWaiting);
     }
 
-    async finish() {
+    copyBytes(start, end) {
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || end > this.byteLength) {
+        throw new Error('Invalid capture byte range.');
+      }
+      const bytes = new Uint8Array(end - start);
+      let base = 0;
+      for (const chunk of this.chunks) {
+        const from = Math.max(start, base), to = Math.min(end, base + chunk.length);
+        if (to > from) bytes.set(chunk.subarray(from - base, to - base), from - start);
+        base += chunk.length;
+        if (base >= end) break;
+      }
+      return bytes;
+    }
+
+    async finish(deliveredBytes = 0) {
       this.pauseAt();
       await this.graph.flush();
       // A short container duration mismatch is safe only if every audio-clock
@@ -610,19 +638,11 @@
           } else this.byteLength = tailEndFrame * this.channelCount * 4;
         }
       }
-      const bytes = new Uint8Array(this.byteLength);
-      let offset = 0;
-
-      for (const chunk of this.chunks) {
-        const part = chunk.subarray(0, bytes.length - offset);
-        bytes.set(part, offset);
-        offset += part.byteLength;
-        if (offset === bytes.length) break;
-      }
+      const bytes = this.copyBytes(deliveredBytes, this.byteLength);
 
       return {
         bytesBuffer: bytes.buffer,
-        byteLength: bytes.byteLength,
+        byteLength: this.byteLength,
         sampleRate: this.sampleRate,
         channelCount: this.channelCount,
         startMediaTime: this.startMediaTime,

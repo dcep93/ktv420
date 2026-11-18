@@ -3,6 +3,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   beginCapture,
+  beginStreamingCapture,
+  finishStreamingCapture,
   appendCapture,
   finishCapture,
   pendingCaptures,
@@ -27,6 +29,22 @@ const metadata = {
   captureEndVerified: true,
 };
 const bytes = btoa(String.fromCharCode(...new Uint8Array(16)));
+test('streaming remains invisible until verified exact final commit, with sender and format bound', async () => {
+  const id = await beginStreamingCapture(503, metadata, 'document');
+  await appendCapture(503, id, 0, bytes);
+  assert.ok(!(await pendingCaptures()).some(c => c.id === id));
+  await assert.rejects(readChunk(id, 0));
+  await assert.rejects(finishCapture(503, id));
+  await assert.rejects(finishStreamingCapture(504, id, metadata, 16));
+  assert.throws(() => finishStreamingCapture(503, id, { ...metadata, captureEndVerified: false }, 16));
+  await assert.rejects(finishStreamingCapture(503, id, { ...metadata, audioSampleRate: 48000 }, 16));
+  await assert.rejects(finishStreamingCapture(503, id, { ...metadata, audioByteLength: 24 }, 24));
+  await finishStreamingCapture(503, id, metadata, 16);
+  const saved = (await pendingCaptures()).find(c => c.id === id)!;
+  assert.equal(saved.expectedBytes, 16); assert.equal(saved.metadata.captureEndVerified, true);
+  assert.equal(await readChunk(id, 0), bytes);
+  await acknowledgeCapture(id);
+});
 test('capture chunk decoding preserves every byte value and padded chunk boundaries', () => {
   for (const length of [1, 2, 3, 256, CHUNK_BYTES - 2, CHUNK_BYTES - 1, CHUNK_BYTES]) {
     const expected = Buffer.alloc(length);

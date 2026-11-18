@@ -28,6 +28,7 @@ export function parseRequest(value: unknown) {
       'open-player',
       'discover',
       'status',
+      'diagnostics',
       'capture',
       'cancel',
       'volume',

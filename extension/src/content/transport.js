@@ -53,7 +53,7 @@ export function setSpotifyVolume(volume) {
   if (!Number.isFinite(volume) || volume < 0 || volume > 1) throw new Error('Invalid listening volume.');
   setRange(slider(true), volume);
 }
-export async function commandTransport(command) {
+export async function commandTransport(command, { verifyPlayback = true } = {}) {
   const before = readTransportDom();
   if (!before.available) throw new Error('Spotify playback controls are unavailable.');
   if (command.action === 'volume') {
@@ -62,7 +62,7 @@ export async function commandTransport(command) {
   } else if (command.action === 'play' || command.action === 'pause') {
     const playing = command.action === 'play';
     if (before.playing !== playing) control('playpause').click();
-    await verify(() => readTransportDom().playing === playing, 'Spotify did not change playback state.');
+    if (verifyPlayback) await verify(() => readTransportDom().playing === playing, 'Spotify did not change playback state.');
   } else if (command.action === 'next' || command.action === 'previous') {
     const button = control(command.action === 'next' ? 'skip-forward' : 'skip-back');
     if (!button || button.disabled) throw new Error('Spotify track navigation is unavailable.');

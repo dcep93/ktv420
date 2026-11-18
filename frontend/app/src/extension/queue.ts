@@ -55,8 +55,9 @@ export async function beginCapture(
   metadata: Record<string, unknown>,
   bytes: number,
   documentId?: string,
+  streaming = false,
 ) {
-  validateCapture(metadata, bytes);
+  validateCapture(metadata, bytes, !streaming);
   const id = crypto.randomUUID();
   await queueTransaction(['captures', 'chunks'], 'readwrite', (tx) => {
     const cursor = tx.objectStore('captures').openCursor();
@@ -88,6 +89,7 @@ export async function beginCapture(
       nextChunk: 0,
       createdAt: Date.now(),
       complete: false,
+      ...(streaming ? { streaming: true, metadata: { ...metadata, captureEndVerified: false } } : {}),
     } satisfies QueuedCapture);
   });
   return id;
@@ -121,13 +123,31 @@ export async function appendCapture(tabId: number, id: string, index: number, ba
     };
   });
 }
+export function beginStreamingCapture(tabId: number, metadata: Record<string, unknown>, documentId?: string) {
+  // Provisional staging is invisible to workers; only finishStreamingCapture can publish it.
+  return beginCapture(tabId, { ...metadata, audioByteLength: 1024 ** 3, captureEndVerified: false }, 1024 ** 3, documentId, true);
+}
+export function finishStreamingCapture(tabId: number, id: string, metadata: Record<string, unknown>, bytes: number) {
+  validateCapture(metadata, bytes);
+  return queueTransaction(['captures'], 'readwrite', tx => {
+    const store = tx.objectStore('captures'), r = store.get(id);
+    r.onsuccess = () => {
+      const c = r.result as QueuedCapture | undefined;
+      if (!c?.streaming || c.complete || c.tabId !== tabId || c.receivedBytes !== bytes ||
+          ['trackId', 'audioSampleRate', 'audioChannelCount', 'audioSampleFormat'].some(key => c.metadata[key] !== metadata[key])) {
+        tx.abort(); return;
+      }
+      store.put({ ...c, metadata, expectedBytes: bytes, streaming: false, complete: true });
+    };
+  }, { durability: 'strict' });
+}
 export function finishCapture(tabId: number, id: string) {
   return queueTransaction(['captures'], 'readwrite', (tx) => {
     const store = tx.objectStore('captures'),
       r = store.get(id);
     r.onsuccess = () => {
       const c = r.result as QueuedCapture | undefined;
-      if (!c || c.tabId !== tabId || c.receivedBytes !== c.expectedBytes) {
+      if (!c || c.streaming || c.tabId !== tabId || c.receivedBytes !== c.expectedBytes) {
         tx.abort();
         return;
       }

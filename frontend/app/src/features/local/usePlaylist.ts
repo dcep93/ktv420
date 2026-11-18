@@ -6,16 +6,17 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { savedCollection, type TrackRow } from './collections';
 import { playlistPath, playlistIndex, playlistViewUrl } from './playlistPage';
 import { spotifyRequest } from './spotify/client';
-import { embeddedSpotify, overlayReady } from './spotify/overlay';
+import { embeddedSpotify, overlayReady, overlayReconnect } from './spotify/overlay';
 import { loadPlaylistCollection } from './spotify/collectionDelivery';
 import type { LibrarySummary } from '../../shared/librarySummary';
 import { loadPerformance } from './performanceFiles';
 import type { PerformanceRecording } from './recording';
 import type { CaptureProgress } from './captureProgress';
 import { discoverPlaylist, type PlaylistSnapshot } from './spotify/discover';
+import { captureStatusInbox } from './spotify/captureStatus';
 export type SpotifyTrack = TrackRow;
 type Status = {
-  request: { id: string; state: string; error: string } | null;
+  request: { id: string; trackId?: string; state: string; error: string } | null;
   active: boolean;
   progress: CaptureProgress | null;
   volume: number | null;
@@ -23,7 +24,6 @@ type Status = {
 };
 const params = new URLSearchParams(location.search),
   path = playlistPath(params.get('id')) || '';
-const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 export function usePlaylist(onClose?: () => void) {
   const [tracks, setTracks] = useState<TrackRow[]>([]),
     [complete, setComplete] = useState(false),
@@ -46,6 +46,7 @@ export function usePlaylist(onClose?: () => void) {
     closeRef = useRef(onClose);
   closeRef.current = onClose;
   const [savingTrackIds, setSavingTrackIds] = useState<string[]>([]);
+  const [discoveryAttempt, setDiscoveryAttempt] = useState(0);
   const volumeRevision = useRef(0), volumePending = useRef(0);
   const active = status?.active === true;
   useEffect(() => {
@@ -104,7 +105,7 @@ export function usePlaylist(onClose?: () => void) {
       disposed = true; clearInterval(rowsTimer);
       window.removeEventListener('popstate', pop);
     };
-  }, []);
+  }, [discoveryAttempt]);
   useEffect(() => {
     let disposed = false,
       busy = false;
@@ -182,10 +183,14 @@ export function usePlaylist(onClose?: () => void) {
     if (!embeddedSpotify)
       throw new Error('Open this playlist from the Spotify extension to capture.');
     cancelled.current = false;
-    const requestId = crypto.randomUUID();
+    const inbox = captureStatusInbox<Status>(window);
+    try {
+    const existing = await spotifyRequest<Status>('status');
+    const requestId = existing.request?.state === 'running' && existing.request.trackId === trackId
+      ? existing.request.id : crypto.randomUUID();
     await spotifyRequest('capture', { trackId, requestId, path });
     while (!cancelled.current) {
-      const next = await spotifyRequest<Status>('status');
+      const next = inbox.take(requestId) || await spotifyRequest<Status>('status');
       setStatus(previous => ({ ...next, volume: previous?.volume ?? next.volume }));
       if (next.request?.id !== requestId) throw new Error('Spotify capture was replaced.');
       if (next.request.state === 'error') throw new Error(next.request.error);
@@ -193,9 +198,10 @@ export function usePlaylist(onClose?: () => void) {
         setSavingTrackIds((previous) => [...new Set([...previous, trackId])]);
         return;
       }
-      await delay(1000);
+      await inbox.wait();
     }
     throw new Error('Capture stopped.');
+    } finally { inbox.dispose(); }
   }, []);
   const transport = useCallback((command: { action: 'volume'; volume: number }) => {
     if (command.action !== 'volume' || !embeddedSpotify) return;
@@ -225,6 +231,13 @@ export function usePlaylist(onClose?: () => void) {
     summaryReady,
     openPlayer: (trackIndex: number | null) => spotifyRequest('open-player', { path, trackIndex }),
     tracksComplete: complete,
+    reconnect: () => { setLoadError(''); setError(''); if (embeddedSpotify) overlayReconnect(); else setDiscoveryAttempt(value => value + 1); },
+    downloadDiagnostics: async () => {
+      const data = await spotifyRequest('diagnostics');
+      const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+      const link = document.createElement('a'); link.href = url; link.download = 'ktv420-capture-diagnostics.json'; link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    },
     // Status polls can recover independently; they must not erase a failed load.
     error: loadError || error,
     notice: '',

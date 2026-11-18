@@ -74,7 +74,7 @@ export default function CapturePage() {
   const message = error || spotify.error || (!spotify.tracksComplete ? 'Loading playlist…' : startup);
   return <main className="iframe-page iframe-page--overlay" aria-label="ktv420 capture playlist">
     <header className="iframe-overlay-header">
-      <div className="iframe-status-slot">{message && <p className="iframe-status-message" data-kind={error || spotify.error ? 'error' : 'notice'} role="status"><OverlayIcon name={error || spotify.error ? 'alert' : 'music'} /><span>{message}</span>{(Object.keys(failures).length > 0 || spotify.librarySummary.some(track => track.status === 'error' && track.location !== 'website')) && <button onClick={resume}>Retry separation</button>}</p>}</div>
+      <div className="iframe-status-slot">{message && <p className="iframe-status-message" data-kind={error || spotify.error ? 'error' : 'notice'} role="status"><OverlayIcon name={error || spotify.error ? 'alert' : 'music'} /><span>{message}</span>{spotify.error && <button onClick={spotify.reconnect}>Reconnect</button>}{(Object.keys(failures).length > 0 || spotify.librarySummary.some(track => track.status === 'error' && track.location !== 'website')) && <button onClick={resume}>Retry separation</button>}</p>}</div>
       <div className="iframe-actions-shell"><div className="iframe-actions">
         <button className="iframe-close-button" aria-label="Close" onClick={spotify.close}><OverlayIcon name="close" /></button>
         <button className="iframe-logo-button" aria-label={capture.active ? 'Stop capture' : allCaptured ? 'Open first track in ktv420' : 'Start capture'}
@@ -90,6 +90,7 @@ export default function CapturePage() {
     </header>
     <div className="iframe-content">
       {settings ? <section className="iframe-settings-view" aria-label="Settings view">
+        <button onClick={() => void spotify.downloadDiagnostics().catch(reason => setError(String(reason)))}>Download capture diagnostics</button>
         <SeparationSettings enabled={processingEnabled} backend={spotify.queueBackend || 'auto'}
           busy={spotify.librarySummary.some(track => track.status === 'processing' && track.location !== 'website')}
           failed={spotify.librarySummary.some(track => track.status === 'error' && track.location !== 'website')}

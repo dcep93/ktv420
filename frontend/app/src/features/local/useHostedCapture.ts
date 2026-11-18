@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { HostedCaptureQueue } from './hostedCapture';
 import type { usePlaylist } from './usePlaylist';
 import type { LocalTrack } from './library';
+import { readCaptureIntent, saveCaptureIntent } from './captureIntent';
 type Options = {
   spotify: ReturnType<typeof usePlaylist>;
   tracks: Pick<LocalTrack, 'id'>[];
@@ -15,17 +16,17 @@ export function useHostedCapture(options: Options) {
   latest.current = options;
   const queue = useRef(new HostedCaptureQueue()),
     [active, setActive] = useState(false);
+  const recovered = useRef(false);
+  const mounted = useRef(true);
   const cancel = useCallback(() => {
     queue.current.cancel();
+    saveCaptureIntent(latest.current.spotify.spotifyPath, null);
     setActive(false);
     latest.current.spotify.cancelCapture();
   }, []);
-  const toggle = useCallback(() => {
+  const start = useCallback((resumeIds?: string[]) => {
     const o = latest.current;
-    if (queue.current.active || o.spotify.active) {
-      cancel();
-      return;
-    }
+    if (queue.current.active) return;
     if (!o.libraryReady || !o.spotify.tracksComplete || o.spotify.standalone) return;
     void navigator.locks.request(
       'ktv420-capture-scheduler',
@@ -37,11 +38,11 @@ export function useHostedCapture(options: Options) {
         }
         o.onError('');
         const saved = new Set(o.tracks.map((t) => t.id.replace(/^spotify-/, '')));
+        const ids = resumeIds || (o.required.length ? o.required.map(t => t.id) : o.spotify.tracks.map(t => t.trackId));
+        saveCaptureIntent(o.spotify.spotifyPath, ids);
         try {
           await queue.current.run(
-            o.required.length
-              ? o.required.map((t) => t.id)
-              : o.spotify.tracks.map((t) => t.trackId),
+            ids,
             () => saved,
             async (id) => {
               await latest.current.spotify.captureOne(id);
@@ -56,11 +57,22 @@ export function useHostedCapture(options: Options) {
         } catch (reason) {
           latest.current.onError(reason instanceof Error ? reason.message : String(reason));
         } finally {
+          if (mounted.current) saveCaptureIntent(o.spotify.spotifyPath, null);
           setActive(false);
         }
       },
     );
-  }, [cancel]);
+  }, []);
+  const toggle = useCallback(() => {
+    if (queue.current.active || latest.current.spotify.active) cancel();
+    else start();
+  }, [cancel, start]);
+  useEffect(() => {
+    if (recovered.current || !options.libraryReady || !options.spotify.tracksComplete || options.spotify.standalone) return;
+    recovered.current = true;
+    const intent = readCaptureIntent(options.spotify.spotifyPath);
+    if (intent) start(intent);
+  }, [options.libraryReady, options.spotify.tracksComplete, options.spotify.standalone, options.spotify.spotifyPath, start]);
   useEffect(() => {
     window.addEventListener('ktv420:overlay-hidden', cancel);
     return () => window.removeEventListener('ktv420:overlay-hidden', cancel);
@@ -68,6 +80,7 @@ export function useHostedCapture(options: Options) {
   // Closing the website stops scheduling; the extension may finish its single in-flight recording.
   useEffect(
     () => () => {
+      mounted.current = false;
       queue.current.cancel();
     },
     [],

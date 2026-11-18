@@ -464,6 +464,34 @@ test('natural-end resampler tails survive; only subsequent exact silence is remo
   }
 });
 
+test('progressive chunks plus verified tail preserve every sample without publishing codec padding', async () => {
+  const duration = 3, expected = 44100 * duration, signalFrames = expected + 100;
+  const frames = signalFrames + 22050;
+  const h = harness([{ src: 'song', paused: true, duration }]);
+  await h.command('capture-begin', { requireStart: true, expectedSource: 'song' });
+  await h.elements[0].play();
+  const pcm = new Float32Array(frames * 2);
+  for (let i = 0; i < signalFrames * 2; i++) pcm[i] = Math.sin(i) * .4;
+  h.contexts[0].currentTime = frames / 44100;
+  h.elements[0].ended = true; h.elements[0].dispatch('ended');
+  const split = 65536;
+  h.ports[0].onmessage({ data: { frame: 0, channelCount: 2, bytesBuffer: pcm.slice(0, split).buffer } });
+  h.ports[0].onmessage({ data: { frame: split / 2, channelCount: 2, bytesBuffer: pcm.slice(split).buffer } });
+  let offset = 0; const parts = [];
+  for (;;) {
+    const response = await h.command('capture-read', { offset }); assert.equal(response.ok, true);
+    const bytes = new Uint8Array(response.result.bytesBuffer);
+    if (!bytes.length) break;
+    assert.equal(bytes.length, 262144); parts.push(Buffer.from(bytes)); offset += bytes.length;
+  }
+  assert.ok(offset > 0);
+  const finish = await h.command('capture-finish', { offset }); assert.equal(finish.ok, true);
+  assert.equal(finish.result.endVerified, true);
+  assert.equal(finish.result.byteLength, signalFrames * 8);
+  parts.push(Buffer.from(finish.result.bytesBuffer));
+  assert.deepEqual(Buffer.concat(parts), Buffer.from(pcm.slice(0, signalFrames * 2).buffer));
+});
+
 test('a brief buffering stall cannot be accepted as a small resampler tail', async () => {
   const h = harness([{src:'song',paused:true,duration:3}]);
   await h.command('capture-begin',{requireStart:true,expectedSource:'song'});

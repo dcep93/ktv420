@@ -116,6 +116,7 @@ test('a failed exact rewind stays bounded and reports actual blocking state', as
 
 test('a delayed startup reset discards the attempt and re-arms without another redundant UI seek', async () => {
  const h=setup();const command=h.options.bridge.command;
+ const events=[]; h.options.onEvent=event=>events.push(event);
  let begins=0,polls=0;
  h.options.bridge.command=async(name,payload)=>{
   if(name==='capture-begin')begins++;
@@ -131,6 +132,8 @@ test('a delayed startup reset discards the attempt and re-arms without another r
  assert.equal(h.calls.filter(name=>name==='pause').length,2);
  assert.equal(h.calls.filter(name=>name==='seek').length,1);
  assert.equal(h.calls.filter(name=>name==='play').length,2);
+ assert.deepEqual(events.filter(event=>event.type==='start-retry').map(event=>event.reason),['startup-zero-seek']);
+ assert.equal(events.filter(event=>event.type==='audio-started').length,2);
 });
 
 test('repeated startup resets are bounded; unrelated failures never restart', async () => {

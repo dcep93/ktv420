@@ -5,28 +5,33 @@ export const CAPTURE_TIMING_VERSION = 1;
 
 /** Capture transport is strict, unlike the best-effort Spotify mirror during DJ playback. */
 export async function startPreciseCapture({ bridge, trackId, checkCancelled = () => {},
-  transport = commandTransport, readTransport = readTransportDom, wait = delay }) {
+  transport = command => commandTransport(command, { verifyPlayback: false }),
+  readTransport = readTransportDom, wait = delay, onEvent = () => {} }) {
   const check = () => {
     checkCancelled();
     if (readTransport().trackId !== trackId) throw new Error('Spotify changed songs while preparing capture. Retry this song.');
   };
   try {
     attempts: for (let restart = 0; restart <= 2; restart++) {
+      onEvent({ type: 'start-attempt', attempt: restart + 1 });
       check();
       await bridge.command('capture-abort');
       // Spotify's button label may lag or never acknowledge the pause. The page
       // command below pauses the actual selected media; its paused/zero state,
       // not the button label, is what authorizes arming the recorder.
       try { await transport({ action: 'pause' }); } catch { /* verify actual media below */ }
+      onEvent({ type: 'pause-requested' });
       check();
       // Load/resume the audio graph before seeking and before any wanted audio plays.
       const prepared = await bridge.command('capture-prepare', { timeoutMs: 3000 }, 4000); check();
+      onEvent({ type: 'audio-prepared' });
       let seekError = '';
       // Do not queue another Spotify seek if the actual media is already at zero.
       if (prepared.target.currentTime !== 0) {
         try { await transport({ action: 'seek', trackId, position: 0 }); }
         catch (reason) { seekError = reason?.message || String(reason); }
       }
+      onEvent({ type: 'seek-requested', needed: prepared.target.currentTime !== 0 });
       check();
       let settled = 0, corrected = false, lastMedia = null;
       // Allow buffering to finish without relaxing the verified-zero requirement.
@@ -36,7 +41,9 @@ export async function startPreciseCapture({ bridge, trackId, checkCancelled = ()
         lastMedia = media;
         // Spotify may replace its media source while applying our zero seek.
         // Re-prepare that source, then verify paused zero again before recording.
-        if (media?.source && media.source !== prepared.target.source && restart < 2) continue attempts;
+        if (media?.source && media.source !== prepared.target.source && restart < 2) {
+          onEvent({ type: 'start-retry', reason: 'source-replaced' }); continue attempts;
+        }
         if (!corrected && attempt >= 10 && media?.source === prepared.target.source && media.paused &&
             !media.seeking && Number.isFinite(media.currentTime) && media.currentTime !== 0) {
           check();
@@ -49,6 +56,7 @@ export async function startPreciseCapture({ bridge, trackId, checkCancelled = ()
         else settled = 0;
         if (settled >= 2) {
           const result = await bridge.command('capture-begin', { requireStart: true, expectedSource: prepared.target.source });
+          onEvent({ type: 'recorder-armed', timing: result.timing });
           check();
           if (!result.startVerified) throw new Error('Update and reload the ktv420 extension before capturing.');
           let playError = '';
@@ -64,7 +72,9 @@ export async function startPreciseCapture({ bridge, trackId, checkCancelled = ()
             check();
             if (state.invalid) {
               if (['startup-zero-seek', 'startup-audio-gap'].includes(state.invalidCode) && restart < 2 &&
-                  state.source === prepared.target.source) continue attempts;
+                  state.source === prepared.target.source) {
+                onEvent({ type: 'start-retry', reason: state.invalidCode }); continue attempts;
+              }
               throw new Error(`Capture timing could not be verified: ${state.invalidReason || 'Audio was interrupted during startup.'} Nothing was saved.`);
             }
             if (state.ended) return result;
@@ -75,7 +85,9 @@ export async function startPreciseCapture({ bridge, trackId, checkCancelled = ()
               playRequested = true;
               check();
             }
-            if (!state.paused && !state.seeking && state.currentTime > 0) playbackObserved = true;
+            if (!state.paused && !state.seeking && state.currentTime > 0 && !playbackObserved) {
+              playbackObserved = true; onEvent({ type: 'audio-started', position: state.currentTime });
+            }
             if (sample < 20) await wait(50);
           }
           if (!playbackObserved) throw new Error(`Spotify's local audio did not start playing${playError ? ` (${playError})` : ''}. Nothing was saved.`);

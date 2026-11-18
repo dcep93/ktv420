@@ -18,16 +18,22 @@ if (embeddedSpotify) {
       else pending.reject(new Error(message.error || 'Spotify did not respond.'));
     } else if (message.type === 'navigation') {
       window.dispatchEvent(new CustomEvent('ktv420:overlay-navigation', { detail: message }));
+    } else if (message.type === 'status') {
+      window.dispatchEvent(new CustomEvent('ktv420:spotify-status', { detail: message.status }));
     }
   });
 }
 export function overlayReady() {
   if (embeddedSpotify) parent.postMessage({ source: 'ktv420-overlay-app', type: 'ready' }, parentOrigin);
 }
+export function overlayReconnect() {
+  if (embeddedSpotify) parent.postMessage({ source: 'ktv420-overlay-app', type: 'reconnect' }, parentOrigin);
+}
 export function overlayRequest<T>(request: Record<string, unknown>): Promise<T> {
   return new Promise((resolve, reject) => {
     const id = crypto.randomUUID();
-    const timer = setTimeout(() => { requests.delete(id); reject(new Error('Spotify did not respond. Reload its tab and retry.')); }, request.operation === 'work-finish' ? 300000 : 90000);
+    const timeout = request.operation === 'work-finish' ? 300000 : ['status', 'capture', 'volume', 'presentation', 'diagnostics'].includes(String(request.operation)) ? 15000 : 90000;
+    const timer = setTimeout(() => { requests.delete(id); reject(new Error('Spotify did not respond. Reconnect the view to retry.')); }, timeout);
     requests.set(id, { resolve: value => resolve(value as T), reject, timer });
     parent.postMessage({ source: 'ktv420-overlay-app', type: 'request', id, request }, parentOrigin);
   });

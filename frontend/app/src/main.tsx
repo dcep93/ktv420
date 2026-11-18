@@ -3,4 +3,5 @@ import './styles/theme.css';
 import './index.css';
 import AppServices from './app/AppServices';
 import AppRoutes from './app/AppRoutes';
-createRoot(document.getElementById('root')!).render(<><AppRoutes /><AppServices /></>);
+import RecoveryBoundary from './app/RecoveryBoundary';
+createRoot(document.getElementById('root')!).render(<RecoveryBoundary><AppRoutes /><AppServices /></RecoveryBoundary>);

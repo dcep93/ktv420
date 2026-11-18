@@ -8,7 +8,7 @@ import {
   resolveTrackRow
 } from "./dom.js";
 import { resolveCurrentPlaybackTrack } from "./playbackState.js";
-import { readCachedTracks, writeTrackArtifact } from "./storage.js";
+import { readCachedTracks, writeTrackArtifact, createStreamingArtifact } from "./storage.js";
 import { markTiming, normalizeTimingTrace } from "./timing.js";
 import { formatSeconds, looselyMatches } from "./text.js";
 import { md5Hex } from "./md5.js";
@@ -69,11 +69,19 @@ export class CaptureOrchestrator extends EventTarget {
       if (!row) throw new Error('Could not find the requested Spotify song.');
       dispatchSyntheticDoubleClick(row);
       const start=await this.beginAndAcceptItem(item,debug,{logFirstStartTiming:true});
+      this.stream = createStreamingArtifact({ ...buildMetadata(item, { sampleRate: start.sampleRate,
+        channelCount: start.channelCount, startMediaTime: 0 }, { duration: 0, endMediaTime: 0 }),
+        captureStartVerified: true, collection: this.collection });
       const end=await this.recordUntilBoundary(item,start,debug);
+      this.lastBoundaryAt = Date.now();
+      debug.events.push({ type: 'audio-ended', at: this.lastBoundaryAt, stagedBytes: this.stream.offset });
       this.markSaving(item.trackId); debug.phase='saving'; pausePlaybackCleanly();
       const capture=await this.finishPageCapture();
+      debug.events.push({ type: 'audio-flushed', at: Date.now(), remainingBytes: capture.bytes.length });
       // Once the natural end is verified, save it even if Stop is pressed during delivery.
       const metadata=await this.storeCapturedTrack(item,capture,end);
+      debug.events.push({ type: 'audio-committed', at: Date.now() });
+      retainDiagnostic({ ...debug, completedAt: new Date().toISOString() });
       this.dispatchTrackStored(item.trackId,metadata);
       this.dispatchCaptureComplete([item.trackId]);
     } catch(error) {
@@ -86,10 +94,12 @@ export class CaptureOrchestrator extends EventTarget {
       // Keep diagnostics without turning expected interruptions into Chrome's
       // extension-error entries. The overlay still receives genuine failures.
       console.debug('[ktv420] Capture diagnostic', report);
+      retainDiagnostic(report);
       throw error;
     } finally {
       this.clearCaptureProgress();
       await this.bridge.command('capture-abort').catch(()=>{});
+      this.stream = null;
       this.active=false;this.singleTrack=false;this.stopRequested=false;
       this.dispatchEvent(new Event('activechange'));
     }
@@ -160,8 +170,11 @@ export class CaptureOrchestrator extends EventTarget {
       await this.waitForExpectedTrackStart(item, debug);
       if (item.cached) return { currentTime: 0, source: 'cached' };
       const result = await startPreciseCapture({ bridge: this.bridge, trackId: item.trackId,
+        onEvent: event => debug.events.push({ ...event, at: Date.now(),
+          ...(event.type === 'audio-started' && this.lastBoundaryAt ? { handoffMs: Date.now() - this.lastBoundaryAt } : {}) }),
         checkCancelled: () => this.throwIfStopped() });
-      const startInfo = { acceptedAt: Date.now(), currentTime: result.target.currentTime, source: result.target.source };
+      const startInfo = { acceptedAt: Date.now(), currentTime: result.target.currentTime, source: result.target.source,
+        sampleRate: result.sampleRate, channelCount: result.channelCount };
       debug.events.push({ type: 'verified-zero-start', trackId: item.trackId, ...startInfo });
       if (logFirstStartTiming) markTiming(debug.timingTrace, 'spotify_first_track_started', startInfo);
       return startInfo;
@@ -295,6 +308,7 @@ export class CaptureOrchestrator extends EventTarget {
         if (!backwardSample) {
           backwardSample = observation;
           await delay(100);
+          await this.stageAudio();
           continue;
         }
         throw new Error(`Spotify moved backward during ${item.trackName} (${lastMediaTime.toFixed(3)}s → ${currentTime.toFixed(3)}s). Nothing was saved.`);
@@ -326,6 +340,7 @@ export class CaptureOrchestrator extends EventTarget {
               at: Date.now()
             });
           }
+          await this.stageAudio();
           await delay(100);
           continue;
         }
@@ -346,12 +361,20 @@ export class CaptureOrchestrator extends EventTarget {
       // Pausing near the end is still a pause. Wait for ended/transition rather
       // than finalizing early and discarding the last few milliseconds.
 
+      await this.stageAudio();
       await delay(100);
     }
   }
 
+  async stageAudio() {
+    if (!this.stream) return;
+    const chunk = await this.bridge.command('capture-read', { offset: this.stream.offset });
+    if (chunk.offset !== this.stream.offset) throw new Error('Captured audio delivery position changed.');
+    await this.stream.append(new Uint8Array(chunk.bytesBuffer));
+  }
+
   async finishPageCapture() {
-    const capture = await this.bridge.command("capture-finish", {}, 60000);
+    const capture = await this.bridge.command("capture-finish", { offset: this.stream?.offset || 0 }, 60000);
     return this.normalizePageCapture(capture);
   }
 
@@ -359,7 +382,7 @@ export class CaptureOrchestrator extends EventTarget {
     const bytes = new Uint8Array(capture.bytesBuffer || new ArrayBuffer(0));
     return {
       bytes,
-      byteLength: bytes.byteLength,
+      byteLength: this.stream ? capture.byteLength : bytes.byteLength,
       sampleRate: capture.sampleRate,
       channelCount: capture.channelCount,
       startMediaTime: capture.startMediaTime,
@@ -374,12 +397,14 @@ export class CaptureOrchestrator extends EventTarget {
 
   async storeCapturedTrack(item, capture, captureEnd) {
     const timing = captureTiming(capture, captureEnd.duration);
+    if (this.stream) await this.stream.append(capture.bytes);
     const captureWithHash = {
       ...capture,
-      md5: md5Hex(capture.bytes)
+      md5: this.stream ? this.stream.md5 : md5Hex(capture.bytes)
     };
     const metadata = { ...buildMetadata(item, captureWithHash, captureEnd), ...timing, collection: this.collection };
-    await writeTrackArtifact(item.trackId, capture.bytes, metadata);
+    if (this.stream) await this.stream.finish(metadata);
+    else await writeTrackArtifact(item.trackId, capture.bytes, metadata);
     return metadata;
   }
 
@@ -388,6 +413,14 @@ export class CaptureOrchestrator extends EventTarget {
       throw new Error(this.stopReason);
     }
   }
+}
+
+function retainDiagnostic(report) {
+  try {
+    const key = 'ktv420:capture-diagnostics';
+    const history = JSON.parse(window.sessionStorage.getItem(key) || '[]');
+    window.sessionStorage.setItem(key, JSON.stringify([...history.slice(-19), report]));
+  } catch { /* Diagnostics must never interrupt recording. */ }
 }
 
 function buildMetadata(item, capture, captureEnd) {

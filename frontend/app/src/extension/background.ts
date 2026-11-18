@@ -11,6 +11,8 @@ import {
   beginCapture,
   appendCapture,
   finishCapture,
+  beginStreamingCapture,
+  finishStreamingCapture,
   pendingCaptures,
   readChunk,
   publishLibrarySummary,
@@ -150,10 +152,15 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
         return (await pendingCaptures()).map((c) => c.metadata);
       case 'ktv420:capture-begin':
         return beginCapture(tabId, message.metadata, message.bytes, sender.documentId);
+      case 'ktv420:capture-stream-begin':
+        return beginStreamingCapture(tabId, message.metadata, sender.documentId);
       case 'ktv420:capture-chunk':
         return appendCapture(tabId, message.id, message.index, message.base64);
       case 'ktv420:capture-finish':
-        await finishCapture(tabId, message.id); await ensureWorkerHost(); return;
+        await finishCapture(tabId, message.id); void ensureWorkerHost().catch(() => {}); return;
+      case 'ktv420:capture-stream-finish':
+        await finishStreamingCapture(tabId, message.id, message.metadata, message.bytes);
+        void ensureWorkerHost().catch(() => {}); return;
       default:
         throw new Error('Unknown Spotify integration operation.');
     }
