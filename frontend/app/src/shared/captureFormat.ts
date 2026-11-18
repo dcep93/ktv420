@@ -43,7 +43,11 @@ export function decodeChunk(base64: unknown) {
     !/^[A-Za-z0-9+/]*={0,2}$/.test(base64)
   )
     throw new Error('Invalid capture chunk.');
-  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const binary = atob(base64);
+  // TypedArray.from iterates the string and allocates an intermediate list.
+  // Hundreds of raw-audio chunks made that conversion stall playlist handoff.
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   if (!bytes.length || bytes.length > CHUNK_BYTES) throw new Error('Invalid capture chunk size.');
   return bytes;
 }

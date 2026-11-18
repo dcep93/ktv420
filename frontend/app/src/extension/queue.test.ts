@@ -16,6 +16,7 @@ import {
   acknowledgePlayerCollection,
 } from './queue';
 import { parseRequest, websiteSender } from './protocol';
+import { CHUNK_BYTES, decodeChunk } from '../shared/captureFormat';
 const metadata = {
   trackId: 'testSong',
   audioSampleRate: 44100,
@@ -26,6 +27,29 @@ const metadata = {
   captureEndVerified: true,
 };
 const bytes = btoa(String.fromCharCode(...new Uint8Array(16)));
+test('capture chunk decoding preserves every byte value and padded chunk boundaries', () => {
+  for (const length of [1, 2, 3, 256, CHUNK_BYTES - 2, CHUNK_BYTES - 1, CHUNK_BYTES]) {
+    const expected = Buffer.alloc(length);
+    for (let i = 0; i < length; i++) expected[i] = i % 256;
+    assert.deepEqual(decodeChunk(expected.toString('base64')), new Uint8Array(expected));
+  }
+  for (const invalid of [null, '', '!!!!', 'A', 'AA=A', Buffer.alloc(CHUNK_BYTES + 1).toString('base64')]) {
+    assert.throws(() => decodeChunk(invalid));
+  }
+});
+
+test('a full raw chunk and partial tail survive durable capture delivery byte-for-byte', async () => {
+  const source = Buffer.alloc(CHUNK_BYTES + 16);
+  for (let i = 0; i < source.length; i++) source[i] = (i * 73) % 256;
+  const id = await beginCapture(101, { ...metadata, audioByteLength: source.length }, source.length);
+  await appendCapture(101, id, 0, source.subarray(0, CHUNK_BYTES).toString('base64'));
+  await assert.rejects(finishCapture(101, id));
+  await appendCapture(101, id, 1, source.subarray(CHUNK_BYTES).toString('base64'));
+  await finishCapture(101, id);
+  const chunks = await Promise.all([readChunk(id, 0), readChunk(id, 1)]);
+  assert.deepEqual(Buffer.concat(chunks.map(chunk => Buffer.from(chunk, 'base64'))), source);
+  await acknowledgeCapture(id);
+});
 test('completed temporary captures survive new captures and are removed only by acknowledgment', async () => {
   const id = await beginCapture(1, metadata, 16);
   await appendCapture(1, id, 0, bytes);
