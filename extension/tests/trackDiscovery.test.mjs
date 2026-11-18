@@ -1,8 +1,21 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { discoverTrackRows, hasAllRows, trackTotal } from '../src/content/trackDiscovery.js';
+import { discoverTrackRows, revealTrackRow, hasAllRows, trackTotal } from '../src/content/trackDiscovery.js';
 
 const rows = Array.from({ length: 45 }, (_, rowIndex) => ({ rowIndex, trackId: `id${rowIndex}` }));
+test('capture jumps directly to a known virtualized row and still requires its exact identity', async () => {
+  const scroller = { scrollTop: 0, clientHeight: 400, scrollHeight: 4000, getBoundingClientRect: () => ({ top: 100 }) };
+  let waits = 0;
+  const read = () => Array.from({ length: 10 }, (_, i) => {
+    const rowIndex = Math.floor(scroller.scrollTop / 40) + i;
+    return { rowIndex, trackId: `id${rowIndex}`, row: { getBoundingClientRect: () => ({ top: 100 + rowIndex * 40 - scroller.scrollTop, height: 40 }) } };
+  });
+  const options = { read, container: () => scroller, wait: async () => { waits++; } };
+  assert.ok(await revealTrackRow({ trackId: 'id75', rowIndex: 75 }, options));
+  assert.equal(waits, 1, 'one targeted scroll rather than scanning the first 75 songs');
+  assert.equal(await revealTrackRow({ trackId: 'different', rowIndex: 75 }, options), null);
+  assert.equal(await revealTrackRow({ trackId: 'id75', rowIndex: 75 }, { ...options, cancelled: () => true }), null);
+});
 test('virtualized discovery loads all 45 rows, not just the initial 36, and restores scrolling', async () => {
   const scroller = { scrollTop: 200, clientHeight: 400, scrollHeight: 1800 };
   const updates = [];

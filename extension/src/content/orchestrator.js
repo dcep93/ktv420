@@ -1,5 +1,5 @@
 import { startPreciseCapture, captureTiming } from './preciseCapture.js';
-import { discoverTrackRows } from "./trackDiscovery.js";
+import { discoverTrackRows, revealTrackRow } from "./trackDiscovery.js";
 import { STORAGE_VERSION } from "./constants.js";
 import {
   dispatchSyntheticDoubleClick,
@@ -12,6 +12,7 @@ import { readCachedTracks, writeTrackArtifact, createStreamingArtifact } from ".
 import { markTiming, normalizeTimingTrace } from "./timing.js";
 import { formatSeconds, looselyMatches } from "./text.js";
 import { md5Hex } from "./md5.js";
+import { readTransportDom } from './transport.js';
 
 const START_TIMEOUT_MS = 3000;
 const END_TOLERANCE_SECONDS = 0.25;
@@ -52,6 +53,7 @@ export class CaptureOrchestrator extends EventTarget {
     this.clearCaptureProgress(); this.dispatchEvent(new Event('activechange'));
     const debug = { extension:'ktv420', startedAt:new Date().toISOString(), route:window.location.href,
       timingTrace:normalizeTimingTrace(timingTrace), events:[], phase:'preflight', recentMediaStates:[] };
+    this.diagnostic = debug;
     try {
       if (!isSupportedRoute()) throw new Error('Open a Spotify album or playlist.');
       const [item] = await this.preflightQueue(debug, trackIds, trackSnapshot);
@@ -60,14 +62,20 @@ export class CaptureOrchestrator extends EventTarget {
       debug.trackId=item.trackId; debug.trackName=item.trackName;
       if (item.cached) { this.dispatchTrackStored(item.trackId,item.cachedMetadata); return; }
       await this.bridge.inject(); this.throwIfStopped();
-      let row=resolveTrackRow(item);
-      if (!row) {
-        await discoverTrackRows({cancelled:()=>this.stopRequested || !!resolveTrackRow(item)});
-        row=resolveTrackRow(item);
+      debug.phase = 'selecting';
+      debug.events.push({ type: 'selection-started', at: Date.now() });
+      if (readTransportDom().trackId !== item.trackId) {
+        let row = resolveTrackRow(item) || await revealTrackRow(item, { cancelled: () => this.stopRequested });
+        if (!row) {
+          await discoverTrackRows({cancelled:()=>this.stopRequested || !!resolveTrackRow(item)});
+          row=resolveTrackRow(item);
+        }
+        this.throwIfStopped();
+        if (!row) throw new Error('Could not find the requested Spotify song.');
+        dispatchSyntheticDoubleClick(row);
       }
       this.throwIfStopped();
-      if (!row) throw new Error('Could not find the requested Spotify song.');
-      dispatchSyntheticDoubleClick(row);
+      debug.events.push({ type: 'selection-finished', at: Date.now() });
       const start=await this.beginAndAcceptItem(item,debug,{logFirstStartTiming:true});
       this.stream = createStreamingArtifact({ ...buildMetadata(item, { sampleRate: start.sampleRate,
         channelCount: start.channelCount, startMediaTime: 0 }, { duration: 0, endMediaTime: 0 }),
@@ -191,7 +199,9 @@ export class CaptureOrchestrator extends EventTarget {
     while (performance.now() <= deadline) {
       this.throwIfStopped();
       const snapshot = this.bridge.getSnapshot();
-      const current = resolveCurrentPlaybackTrack(snapshot);
+      const resolved = resolveCurrentPlaybackTrack(snapshot);
+      const domId = readTransportDom().trackId;
+      const current = domId === item.trackId ? { trackId: domId, source: 'now-playing-dom' } : resolved;
       lastResolved = current;
 
       if (current?.trackId === item.trackId) {

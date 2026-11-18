@@ -181,6 +181,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
         return status();
       case 'diagnostics':
         return { extensionVersion: chrome.runtime.getManifest().version, status: status(),
+          currentCapture: runner.isActive() ? { ...runner.diagnostic, stagedBytes: runner.stream?.offset || 0 } : null,
           captures: JSON.parse(sessionStorage.getItem('ktv420:capture-diagnostics') || '[]'),
           lastFailure: JSON.parse(sessionStorage.getItem('ktv420:last-capture-failure') || 'null') };
       case 'capture':

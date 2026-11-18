@@ -26,6 +26,27 @@ function scrollContainer() {
   return null;
 }
 
+// Capture already knows the playlist position. Reveal that neighborhood before
+// falling back to a full inventory sweep (which is slow in background tabs).
+export async function revealTrackRow(track, { read = collectTrackRows, container = scrollContainer,
+  cancelled = () => false, wait = () => new Promise(resolve => setTimeout(resolve, 100)) } = {}) {
+  const scroller = container();
+  for (let attempt = 0; attempt < 4 && !cancelled(); attempt++) {
+    const rows = read(), match = rows.find(row => row.trackId === track.trackId);
+    if (match) return match.row;
+    if (!scroller || !rows.length || !Number.isSafeInteger(track.rowIndex)) return null;
+    const first = rows[0], last = rows.at(-1);
+    const firstRect = first.row.getBoundingClientRect(), lastRect = last.row.getBoundingClientRect();
+    const stride = last.rowIndex > first.rowIndex ? (lastRect.top - firstRect.top) / (last.rowIndex - first.rowIndex) : firstRect.height;
+    if (!(stride > 0)) return null;
+    scroller.scrollTop = Math.max(0, Math.min(scroller.scrollHeight - scroller.clientHeight,
+      scroller.scrollTop + firstRect.top - scroller.getBoundingClientRect().top +
+      (track.rowIndex - first.rowIndex) * stride - scroller.clientHeight / 3));
+    await wait();
+  }
+  return cancelled() ? null : read().find(row => row.trackId === track.trackId)?.row || null;
+}
+
 // The fallback must visit virtualized rows, not equate the currently rendered
 // viewport with the playlist. It runs only after the user opens ktv420.
 export async function discoverTrackRows({ initial = [], cancelled = () => false, onRows = () => {},

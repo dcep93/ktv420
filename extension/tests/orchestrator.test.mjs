@@ -21,6 +21,24 @@ function mockPage(t) {
   }
 }
 
+test('an already selected song reaches precise start without scanning its offscreen playlist row', async t => {
+  mockPage(t);
+  const trackId = 'a'.repeat(22), anchor = { getAttribute: () => `/track/${trackId}` };
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'location');
+  Object.defineProperty(globalThis, 'location', { configurable: true, value: { origin: 'https://open.spotify.com' } });
+  t.after(() => original ? Object.defineProperty(globalThis, 'location', original) : delete globalThis.location);
+  document.querySelector = selector => selector === '[data-testid="now-playing-widget"]' ? { contains: () => true, querySelector: () => null } : null;
+  document.querySelectorAll = selector => selector.includes('now-playing-widget') ? [anchor] : [];
+  t.mock.method(console, 'debug', () => {});
+  const runner = new CaptureOrchestrator({ bridge: { inject: async () => {}, command: async () => ({}), getSnapshot: () => ({}) } });
+  runner.preflightQueue = async () => [{ trackId, trackName: 'Selected song', rowIndex: 75 }];
+  let starts = 0;
+  runner.beginAndAcceptItem = async () => { starts++; throw new Error('Reached precise verification'); };
+  await assert.rejects(runner.run({ trackIds: [trackId] }), /Reached precise verification/);
+  assert.equal(starts, 1);
+  assert.deepEqual(runner.diagnostic.events.map(event => event.type), ['selection-started', 'selection-finished']);
+});
+
 test('page teardown cancels capture without warning or overwriting a genuine failure', async t => {
   mockPage(t);
   const warnings = t.mock.method(console, 'warn', () => {});

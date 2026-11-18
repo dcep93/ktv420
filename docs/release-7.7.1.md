@@ -1,0 +1,9 @@
+# Smooth capture release verification
+
+Version 7.7.0 moved PCM staging and MD5 into playback, retained a verified tail, and added immediate capture-completion notifications. End verification and strict durable publication still precede the next song; separation/encoding and worker startup do not. Blank owned frames recover from altered `srcdoc`/`src`, and the hosted scheduler can reattach to its current request after view recovery. Settings exports bounded local diagnostics without issuing playback commands.
+
+Native Chrome verification activated 7.7.0 and opened the same 107-song playlist in a fresh tab after the original tab failed to render. Existing saved songs were present. Diagnostics exported during capture confirmed 7.7.0, an active recording at 31% progress, and no stop request. They also exposed a failed initial attempt: 03:36:55–03:38:50 UTC on November 18, 2026, spent finding an offscreen Spotify row before the queue retried. This is startup discovery time, not a measured between-song silence.
+
+Version 7.7.1 skips row discovery when the unique now-playing track ID already matches the request, jumps directly to known playlist row positions before fallback discovery, and includes the current trace/staged byte count in diagnostics. Actual media identity, paused zero, source continuity and natural completion remain checked.
+
+Validation: 425 tests (104 JavaScript and 321 TypeScript), lint, TypeScript and both production builds. New coverage checks incremental MD5 against Node crypto, byte-exact progressive capture with resampler tails, unpublished partial staging, wrong-sender/format rejection, completion races, frame recovery, startup retry logs, persisted queue intent and direct row selection. Browser foreground changed during live observation, so no verified end-to-end handoff duration is claimed. Earlier microbenchmarks do not establish an audible-gap reduction.
