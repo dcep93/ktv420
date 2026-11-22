@@ -35,4 +35,8 @@ export class PlaybackEnd {
     source.stop();
     source.disconnect();
   }
+  dispose() {
+    this.ended = () => {};
+    this.cancel();
+  }
 }

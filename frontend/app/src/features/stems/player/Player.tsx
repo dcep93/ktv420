@@ -603,6 +603,7 @@ export default function Player({
 
       stopAllSources();
       engine.current?.dispose(); engine.current = null;
+      buffersRef.current = {};
       disposeStemNodes();
       masterAudio.current?.dispose(); masterAudio.current = null;
       masterGain.current?.disconnect(); masterGain.current = null;

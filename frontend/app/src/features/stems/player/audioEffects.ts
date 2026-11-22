@@ -1,5 +1,6 @@
 import processorUrl from './effects/processor.ts?worker&url';
 import { defaultEffectSettings, effectIds, type AudioEffectType, type EffectSettings } from './effects/catalog';
+import { disposeWorkletNode } from './workletLifetime';
 export * from './effects/catalog';
 export type EffectNodes = { node: AudioWorkletNode };
 const modules=new WeakMap<BaseAudioContext,Promise<void>>();
@@ -11,7 +12,7 @@ export function prepareAudioEffects(context:BaseAudioContext){
 export function createEffectNodes(context:BaseAudioContext):EffectNodes {
   return {node:new AudioWorkletNode(context,'ktv420-effects',{numberOfInputs:1,numberOfOutputs:1,outputChannelCount:[2],channelCount:2,channelCountMode:'explicit'})};
 }
-export function disposeAudioEffects(nodes:EffectNodes){nodes.node.port.postMessage('dispose');nodes.node.disconnect();nodes.node.port.close();}
+export function disposeAudioEffects(nodes:EffectNodes){disposeWorkletNode(nodes.node,()=>nodes.node.port.postMessage('dispose'));}
 function parameter(nodes:EffectNodes,name:string,value:number,time:number){
   const p=nodes.node.parameters.get(name)!;
   // Reapplying a mixer snapshot must not restart a tail or its smoothing.

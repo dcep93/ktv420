@@ -2,6 +2,7 @@ import SignalsmithStretch, { type StretchNode } from 'signalsmith-stretch';
 import processorUrl from 'signalsmith-stretch?url';
 import { SongClock, validPitch, validTempo } from './tempo';
 import { PlaybackEnd } from './playbackEnd';
+import { disposeWorkletNode } from './workletLifetime';
 // Use the immutable hosted module, never generated JS or a third-party runtime URL.
 SignalsmithStretch.moduleUrl = processorUrl;
 export class TempoEngine {
@@ -35,21 +36,32 @@ export class TempoEngine {
     const length = buffers[0].length;
     if (buffers.some(b => b.sampleRate !== context.sampleRate || b.length !== length)) throw new Error('Stem lengths or sample rates do not match.');
     const node = await SignalsmithStretch(context, { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [buffers.length * 2], channelInterpretation: 'discrete' });
-    const engine = new TempoEngine(context, node, buffers[0].duration, ended, outputDelaySeconds);
-    node.onprocessorerror = () => { engine.failed = true; engine.pause(); fail('Audio processing stopped. Reload the player to retry.'); };
-    // One multichannel processor shares its time map across every stereo stem.
-    const splitter = context.createChannelSplitter(buffers.length * 2);
-    engine.splitter = splitter; engine.buffers=buffers; engine.destinations=destinations; engine.routes.push(splitter);
-    destinations.forEach((destination, index) => {
-      const merger = context.createChannelMerger(2), gate = context.createGain();
-      splitter.connect(merger, index * 2, 0); splitter.connect(merger, index * 2 + 1, 1);
-      gate.gain.value = 0; merger.connect(gate); gate.connect(destination);
-      engine.gates.push(gate); engine.routes.push(merger, gate);
-    });
-    const channels = buffers.flatMap(buffer => [buffer.getChannelData(0).slice(), buffer.getChannelData(Math.min(1, buffer.numberOfChannels - 1)).slice()]);
-    try { await node.addBuffers(channels, channels.map(channel => channel.buffer)); }
-    catch (error) { engine.dispose(); throw error; }
-    return engine;
+    let engine: TempoEngine | undefined;
+    try {
+      const next = new TempoEngine(context, node, buffers[0].duration, ended, outputDelaySeconds);
+      engine = next;
+      node.onprocessorerror = () => { next.failed = true; next.pause(); fail('Audio processing stopped. Reload the player to retry.'); };
+      // One multichannel processor shares its time map across every stereo stem.
+      const splitter = context.createChannelSplitter(buffers.length * 2);
+      next.splitter = splitter; next.buffers=buffers; next.destinations=destinations; next.routes.push(splitter);
+      destinations.forEach((destination, index) => {
+        const merger = context.createChannelMerger(2);
+        next.routes.push(merger);
+        const gate = context.createGain();
+        next.gates.push(gate); next.routes.push(gate);
+        splitter.connect(merger, index * 2, 0); splitter.connect(merger, index * 2 + 1, 1);
+        gate.gain.value = 0; merger.connect(gate); gate.connect(destination);
+      });
+      // Channel copies may fail under memory pressure, so they must be covered
+      // by the same cleanup as the worklet upload and graph construction.
+      const channels = buffers.flatMap(buffer => [buffer.getChannelData(0).slice(), buffer.getChannelData(Math.min(1, buffer.numberOfChannels - 1)).slice()]);
+      await node.addBuffers(channels, channels.map(channel => channel.buffer));
+      return next;
+    } catch (error) {
+      if (engine) engine.dispose();
+      else disposeWorkletNode(node, () => {});
+      throw error;
+    }
   }
   get position() { return Math.min(this.duration, this.clock.position); }
   positionAt(contextTime: number) { return Math.min(this.duration, this.clock.positionAt(contextTime)); }
@@ -97,5 +109,17 @@ export class TempoEngine {
     return Math.min(this.duration,position);
   }
 
-  dispose() { if (this.disposed) return; this.pause(); this.disposed = true; void this.node.dropBuffers(); this.node.disconnect(); this.routes.forEach(node => node.disconnect()); this.node.port.close(); }
+  dispose() {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.node.onprocessorerror = null;
+    this.buffers = []; this.destinations = [];
+    const routes = this.routes;
+    this.routes = []; this.gates = []; this.splitter = null; this.connected = false;
+    try { this.pause(); this.completion.dispose(); }
+    finally {
+      try { routes.forEach(node => node.disconnect()); }
+      finally { disposeWorkletNode(this.node, () => { void this.node.dropBuffers().catch(() => {}); }); }
+    }
+  }
 }
